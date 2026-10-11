@@ -6,8 +6,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { AppProvider } from '@/context/AppContext';
+import { AppProvider, useApp } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/src/auth/AuthContext';
+import { AddToHomeScreenModal } from '@/components/AddToHomeScreenModal';
 import { DonationModal } from '@/components/DonationModal';
 import { ONBOARDING_SEEN_KEY } from './(auth)/onboarding';
 import { COLORS } from '@/constants/theme';
@@ -127,6 +128,7 @@ const Splash: React.FC = () => {
 /* ------------------------------------------------------------------ */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isBootstrapping, isAuthenticated } = useAuth();
+  const { isAddToHomeOpen, addToHomeMode, closeAddToHome } = useApp();
   const segments = useSegments();
   const router = useRouter();
 
@@ -171,8 +173,19 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (showSplash) return <Splash />;
 
-  return <>{children}</>;
-}
+    return (
+      <>
+        {children}
+        {/* Модалът е тук, защото AuthGate е вътре в AppProvider и вижда
+            състоянието му (в RootLayout то още не съществува). */}
+        <AddToHomeScreenModal
+          visible={isAddToHomeOpen}
+          onClose={closeAddToHome}
+          mode={addToHomeMode}
+        />
+      </>
+    );
+  }
 
 export default function RootLayout() {
   return (
@@ -195,7 +208,7 @@ export default function RootLayout() {
                 options={{ headerShown: false, presentation: 'card' }}
               />
             </Stack>
-            <DonationModal />
+                        <DonationModal />
           </View>
         </AuthGate>
       </AppProvider>
@@ -204,13 +217,16 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.bgPrimary },
-  splash: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
+  root: { flex: 1, backgroundColor: COLORS.bgPrimary, overflow: 'hidden' },
+    splash: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+      // Скрива ореола, ако е по-широк от екрана — иначе на web се появява
+      // хоризонтален скрол.
+      overflow: 'hidden',
+    },
   glow: {
     position: 'absolute',
     width: 260,

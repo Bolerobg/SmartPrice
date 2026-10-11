@@ -49,33 +49,69 @@ function buildWhere(filters: FeedFilters): Where {
   if (filters.authorId) clauses.push(`p.author_id = ${bind(filters.authorId)}`);
 
   if (filters.q && filters.q.trim().length > 0) {
-    const like = `%${filters.q.trim()}%`;
-    const p = bind(like);
-    clauses.push(`(
-      p.title ilike ${p}
-      or p.description ilike ${p}
-      or p.place_name ilike ${p}
-      or p.city ilike ${p}
-      or coalesce(p.address, '') ilike ${p}
-      or p.platform_tag ilike ${p}
-      or coalesce(p.custom_platform_label, '') ilike ${p}
-      or coalesce(p.custom_category_label, '') ilike ${p}
-      or array_to_string(p.tags, ' ') ilike ${p}
-      or a.name ilike ${p}
-      or a.handle ilike ${p}
-      or p.price_paid::text ilike ${p}
-      or exists (
-        select 1 from receipts rc
-        join receipt_items ri on ri.receipt_id = rc.id
-        where rc.post_id = p.id
-          and (ri.name ilike ${p} or coalesce(ri.highlight_reason, '') ilike ${p})
-      )
-      or exists (
-        select 1 from comments c
-        where c.post_id = p.id and c.status = 'published' and c.body ilike ${p}
-      )
-    )`);
-  }
+      // Разделяме заявката на думи и изискваме ВСЯКА дума да съвпадне в НЯКОЕ
+      // поле. Така „вода созопол“ намира поста дори думите да са в различни
+      // полета, а търсенето обхваща цялата база, не само заредената страница.
+      const words = filters.q
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 6); // таван, за да не се строят огромни заявки
+
+      for (const word of words) {
+            // sp_fold() вместо ilike: базата е с C колация и вградената lower() не
+            // сгъва кирилица, затова ilike не намираше „София“ по „софия“.
+            const p = bind(`%${word}%`);
+            clauses.push(`(
+              sp_fold(p.title) like ${p}
+              or sp_fold(p.description) like ${p}
+              or sp_fold(p.place_name) like ${p}
+              or sp_fold(p.city) like ${p}
+              or sp_fold(p.address) like ${p}
+              or sp_fold(p.platform_tag) like ${p}
+              or sp_fold(p.custom_platform_label) like ${p}
+              or sp_fold(p.custom_category_label) like ${p}
+              or sp_fold(array_to_string(p.tags, ' ')) like ${p}
+              or sp_fold(a.name) like ${p}
+              or sp_fold(a.handle) like ${p}
+              or p.price_paid::text like ${p}
+              or sp_fold(p.category) like ${p}
+              -- Етикетите на категориите са в клиента, затова ги въвеждаме тук,
+              -- за да намериш „кафе“ или „хотел“, без да знаеш вътрешния id.
+              or sp_fold(case p.category
+                    when 'restaurants'   then 'ресторанти заведения храна обяд вечеря'
+                    when 'hotels_airbnb' then 'хотели airbnb booking нощувка настаняване'
+                    when 'supermarket'   then 'магазини продукти супермаркет храна'
+                    when 'cafes_bars'    then 'кафенета барове сладкарници кафе бар десерт'
+                    when 'services_tech' then 'услуги техника авто ремонт сервиз'
+                    when 'other'         then 'други стоки обекти услуги'
+                    else '' end) like ${p}
+              -- Смислови синоними: „капан“ намира всички червени флагове.
+              or (p.polarity = 'green'
+                  and 'оферта находка евтино изгодно намаление промоция топ'
+                      like ${p})
+              or (p.polarity = 'red'
+                  and 'червен флаг капан скъпо измама обир такса шринкфлация'
+                      like ${p})
+              or exists (
+                select 1 from receipts rc
+                join receipt_items ri on ri.receipt_id = rc.id
+                where rc.post_id = p.id
+                  and (sp_fold(ri.name) like ${p} or sp_fold(ri.highlight_reason) like ${p})
+              )
+              or exists (
+                select 1 from receipts rc
+                where rc.post_id = p.id and sp_fold(rc.merchant_name) like ${p}
+              )
+              or exists (
+                select 1 from comments c
+                where c.post_id = p.id and c.status = 'published'
+                  and sp_fold(c.body) like ${p}
+              )
+            )`);
+          }
+    }
 
   if (filters.bookmarkedBy) {
     clauses.push(

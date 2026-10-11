@@ -5,8 +5,16 @@ import { requireUserId } from '../lib/auth.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { loadFullProfile, loadPublicProfile } from '../lib/profile.js';
 
-const INTERACTIONS_THRESHOLD = 3;
-const NUDGE_COOLDOWN_MS = 90 * 1000;
+// Преди беше 3 действия и пауза от 90 СЕКУНДИ — твърде натрапчиво.
+// Сега: 8 действия И поне 3 дни между две подсещания.
+const INTERACTIONS_THRESHOLD = 8;
+const NUDGE_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000; // 3 дни
+
+/**
+ * Прагове на спестени пари, при които има СМИСЪЛ да поискаме подкрепа:
+ * потребителят вече е усетил ползата. Всеки праг се отбелязва веднъж.
+ */
+const SAVED_MILESTONES = [25, 50, 100, 250, 500, 1000];
 
 const alertSchema = z.object({
   keyword: z.string().trim().min(2, 'Ключовата дума е твърде кратка.').max(80),
@@ -238,49 +246,80 @@ export default async function communityRoutes(app: FastifyInstance) {
     const input = z.object({ reasonHint: z.string().trim().max(300).optional() }).parse(req.body ?? {});
 
     const profile = await one<{
-      is_supporter: boolean;
-      interactions_since_prompt: number;
-      last_donation_prompt_at: Date | null;
-      nudge_snoozed_until: Date | null;
-      personal_saved_bgn: number;
-      name: string;
-    }>(
-      `select is_supporter, interactions_since_prompt, last_donation_prompt_at,
-              nudge_snoozed_until, personal_saved_bgn, name
-         from profiles where id = $1`,
-      [userId]
-    );
-    if (!profile) throw notFound('Профилът не е намерен.');
+          is_supporter: boolean;
+          interactions_since_prompt: number;
+          last_donation_prompt_at: Date | null;
+          nudge_snoozed_until: Date | null;
+          personal_saved_bgn: number;
+          saved_milestone_step: number;
+          name: string;
+        }>(
+          `select is_supporter, interactions_since_prompt, last_donation_prompt_at,
+                  nudge_snoozed_until, personal_saved_bgn, saved_milestone_step, name
+             from profiles where id = $1`,
+          [userId]
+        );
+        if (!profile) throw notFound('Профилът не е намерен.');
 
-    if (profile.is_supporter) {
-      return { shouldPrompt: false, interactionsSincePrompt: profile.interactions_since_prompt };
-    }
+        if (profile.is_supporter) {
+          return { shouldPrompt: false, interactionsSincePrompt: profile.interactions_since_prompt };
+        }
 
-    const now = Date.now();
-    const next = profile.interactions_since_prompt + 1;
-    const snoozedUntil = profile.nudge_snoozed_until?.getTime() ?? 0;
-    const lastPrompt = profile.last_donation_prompt_at?.getTime() ?? 0;
+        const now = Date.now();
+        const next = profile.interactions_since_prompt + 1;
+        const snoozedUntil = profile.nudge_snoozed_until?.getTime() ?? 0;
+        const lastPrompt = profile.last_donation_prompt_at?.getTime() ?? 0;
 
-    const cooldownPassed = now - lastPrompt >= NUDGE_COOLDOWN_MS;
-    const notSnoozed = now > snoozedUntil;
-    const shouldPrompt = next >= INTERACTIONS_THRESHOLD && cooldownPassed && notSnoozed;
+        const cooldownPassed = now - lastPrompt >= NUDGE_COOLDOWN_MS;
+        const notSnoozed = now > snoozedUntil;
 
-    await one(
-      `update profiles
-          set interactions_since_prompt = $2,
-              last_donation_prompt_at = case when $3 then now() else last_donation_prompt_at end
-        where id = $1 returning id`,
-      [userId, shouldPrompt ? 0 : next, shouldPrompt]
-    );
+        // --- Смислено подсещане: минал ли е нов праг на спестени пари? -------------
+        // Вместо да подсещаме „просто ей така“, чакаме потребителят да е спестил
+        // реална сума благодарение на общността. Тогава молбата има контекст.
+        const saved = Number(profile.personal_saved_bgn ?? 0);
+        const reachedStep = SAVED_MILESTONES.filter((m) => saved >= m).length;
+        const milestoneReached =
+          reachedStep > profile.saved_milestone_step && cooldownPassed && notSnoozed;
 
-    return {
-      shouldPrompt,
-      interactionsSincePrompt: shouldPrompt ? 0 : next,
-      reasonHint: input.reasonHint,
-      firstName: profile.name.split(' ')[0],
-      personalSavedBgn: profile.personal_saved_bgn,
-    };
-  });
+        // Обикновеното подсещане иска и достатъчно действия.
+        const enoughInteractions = next >= INTERACTIONS_THRESHOLD;
+        const shouldPrompt = (milestoneReached || enoughInteractions) && cooldownPassed && notSnoozed;
+
+        await one(
+          `update profiles
+              set interactions_since_prompt = $2,
+                  last_donation_prompt_at = case when $3 then now() else last_donation_prompt_at end,
+                  saved_milestone_step = case when $4 then $5 else saved_milestone_step end
+            where id = $1 returning id`,
+          [
+            userId,
+            shouldPrompt ? 0 : next,
+            shouldPrompt,
+            milestoneReached,
+            Math.max(reachedStep, profile.saved_milestone_step),
+          ]
+        );
+
+        // Текстът зависи от причината: спестена сума или просто активност.
+        let reasonHint = input.reasonHint;
+        if (milestoneReached) {
+          const firstName = profile.name.split(' ')[0] || 'приятел';
+          reasonHint =
+            `${firstName}, с помощта на общността вече си спестил ${saved.toFixed(2)} €! ` +
+            `SmartPrice е без реклами и без платени ревюта. Ако ти е полезно, ` +
+            `подкрепи развитието му с малко дарение.`;
+        }
+
+        return {
+          shouldPrompt,
+          interactionsSincePrompt: shouldPrompt ? 0 : next,
+          reasonHint,
+          firstName: profile.name.split(' ')[0],
+          personalSavedBgn: saved,
+          milestoneReached,
+          savedMilestoneStep: Math.max(reachedStep, profile.saved_milestone_step),
+        };
+      });
 
   app.post('/api/me/snooze', async (req) => {
     const userId = requireUserId(req);

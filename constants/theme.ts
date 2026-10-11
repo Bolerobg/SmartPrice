@@ -37,8 +37,11 @@ export const COLORS = {
 
   // Интерактивни акценти (AI & Радар)
   accentIndigo: '#6366F1',
-  accentCyan: '#06B6D4',
-  accentPurple: '#8B5CF6',
+    accentCyan: '#06B6D4',
+    accentPurple: '#8B5CF6',
+    // Меки варианти за фонове на баджове/стъпки
+    accentCyanSoftBg: 'rgba(6, 182, 212, 0.14)',
+    accentCyanBorder: 'rgba(6, 182, 212, 0.42)',
   indigoSoftBg: 'rgba(99, 102, 241, 0.15)',
 
   white: '#FFFFFF',

@@ -296,12 +296,19 @@ const styles = StyleSheet.create({
   emailText: { color: COLORS.accentCyan, fontWeight: '800' },
   codeRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 7,
     marginTop: 26,
     marginBottom: 4,
+    width: '100%',
+    justifyContent: 'center',
   },
   codeBox: {
-    width: 46,
+    // Гъвкава ширина: на тесен екран квадратчетата се свиват, вместо да
+    // излизат извън екрана. Преди бяха твърдо 46px × 6 = 316px + отстъпи,
+    // което не се събираше хоризонтално на по-малки телефони.
+    flex: 1,
+    maxWidth: 48,
+    minWidth: 34,
     height: 58,
     borderRadius: 13,
     backgroundColor: COLORS.bgCard,

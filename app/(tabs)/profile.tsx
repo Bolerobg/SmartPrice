@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -11,17 +11,28 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PostCard } from '@/components/PostCard';
+import {
+  detectHomeScreenPlatform,
+  isAlreadyInstalled,
+} from '@/components/AddToHomeScreenModal';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 
 export default function ProfileScreen() {
-  const { userProfile, posts, openDonationModal, refreshAll } = useApp();
+  const { userProfile, posts, openDonationModal, refreshAll, openAddToHome } = useApp();
   const { logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'badges' | 'bookmarks' | 'donations'>(
     'badges'
   );
+
+  // Показваме реда „сложи на началния екран“ само в браузър и само ако още
+  // не е добавено — в истинското приложение е излишно.
+  const [showInstallRow, setShowInstallRow] = useState(false);
+  useEffect(() => {
+    setShowInstallRow(detectHomeScreenPlatform() !== 'native' && !isAlreadyInstalled());
+  }, []);
 
   const bookmarkedPosts = posts.filter((p) => p.isBookmarked);
 
@@ -152,6 +163,26 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Покана: сложи приложението на началния екран (само в браузър) */}
+        {showInstallRow && (
+          <TouchableOpacity
+            style={styles.installRow}
+            onPress={() => openAddToHome('help')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.installIcon}>
+              <Ionicons name="phone-portrait-outline" size={19} color={COLORS.accentCyan} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.installTitle}>Сложи SmartPrice на телефона</Text>
+              <Text style={styles.installSub}>
+                Икона на началния екран — отваря се като истинско приложение
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        )}
 
         {/* Табове в профила */}
         <View style={styles.subTabsRow}>
@@ -448,6 +479,33 @@ const styles = StyleSheet.create({
     color: COLORS.goldBright,
     fontSize: 11.5,
     fontWeight: '700',
+  },
+  installRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyanBorder,
+    paddingHorizontal: 13,
+    paddingVertical: 13,
+    marginBottom: 14,
+  },
+  installIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: COLORS.accentCyanSoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  installTitle: { color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '800' },
+  installSub: {
+    color: COLORS.textMuted,
+    fontSize: 11.5,
+    marginTop: 3,
+    lineHeight: 16,
   },
   subTabsRow: {
     flexDirection: 'row',

@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   SafeAreaView,
@@ -17,6 +18,7 @@ import { PostCard } from '@/components/PostCard';
 import { QuickPricePhotoModal } from '@/components/QuickPricePhotoModal';
 import { SmartPriceAssistantCard } from '@/components/SmartPriceAssistantCard';
 import { SmartToolsModal } from '@/components/SmartToolsModal';
+import { api } from '@/src/api/client';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import {
@@ -25,6 +27,10 @@ import {
   getCoordinatesForPost,
 } from '@/lib/locationService';
 import { matchesUniversalSearch, SortMode, sortPostsSmart } from '@/lib/smartSearch';
+import type { PostItem } from '@/types';
+
+/** Колко да изчакаме, преди да питаме сървъра (за да не удряме на всяка буква) */
+const SEARCH_DEBOUNCE_MS = 350;
 
 const QUICK_SEARCH_SUGGESTIONS = [
   'Кафе',
@@ -60,13 +66,53 @@ export default function FeedScreen() {
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortMode, setSortMode] = useState<SortMode>('newest');
+    // Търсенето пита сървъра (цялата база), а не само заредените 60 поста.
+    const [debouncedQuery, setDebouncedQuery] = useState('');
+    const [serverResults, setServerResults] = useState<PostItem[] | null>(null);
+    const [isSearching, setIsSearching] = useState(false);
+    const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [isQuickPhotoOpen, setIsQuickPhotoOpen] = useState(false);
   const [quickInitialPhoto, setQuickInitialPhoto] = useState<string | null>(null);
   const [isSmartToolsOpen, setIsSmartToolsOpen] = useState(false);
   const [smartToolsTab, setSmartToolsTab] = useState<'basket' | 'shrinkflation' | 'alerts'>('basket');
   const [nearbySorted, setNearbySorted] = useState(false);
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  // 1) Дебounce — чакаме да спреш да пишеш, преди да питаме сървъра.
+  //    Без това всяка буква пускаше заявка и приложението „забиваше“.
+  useEffect(() => {
+    const t = setTimeout(
+      () => setDebouncedQuery(searchQuery.trim()),
+      SEARCH_DEBOUNCE_MS
+    );
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // 2) Търсене в ЦЯЛАТА база. Преди търсенето филтрираше само заредените
+  //    60 поста, затова „пиле“ не намираше нищо извън тях.
+  useEffect(() => {
+    if (!debouncedQuery) {
+      setServerResults(null);
+      setIsSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setIsSearching(true);
+    api
+      .feed({ q: debouncedQuery, limit: 60 })
+      .then((res) => {
+        if (!cancelled) setServerResults(res.items);
+      })
+      .catch(() => {
+        if (!cancelled) setServerResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsSearching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery]);
 
   const handleToggleNearby = async () => {
     if (nearbySorted) {
@@ -157,42 +203,53 @@ export default function FeedScreen() {
   }, [posts, userCoords]);
 
   const filteredPosts = useMemo(() => {
-    const matching = posts.filter((post) => {
-      if (selectedPolarityFilter !== 'all' && post.polarity !== selectedPolarityFilter) {
-        return false;
-      }
-      if (selectedCategoryFilter !== 'all' && post.category !== selectedCategoryFilter) {
-        return false;
-      }
-      if (
-        selectedCityFilter !== 'Всички градове' &&
-        post.city.toLowerCase() !== selectedCityFilter.toLowerCase()
-      ) {
-        return false;
-      }
-      if (!matchesUniversalSearch(post, searchQuery)) {
-        return false;
-      }
-      return true;
-    });
+      // Когато има активно търсене, показваме резултатите от СЪРВЪРА: те
+      // обхващат цялата база (не само заредените 60 поста) и вече са минали
+      // през търсенето по всички полета. Затова тук НЕ прилагаме отново
+      // филтъра по категория — иначе търсенето пак се затваря в избрания таб
+      // и „пиле“ не се намира, ако не е в „Магазини“.
+      const isSearchActive = Boolean(debouncedQuery) && serverResults !== null;
 
-    if (nearbySorted) {
-      return [...matching].sort(
-        (a, b) => (postDistances[a.id] ?? 999) - (postDistances[b.id] ?? 999)
-      );
-    }
+      const matching = isSearchActive
+        ? serverResults!
+        : posts.filter((post) => {
+            if (selectedPolarityFilter !== 'all' && post.polarity !== selectedPolarityFilter) {
+              return false;
+            }
+            if (selectedCategoryFilter !== 'all' && post.category !== selectedCategoryFilter) {
+              return false;
+            }
+            if (
+              selectedCityFilter !== 'Всички градове' &&
+              post.city.toLowerCase() !== selectedCityFilter.toLowerCase()
+            ) {
+              return false;
+            }
+            if (!matchesUniversalSearch(post, searchQuery)) {
+              return false;
+            }
+            return true;
+          });
 
-    return sortPostsSmart(matching, sortMode);
-  }, [
-    posts,
-    selectedPolarityFilter,
-    selectedCategoryFilter,
-    selectedCityFilter,
-    searchQuery,
-    sortMode,
-    nearbySorted,
-    postDistances,
-  ]);
+      if (nearbySorted && !isSearchActive) {
+        return [...matching].sort(
+          (a, b) => (postDistances[a.id] ?? 999) - (postDistances[b.id] ?? 999)
+        );
+      }
+
+      return sortPostsSmart(matching, sortMode);
+    }, [
+      posts,
+      serverResults,
+      debouncedQuery,
+      selectedPolarityFilter,
+      selectedCategoryFilter,
+      selectedCityFilter,
+      searchQuery,
+      sortMode,
+      nearbySorted,
+      postDistances,
+    ]);
 
   const greenCount = useMemo(
     () => posts.filter((p) => p.polarity === 'green').length,
@@ -697,14 +754,19 @@ export default function FeedScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <FlatList
-        data={filteredPosts}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <PostCard post={item} distanceKm={postDistances[item.id]} />
-        )}
-        ListHeaderComponent={renderHeader}
+      <SafeAreaView style={styles.safeArea}>
+        {/* ВАЖНО: подаваме ЕЛЕМЕНТ (renderHeader()), не самата функция.
+            Ако се подаде функция, FlatList я третира като компонент; понеже
+            идентичността ѝ се сменя на всеки render, React размонтира и
+            монтира хедъра наново — полето за търсене губи фокус на всяка
+            буква и клавиатурата се затваря (изглежда като „рефреш“). */}
+        <FlatList
+          data={filteredPosts}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <PostCard post={item} distanceKm={postDistances[item.id]} />
+          )}
+          ListHeaderComponent={renderHeader()}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

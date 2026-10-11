@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -15,9 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/theme';
 
-const { width: SCREEN_W } = Dimensions.get('window');
 export const ONBOARDING_SEEN_KEY = '@smartprice_onboarding_seen_v1';
 
 interface Page {
@@ -258,6 +259,10 @@ const DonateDemo: React.FC = () => {
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // Ширината се взема динамично — така работи и при завъртане/преоразмеряване
+  // в браузър, а не само при първоначално зареждане.
+  const { width: pageWidth } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
   const [index, setIndex] = useState(0);
   const progress = useRef(new Animated.Value(0)).current;
@@ -331,10 +336,10 @@ export default function OnboardingScreen() {
   const goTo = useCallback(
     (next: number) => {
       const clamped = Math.max(0, Math.min(pages.length - 1, next));
-      scrollRef.current?.scrollTo({ x: clamped * SCREEN_W, animated: true });
+      scrollRef.current?.scrollTo({ x: clamped * pageWidth, animated: true });
       setIndex(clamped);
     },
-    [pages.length]
+    [pageWidth, pages.length]
   );
 
   const finish = useCallback(async () => {
@@ -349,7 +354,7 @@ export default function OnboardingScreen() {
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
-    const i = Math.round(x / SCREEN_W);
+    const i = Math.round(x / pageWidth);
     if (i !== index) setIndex(i);
     progress.setValue(pages.length > 1 ? i / (pages.length - 1) : 1);
   };
@@ -368,9 +373,21 @@ export default function OnboardingScreen() {
         style={styles.flex}
       >
         {pages.map((page) => (
-          <View key={page.key} style={{ width: SCREEN_W }}>
+          <View key={page.key} style={{ width: pageWidth }}>
             <LinearGradient colors={page.gradient} style={styles.page}>
-              <View style={styles.pageInner}>
+              {/* Вертикален скрол: на по-нисък екран съдържанието се събира
+                  без да се реже. Преди тук нямаше вертикален скрол и текстът
+                  се отрязваше на малки телефони. */}
+              <ScrollView
+                contentContainerStyle={[
+                  styles.pageInner,
+                  {
+                    paddingTop: insets.top + 62,
+                    paddingBottom: 24,
+                  },
+                ]}
+                showsVerticalScrollIndicator={false}
+              >
                 <View style={styles.emojiCircle}>
                   <Text style={styles.emojiBig}>{page.emoji}</Text>
                 </View>
@@ -380,14 +397,14 @@ export default function OnboardingScreen() {
                 <Text style={styles.pageBody}>{page.body}</Text>
 
                 <View style={styles.demoWrap}>{page.interactive}</View>
-              </View>
+              </ScrollView>
             </LinearGradient>
           </View>
         ))}
       </ScrollView>
 
       {/* Горна лента: пропусни */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
         <TouchableOpacity onPress={() => void skip()} hitSlop={12} style={styles.skipBtn}>
           <Text style={styles.skipText}>Пропусни</Text>
           <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
@@ -395,7 +412,7 @@ export default function OnboardingScreen() {
       </View>
 
       {/* Долна лента: напредък + бутони */}
-      <View style={styles.bottomBar}>
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) + 10 }]}>
         <View style={styles.dotsRow}>
           {pages.map((p, i) => (
             <TouchableOpacity key={p.key} onPress={() => goTo(i)} hitSlop={8}>
@@ -495,10 +512,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: COLORS.bgPrimary },
   page: { flex: 1 },
   pageInner: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 26,
-    paddingTop: Platform.OS === 'ios' ? 74 : 58,
-    paddingBottom: 24,
     justifyContent: 'center',
   },
   emojiCircle: {

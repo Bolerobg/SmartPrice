@@ -20,6 +20,12 @@ import {
   type FeatureFlags,
 } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
+import {
+  detectHomeScreenPlatform,
+  getAddToHomeSeen,
+  isAlreadyInstalled,
+  saveAddToHomeSeen,
+} from '@/components/AddToHomeScreenModal';
 import type {
   CategoryId,
   CommentItem,
@@ -140,8 +146,14 @@ interface AppContextValue {
   }) => Promise<{ donationId: string; checkoutUrl: string; sessionId: string; message: string }>;
   confirmDonationReturn: (sessionId: string) => Promise<boolean>;
 
-  totalCommunitySavedAllPosts: number;
-}
+    /** Покана „добави на началния екран“ (само в браузър) */
+        isAddToHomeOpen: boolean;
+        addToHomeMode: 'invite' | 'help';
+        openAddToHome: (mode?: 'invite' | 'help') => void;
+        closeAddToHome: () => void;
+
+    totalCommunitySavedAllPosts: number;
+  }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
@@ -182,8 +194,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const userProfile = authProfile ?? EMPTY_PROFILE;
-  const isAuthenticated = Boolean(authProfile);
-  const nudgeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const isAuthenticated = Boolean(authProfile);
+    const nudgeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // ---------------------------------------------------- „Добави на началния екран“
+    const [isAddToHomeOpen, setIsAddToHomeOpen] = useState(false);
+    const [addToHomeMode, setAddToHomeMode] = useState<'invite' | 'help'>('invite');
+
+    const openAddToHome = useCallback((mode: 'invite' | 'help' = 'help') => {
+      setAddToHomeMode(mode);
+      setIsAddToHomeOpen(true);
+    }, []);
+
+    const closeAddToHome = useCallback(() => {
+        setIsAddToHomeOpen(false);
+        // Отбелязваме, че вече сме показали поканата, за да не досаждаме пак.
+        void saveAddToHomeSeen();
+      }, []);
+
+      // Показваме поканата САМО веднъж, и то само в браузър, ако още не е
+      // добавено на началния екран. В истинското приложение е излишно.
+      useEffect(() => {
+        let cancelled = false;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        (async () => {
+          if (!isAuthenticated) return;
+          const platform = detectHomeScreenPlatform();
+          if (platform === 'native') return; // нативно → вече е инсталирано
+          if (isAlreadyInstalled()) return; // вече е добавено
+          const seen = await getAddToHomeSeen();
+          if (cancelled || seen) return;
+          // Изчакваме потребителят да види приложението, преди да го подканим.
+          timer = setTimeout(() => {
+            if (!cancelled) openAddToHome('invite');
+          }, 8000);
+        })();
+        return () => {
+          cancelled = true;
+          if (timer) clearTimeout(timer);
+        };
+      }, [isAuthenticated, openAddToHome]);
 
   // ------------------------------------------------------------ Зареждане на данни
 
@@ -269,39 +319,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [isAuthenticated, isLoading, loadFeed]);
 
-  // Периодичен таймер за напомняне (само за не-дарители)
-  useEffect(() => {
-    if (!isAuthenticated || userProfile.isSupporter) {
-      if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
-      return;
-    }
-
-    nudgeTimerRef.current = setInterval(() => {
-      const snoozedUntil = userProfile.nudgeSnoozedUntil ?? 0;
-      const lastPrompt = userProfile.lastDonationPromptAt ?? 0;
-      const now = Date.now();
-      if (now > snoozedUntil && now - lastPrompt >= 90_000 && !isDonationModalOpen) {
-        setIsPeriodicNudge(true);
-        setDonationPromptReason(
-          `Здравей, ${userProfile.name.split(' ')[0] || 'приятел'}! SmartPrice е без реклами и без платени ревюта. Подкрепи ни с малко дарение, за да продължим.`
-        );
-        setIsDonationModalOpen(true);
+  // ВАЖНО: преди тук имаше таймер, който отваряше модала за дарение на всеки
+    // 35 секунди (с пауза само 90 с). Това е натрапчиво и кара хората да
+    // отказват. Затова таймерът е премахнат изцяло.
+    //
+    // Сега подсещането идва само когато има СМИСЪЛ (виж recordUserInteraction):
+    //   • след 8 реални действия, И поне 3 дни след предишното подсещане;
+    //   • или когато потребителят мине праг на спестени пари (25/50/100 €…),
+    //     защото тогава вече е усетил ползата.
+    useEffect(() => {
+      if (nudgeTimerRef.current) {
+        clearInterval(nudgeTimerRef.current);
+        nudgeTimerRef.current = null;
       }
-    }, 35_000);
+    }, []);
 
-    return () => {
-      if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
-    };
-  }, [
-    isAuthenticated,
-    userProfile.isSupporter,
-    userProfile.nudgeSnoozedUntil,
-    userProfile.lastDonationPromptAt,
-    userProfile.name,
-    isDonationModalOpen,
-  ]);
-
-  // ------------------------------------------------------------ Действия
+    // ------------------------------------------------------------ Действия
 
   const recordUserInteraction = useCallback(
     async (reasonHint?: string) => {
@@ -684,9 +717,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       closeDonationModal,
       snoozeDonationNudge,
       submitDonation,
-      confirmDonationReturn,
-      totalCommunitySavedAllPosts,
-    }),
+            confirmDonationReturn,
+
+            isAddToHomeOpen,
+            addToHomeMode,
+            openAddToHome,
+            closeAddToHome,
+
+            totalCommunitySavedAllPosts,
+          }),
     [
       posts,
       userProfile,
@@ -721,9 +760,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       closeDonationModal,
       snoozeDonationNudge,
       submitDonation,
-      confirmDonationReturn,
-      totalCommunitySavedAllPosts,
-    ]
+            confirmDonationReturn,
+
+            isAddToHomeOpen,
+            addToHomeMode,
+            openAddToHome,
+            closeAddToHome,
+
+            totalCommunitySavedAllPosts,
+          ]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
