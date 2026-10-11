@@ -30,71 +30,22 @@ interface BasketProduct {
   name: string;
   unitLabel: string;
   selected: boolean;
-  pricesByStore: {
-    Lidl: number;
-    Kaufland: number;
-    Billa: number;
-    Фантастико: number;
-  };
+  /** Цената, която ПОТРЕБИТЕЛЯТ е платил/въвел. Не се измисля от приложението. */
+  myPrice: number;
 }
 
+/**
+ * ВАЖНО: преди тук имаше твърдо зададени цени за Lidl / Kaufland / Billa /
+ * Фантастико, които приложението показваше като „НАЙ-ИЗГОДНА КОШНИЦА ДНЕС“.
+ * Тези числа бяха измислени. Сега списъкът съдържа само реалните цени,
+ * които потребителят въведе, а сравнението се прави с действителните
+ * публикации на общността за същия продукт.
+ */
 const INITIAL_BASKET_PRODUCTS: BasketProduct[] = [
-  {
-    id: 'bp-1',
-    name: 'Краве масло 82%',
-    unitLabel: '250 г',
-    selected: true,
-    pricesByStore: { Lidl: 4.49, Kaufland: 4.29, Billa: 5.89, Фантастико: 5.49 },
-  },
-  {
-    id: 'bp-2',
-    name: 'Прясно мляко 3.6%',
-    unitLabel: '1 л',
-    selected: true,
-    pricesByStore: { Lidl: 2.39, Kaufland: 2.49, Billa: 2.89, Фантастико: 2.75 },
-  },
-  {
-    id: 'bp-3',
-    name: 'Яйца размер L',
-    unitLabel: '10 бр.',
-    selected: true,
-    pricesByStore: { Lidl: 4.19, Kaufland: 3.99, Billa: 4.89, Фантастико: 4.59 },
-  },
-  {
-    id: 'bp-4',
-    name: 'Зехтин Extra Virgin',
-    unitLabel: '1 л',
-    selected: true,
-    pricesByStore: { Lidl: 16.99, Kaufland: 16.49, Billa: 23.9, Фантастико: 21.5 },
-  },
-  {
-    id: 'bp-5',
-    name: 'Кашкавал от краве мляко',
-    unitLabel: '400 г',
-    selected: true,
-    pricesByStore: { Lidl: 8.49, Kaufland: 8.29, Billa: 10.9, Фантастико: 9.89 },
-  },
-  {
-    id: 'bp-6',
-    name: 'Кафе на зърна 100% Арабика',
-    unitLabel: '500 г',
-    selected: false,
-    pricesByStore: { Lidl: 11.99, Kaufland: 11.49, Billa: 15.9, Фантастико: 14.5 },
-  },
-  {
-    id: 'bp-7',
-    name: 'Охладено пилешко филе',
-    unitLabel: '1 кг',
-    selected: false,
-    pricesByStore: { Lidl: 11.49, Kaufland: 10.99, Billa: 13.8, Фантастико: 12.9 },
-  },
-  {
-    id: 'bp-8',
-    name: 'Хляб с квас нарязан',
-    unitLabel: '650 г',
-    selected: false,
-    pricesByStore: { Lidl: 2.19, Kaufland: 2.09, Billa: 2.69, Фантастико: 2.55 },
-  },
+  { id: 'bp-1', name: 'Краве масло 82%', unitLabel: '250 г', selected: true, myPrice: 4.49 },
+  { id: 'bp-2', name: 'Прясно мляко 3.6%', unitLabel: '1 л', selected: true, myPrice: 2.39 },
+  { id: 'bp-3', name: 'Яйца размер L', unitLabel: '10 бр.', selected: true, myPrice: 4.19 },
+  { id: 'bp-4', name: 'Зехтин Extra Virgin', unitLabel: '1 л', selected: true, myPrice: 16.99 },
 ];
 
 export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
@@ -136,55 +87,49 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
     }
   }, [visible, initialTab]);
 
-  // Изчисления за Умната Кошница
+  // Сравнение с РЕАЛНИТЕ цени от публикациите на общността
   const basketComparison = useMemo(() => {
     const selected = basketItems.filter((i) => i.selected);
-    const stores: (keyof BasketProduct['pricesByStore'])[] = [
-      'Kaufland',
-      'Lidl',
-      'Фантастико',
-      'Billa',
-    ];
 
-    const totals = stores.map((store) => {
-      const total = selected.reduce(
-        (acc, item) => acc + item.pricesByStore[store],
-        0
-      );
-      return { store, total };
+    const rows = selected.map((item) => {
+      const keyword = item.name.toLowerCase().split(/\s+/)[0] ?? item.name.toLowerCase();
+      const community = posts
+        .filter((p) => matchesUniversalSearch(p, keyword) && p.pricePaid > 0)
+        .map((p) => ({ price: p.pricePaid, place: p.placeName, city: p.city }));
+
+      const cheapest =
+        community.length > 0
+          ? community.reduce((min, c) => (c.price < min.price ? c : min), community[0]!)
+          : null;
+
+      return {
+        item,
+        communityCount: community.length,
+        cheapest,
+        saving: cheapest && cheapest.price < item.myPrice ? item.myPrice - cheapest.price : 0,
+      };
     });
 
-    totals.sort((a, b) => a.total - b.total);
-    const cheapest = totals[0];
-    const mostExpensive = totals[totals.length - 1];
-    const maxSavings =
-      mostExpensive && cheapest ? mostExpensive.total - cheapest.total : 0;
+    const myTotal = selected.reduce((acc, i) => acc + i.myPrice, 0);
+    const totalPotentialSaving = rows.reduce((acc, r) => acc + r.saving, 0);
+    const itemsWithCommunityData = rows.filter((r) => r.communityCount > 0).length;
 
-    return {
-      selectedCount: selected.length,
-      totals,
-      cheapest,
-      mostExpensive,
-      maxSavings,
-    };
-  }, [basketItems]);
+    return { selectedCount: selected.length, rows, myTotal, totalPotentialSaving, itemsWithCommunityData };
+  }, [basketItems, posts]);
 
   const handleAddCustomBasketItem = () => {
     const name = customBasketName.trim();
-    const basePrice = Number(customBasketPrice.replace(',', '.')) || 5.0;
+    const price = Number(customBasketPrice.replace(',', '.'));
     if (!name) return;
+    if (!Number.isFinite(price) || price <= 0) return;
 
+    // Пазим САМО цената, която потребителят е въвел — без измислени вариации по вериги.
     const newItem: BasketProduct = {
       id: `bp-${Date.now()}`,
       name,
       unitLabel: '1 бр.',
       selected: true,
-      pricesByStore: {
-        Kaufland: Number((basePrice * 0.92).toFixed(2)),
-        Lidl: Number((basePrice * 0.94).toFixed(2)),
-        Фантастико: Number(basePrice.toFixed(2)),
-        Billa: Number((basePrice * 1.12).toFixed(2)),
-      },
+      myPrice: Number(price.toFixed(2)),
     };
     setBasketItems((prev) => [newItem, ...prev]);
     setCustomBasketName('');
@@ -224,40 +169,31 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
     };
   }, [pkgAWeight, pkgAPrice, pkgBWeight, pkgBPrice]);
 
-  // Съвпадащи постове за всяка активна Ценова Аларма (Таб 3)
-  const alertsWithMatches = useMemo(() => {
-    return priceAlerts.map((alert) => {
-      const matches = posts.filter((p) => {
-        if (!alert.isActive) return false;
-        if (alert.polarity !== 'any' && p.polarity !== alert.polarity) {
-          return false;
-        }
-        if (
-          alert.city !== 'Всички градове' &&
-          p.city.toLowerCase() !== alert.city.toLowerCase()
-        ) {
-          return false;
-        }
-        if (alert.maxPrice && p.pricePaid > alert.maxPrice) {
-          return false;
-        }
-        return matchesUniversalSearch(p, alert.keyword);
-      });
-      return { alert, matches };
-    });
-  }, [priceAlerts, posts]);
+  // Съвпаденията идват изчислени от сървъра (реални данни от базата)
+  const alertsWithMatches = useMemo(
+    () =>
+      priceAlerts.map((alert) => ({
+        alert,
+        matches: alert.isActive ? alert.matches : [],
+      })),
+    [priceAlerts]
+  );
 
-  const handleCreateAlert = () => {
+  const handleCreateAlert = async () => {
     if (!alertKeyword.trim()) return;
     const maxP = Number(alertMaxPrice.replace(',', '.'));
-    addPriceAlert({
-      keyword: alertKeyword.trim(),
-      maxPrice: !isNaN(maxP) && maxP > 0 ? maxP : undefined,
-      city: alertCity,
-      polarity: alertPolarity,
-    });
-    setAlertKeyword('');
-    setAlertMaxPrice('');
+    try {
+      await addPriceAlert({
+        keyword: alertKeyword.trim(),
+        maxPrice: !isNaN(maxP) && maxP > 0 ? maxP : undefined,
+        city: alertCity,
+        polarity: alertPolarity,
+      });
+      setAlertKeyword('');
+      setAlertMaxPrice('');
+    } catch {
+      // грешката се показва от контекста
+    }
   };
 
   return (
@@ -313,7 +249,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                 ]}
                 numberOfLines={1}
               >
-                Кошница
+                Списък
               </Text>
             </TouchableOpacity>
 
@@ -383,57 +319,101 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
             contentContainerStyle={styles.scrollBody}
             keyboardShouldPersistTaps="handled"
           >
-            {/* ТАБ 1: УМНА КОШНИЦА */}
+            {/* ТАБ 1: МОЯТ СПИСЪК ЗА ПАЗАРУВАНЕ */}
             {activeTab === 'basket' && (
               <View style={{ gap: 12 }}>
                 <View style={styles.winnerBanner}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.winnerSmallLabel}>
-                      🏆 НАЙ-ИЗГОДНА КОШНИЦА ДНЕС ({basketComparison.selectedCount}{' '}
-                      продукта)
+                      🛒 МОЯТ СПИСЪК ({basketComparison.selectedCount} продукта)
                     </Text>
                     <Text style={styles.winnerStoreName}>
-                      {basketComparison.cheapest?.store || 'Kaufland'} — общо{' '}
-                      {basketComparison.cheapest?.total.toFixed(2)} лв.
+                      Общо по твоите цени: {basketComparison.myTotal.toFixed(2)} лв.
                     </Text>
-                    <Text style={styles.winnerSavingsSub}>
-                      Спестяваш до{' '}
-                      <Text style={{ color: COLORS.greenBright, fontWeight: '900' }}>
-                        {basketComparison.maxSavings.toFixed(2)} лв.
-                      </Text>{' '}
-                      спрямо най-скъпия магазин!
-                    </Text>
+                    {basketComparison.itemsWithCommunityData > 0 ? (
+                      <Text style={styles.winnerSavingsSub}>
+                        За{' '}
+                        <Text style={{ color: COLORS.greenBright, fontWeight: '900' }}>
+                          {basketComparison.itemsWithCommunityData}
+                        </Text>{' '}
+                        от тях общността има по-ниска цена — можеш да спестиш до{' '}
+                        <Text style={{ color: COLORS.greenBright, fontWeight: '900' }}>
+                          {basketComparison.totalPotentialSaving.toFixed(2)} лв.
+                        </Text>
+                      </Text>
+                    ) : (
+                      <Text style={styles.winnerSavingsSub}>
+                        Няма публикации на общността за тези продукти още. Твоите цени се пазят
+                        само на това устройство.
+                      </Text>
+                    )}
                   </View>
                 </View>
 
-                {/* Сравнение по вериги */}
-                <View style={styles.storesGrid}>
-                  {basketComparison.totals.map((item, idx) => (
-                    <View
-                      key={item.store}
-                      style={[
-                        styles.storeTotalCard,
-                        idx === 0 && {
-                          borderColor: COLORS.greenPrimary,
-                          backgroundColor: COLORS.greenSoftBg,
-                        },
-                      ]}
-                    >
-                      <Text style={styles.storeCardRank}>
-                        {idx === 0 ? '🥇 #1 Най-евтино' : `#${idx + 1}`}
-                      </Text>
-                      <Text style={styles.storeCardTitle}>{item.store}</Text>
-                      <Text
+                <View style={styles.infoBox}>
+                  <Text style={styles.infoBoxTitle}>ℹ️ Как работят тези цени</Text>
+                  <Text style={styles.infoBoxSub}>
+                    Списъкът пази цените, които ТИ въвеждаш. Сравнението се прави с реалните
+                    публикации на другите потребители — приложението не измисля цени за вериги.
+                  </Text>
+                </View>
+
+                {/* Сравнение с реалните цени от общността */}
+                {basketComparison.rows.length > 0 && (
+                  <View style={styles.storesGrid}>
+                    {basketComparison.rows.map((row) => (
+                      <View
+                        key={row.item.id}
                         style={[
-                          styles.storeCardPrice,
-                          idx === 0 && { color: COLORS.greenBright },
+                          styles.storeTotalCard,
+                          row.saving > 0 && {
+                            borderColor: COLORS.greenPrimary,
+                            backgroundColor: COLORS.greenSoftBg,
+                          },
                         ]}
                       >
-                        {item.total.toFixed(2)} лв.
-                      </Text>
-                    </View>
-                  ))}
-                </View>
+                        <Text style={styles.storeCardRank} numberOfLines={1}>
+                          {row.item.name}
+                        </Text>
+                        <Text style={styles.storeCardTitle}>Твоята цена</Text>
+                        <Text style={styles.storeCardPrice}>
+                          {row.item.myPrice.toFixed(2)} лв.
+                        </Text>
+                        {row.cheapest ? (
+                          <>
+                            <Text
+                              style={[
+                                styles.storeCardRank,
+                                { marginTop: 6, color: COLORS.textMuted },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {row.saving > 0 ? 'По-евтино при' : 'Общността отчита'}:{' '}
+                              {row.cheapest.place}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.storeCardPrice,
+                                { fontSize: 13, color: row.saving > 0 ? COLORS.greenBright : COLORS.textSecondary },
+                              ]}
+                            >
+                              {row.cheapest.price.toFixed(2)} лв.
+                            </Text>
+                          </>
+                        ) : (
+                          <Text
+                            style={[
+                              styles.storeCardRank,
+                              { marginTop: 6, color: COLORS.textMuted },
+                            ]}
+                          >
+                            Няма данни от общността
+                          </Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
 
                 {/* Добави свой продукт към списъка */}
                 <View style={styles.addCustomRow}>
@@ -495,9 +475,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                         </Text>
                       </Text>
                       <Text style={styles.basketItemPrices}>
-                        Kaufland: {item.pricesByStore.Kaufland.toFixed(2)} лв. •
-                        Lidl: {item.pricesByStore.Lidl.toFixed(2)} лв. • Billa:{' '}
-                        {item.pricesByStore.Billa.toFixed(2)} лв.
+                        Твоята цена: {item.myPrice.toFixed(2)} лв.
                       </Text>
                     </View>
                   </TouchableOpacity>

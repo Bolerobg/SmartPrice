@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
+import { formatPricePerUnit, formatRelativeTime } from '@/src/lib/format';
 import { PostItem, ReactionKey } from '@/types';
 
 interface PostCardProps {
@@ -214,7 +215,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
                 {post.placeName} • {post.city}
               </Text>
               <Text style={styles.timeText} numberOfLines={1}>
-                • {post.createdAt}
+                • {formatRelativeTime(post.createdAt)}
               </Text>
             </View>
           </View>
@@ -449,8 +450,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
                   fontWeight: '800',
                 }}
               >
-                ⚖️ {post.pricePerKgOrLiter.toFixed(2)} лв./
-                {post.unitType === 'ml' || post.unitType === 'l' ? 'л' : 'кг'}
+                ⚖️ {formatPricePerUnit(post.pricePerKgOrLiter, post.unitType)}
               </Text>
             </View>
           )}

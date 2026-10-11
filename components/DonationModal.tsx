@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, DONATION_TIERS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
+import { ApiError } from '@/src/api/client';
+
+type TierId = 'coffee' | 'guardian' | 'legend';
 
 export const DonationModal: React.FC = () => {
   const {
@@ -20,58 +24,118 @@ export const DonationModal: React.FC = () => {
     donationPromptReason,
     snoozeDonationNudge,
     submitDonation,
+    confirmDonationReturn,
+    closeDonationModal,
     userProfile,
+    paymentsEnabled,
   } = useApp();
 
-  const [selectedTierId, setSelectedTierId] = useState<'coffee' | 'guardian' | 'legend'>(
-    'guardian'
-  );
+  const [selectedTierId, setSelectedTierId] = useState<TierId>('guardian');
   const [customAmount, setCustomAmount] = useState<string>('');
   const [isMonthly, setIsMonthly] = useState<boolean>(false);
-  const [paymentMethod, setPaymentMethod] = useState<'apple_pay' | 'google_pay' | 'card'>(
-    'apple_pay'
-  );
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [successInfo, setSuccessInfo] = useState<{
     message: string;
-    paymentIntentId: string;
     amount: number;
   } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const selectedTier =
-    DONATION_TIERS.find((t) => t.id === selectedTierId) || DONATION_TIERS[1];
+    DONATION_TIERS.find((t) => t.id === selectedTierId) || DONATION_TIERS[1]!;
 
-  const finalAmountBgn =
-    customAmount.trim() !== '' && !isNaN(Number(customAmount)) && Number(customAmount) > 0
-      ? Number(customAmount)
-      : selectedTier.amountBgn;
+  const customNumeric = Number(customAmount.replace(',', '.'));
+  const hasCustomAmount = customAmount.trim() !== '' && Number.isFinite(customNumeric) && customNumeric > 0;
+  const finalAmount = hasCustomAmount ? customNumeric : selectedTier.amount;
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  /**
+   * След връщане от Stripe проверяваме реалния статус на плащането на сървъра.
+   * Никога не отбелязваме „успешно“ само защото потребителят се е върнал.
+   */
+  const startPolling = useCallback(
+    (sessionId: string, amount: number) => {
+      stopPolling();
+      let attempts = 0;
+      pollRef.current = setInterval(async () => {
+        attempts += 1;
+        try {
+          const paid = await confirmDonationReturn(sessionId);
+          if (paid) {
+            stopPolling();
+            setPendingSessionId(null);
+            setSuccessInfo({
+              message: 'Плащането е потвърдено от Stripe. Благодарим ти!',
+              amount,
+            });
+          }
+        } catch {
+          // продължаваме да опитваме
+        }
+        if (attempts >= 20) {
+          stopPolling();
+          setPendingSessionId(null);
+          setError(
+            'Плащането още не е потвърдено. Ако вече си платил, статусът ще се обнови автоматично при следващо отваряне на профила.'
+          );
+        }
+      }, 3000);
+    },
+    [confirmDonationReturn, stopPolling]
+  );
+
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
+  useEffect(() => {
+    if (!isDonationModalOpen) stopPolling();
+  }, [isDonationModalOpen, stopPolling]);
 
   const handleDonate = async () => {
     setIsProcessing(true);
+    setError(null);
     try {
-      const res = await submitDonation({
-        amountBgn: finalAmountBgn,
+      const result = await submitDonation({
+        amount: finalAmount,
         tierId: selectedTierId,
         isMonthly,
-        paymentMethodType: paymentMethod,
       });
 
-      if (res.success) {
-        setSuccessInfo({
-          message: res.message,
-          paymentIntentId: res.paymentIntentId,
-          amount: finalAmountBgn,
-        });
+      const canOpen = await Linking.canOpenURL(result.checkoutUrl).catch(() => false);
+      if (canOpen) {
+        await Linking.openURL(result.checkoutUrl);
+      } else {
+        throw new ApiError(0, 'cannot_open', 'Не успях да отворя страницата за плащане на Stripe.');
       }
+
+      setPendingSessionId(result.sessionId);
+      startPolling(result.sessionId, finalAmount);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : 'Плащането не можа да стартира. Опитай отново.'
+      );
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleClose = () => {
+    stopPolling();
     setSuccessInfo(null);
+    setError(null);
+    setPendingSessionId(null);
     setCustomAmount('');
-    snoozeDonationNudge();
+    if (pendingSessionId) void confirmDonationReturn(pendingSessionId).catch(() => undefined);
+    closeDonationModal();
+    void snoozeDonationNudge();
   };
 
   return (
@@ -102,8 +166,8 @@ export const DonationModal: React.FC = () => {
                   </Text>
                 </View>
                 <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Stripe ID:</Text>
-                  <Text style={styles.receiptValue}>{successInfo.paymentIntentId}</Text>
+                  <Text style={styles.receiptLabel}>Обработка:</Text>
+                  <Text style={styles.receiptValue}>Stripe (потвърдено)</Text>
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>Статус на напомнянията:</Text>
@@ -177,9 +241,9 @@ export const DonationModal: React.FC = () => {
                 <View style={styles.impactDivider} />
                 <View style={styles.impactItem}>
                   <Text style={[styles.impactValue, { color: COLORS.goldBright }]}>
-                    100%
+                    0
                   </Text>
-                  <Text style={styles.impactLabel}>Проверени ревюта</Text>
+                  <Text style={styles.impactLabel}>Платени ревюта</Text>
                 </View>
               </View>
 
@@ -259,9 +323,9 @@ export const DonationModal: React.FC = () => {
                             isSelected && { color: COLORS.goldBright },
                           ]}
                         >
-                          {tier.amountBgn} лв.
+                          {tier.amount} €
                         </Text>
-                        <Text style={styles.tierPriceEur}>~{tier.amountEur.toFixed(2)} €</Text>
+                        <Text style={styles.tierPriceEur}>еднократно</Text>
                       </View>
                     </TouchableOpacity>
                   );
@@ -281,47 +345,85 @@ export const DonationModal: React.FC = () => {
                 />
               </View>
 
-              {/* Избор на метод в Stripe */}
-              <Text style={styles.sectionLabel}>Метод на плащане (Stripe Secure):</Text>
-              <View style={styles.paymentMethodsRow}>
-                {[
-                  { id: 'apple_pay', icon: 'logo-apple', label: 'Apple Pay' },
-                  { id: 'google_pay', icon: 'logo-google', label: 'Google Pay' },
-                  { id: 'card', icon: 'card-outline', label: 'Карта' },
-                ].map((pm) => {
-                  const active = paymentMethod === pm.id;
-                  return (
-                    <TouchableOpacity
-                      key={pm.id}
-                      style={[
-                        styles.pmChip,
-                        active && styles.pmChipActive,
-                      ]}
-                      onPress={() => setPaymentMethod(pm.id as any)}
-                    >
-                      <Ionicons
-                        name={pm.icon as any}
-                        size={16}
-                        color={active ? COLORS.goldBright : COLORS.textSecondary}
-                      />
-                      <Text
-                        style={[
-                          styles.pmChipText,
-                          active && { color: COLORS.goldBright, fontWeight: '700' },
-                        ]}
-                      >
-                        {pm.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+              {/* Плащане през Stripe Checkout (реална страница на Stripe) */}
+              <Text style={styles.sectionLabel}>Плащане:</Text>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 9,
+                  backgroundColor: paymentsEnabled ? COLORS.greenSoftBg : COLORS.goldSoftBg,
+                  borderWidth: 1,
+                  borderColor: paymentsEnabled ? COLORS.greenBorder : COLORS.goldBorder,
+                  borderRadius: 12,
+                  padding: 11,
+                }}
+              >
+                <Ionicons
+                  name={paymentsEnabled ? 'lock-closed' : 'construct'}
+                  size={17}
+                  color={paymentsEnabled ? COLORS.greenBright : COLORS.goldBright}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    color: paymentsEnabled ? COLORS.greenBright : COLORS.goldBright,
+                    fontSize: 11.5,
+                    fontWeight: '700',
+                    lineHeight: 17,
+                  }}
+                >
+                  {paymentsEnabled
+                    ? 'Ще бъдеш пренасочен към защитената страница на Stripe. Картата се въвежда само там — приложението не я вижда.'
+                    : 'Плащанията още не са включени на сървъра (липсва STRIPE_SECRET_KEY). Даренията са временно недостъпни.'}
+                </Text>
               </View>
+
+              {pendingSessionId && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 9,
+                    backgroundColor: COLORS.bgCardElevated,
+                    borderRadius: 12,
+                    padding: 11,
+                    marginTop: 8,
+                  }}
+                >
+                  <ActivityIndicator size="small" color={COLORS.accentCyan} />
+                  <Text style={{ flex: 1, color: COLORS.textSecondary, fontSize: 11.5, fontWeight: '700' }}>
+                    Чакам потвърждение от Stripe…
+                  </Text>
+                </View>
+              )}
+
+              {error && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    backgroundColor: COLORS.redSoftBg,
+                    borderWidth: 1,
+                    borderColor: COLORS.redBorder,
+                    borderRadius: 12,
+                    padding: 11,
+                    marginTop: 8,
+                  }}
+                >
+                  <Ionicons name="alert-circle" size={16} color={COLORS.redBright} />
+                  <Text style={{ flex: 1, color: COLORS.redBright, fontSize: 11.5, fontWeight: '700' }}>
+                    {error}
+                  </Text>
+                </View>
+              )}
 
               {/* Главен бутон за дарение */}
               <TouchableOpacity
-                style={styles.stripeDonateBtn}
+                style={[styles.stripeDonateBtn, (!paymentsEnabled || isProcessing) && { opacity: 0.5 }]}
                 onPress={handleDonate}
-                disabled={isProcessing}
+                disabled={!paymentsEnabled || isProcessing}
                 activeOpacity={0.88}
               >
                 {isProcessing ? (
@@ -330,7 +432,7 @@ export const DonationModal: React.FC = () => {
                   <>
                     <Ionicons name="lock-closed" size={17} color={COLORS.black} />
                     <Text style={styles.stripeDonateBtnText}>
-                      Дари {finalAmountBgn.toFixed(2)} лв. през Stripe{' '}
+                      Дари {finalAmount.toFixed(2)} € през Stripe{' '}
                       {isMonthly ? '/ месец' : ''}
                     </Text>
                   </>

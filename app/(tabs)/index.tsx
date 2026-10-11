@@ -76,6 +76,16 @@ export default function FeedScreen() {
     const info = await detectUserAndStoreLocation({
       fallbackCity: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : userProfile.city,
     });
+
+    // Без реални координати не подреждаме по „разстояние“ — иначе би било измислено.
+    if (!info.hasRealCoordinates) {
+      Alert.alert(
+        'Няма достъп до локацията',
+        'Не успях да взема GPS координати (няма разрешение или няма сигнал). Разреши достъп до локацията и опитай пак — иначе подредбата по разстояние би била неточна.'
+      );
+      return;
+    }
+
     setUserCoords({ latitude: info.latitude, longitude: info.longitude });
     setNearbySorted(true);
   };
@@ -137,7 +147,10 @@ export default function FeedScreen() {
     const refLat = userCoords?.latitude ?? 42.6977;
     const refLng = userCoords?.longitude ?? 23.3219;
     posts.forEach((p) => {
+      // Постове без реални координати не получават разстояние —
+      // преди тук се измисляха координати и се показваха фалшиви километри.
       const coords = getCoordinatesForPost(p);
+      if (!coords) return;
       map[p.id] = calculateDistanceKm(refLat, refLng, coords.latitude, coords.longitude);
     });
     return map;

@@ -1,0 +1,253 @@
+import React, { useState } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Link, useRouter } from 'expo-router';
+import { CityPickerDropdown } from '@/components/CityPickerDropdown';
+import { COLORS } from '@/constants/theme';
+import { ApiError, API_URL } from '@/src/api/client';
+import { useAuth } from '@/src/auth/AuthContext';
+
+export default function RegisterScreen() {
+  const router = useRouter();
+  const { register } = useAuth();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [city, setCity] = useState('София');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const passwordIssue =
+    password.length === 0
+      ? null
+      : password.length < 8
+        ? 'Поне 8 символа'
+        : !/[A-Za-zА-Яа-я]/.test(password) || !/[0-9]/.test(password)
+          ? 'Поне една буква и една цифра'
+          : null;
+
+  const canSubmit =
+    name.trim().length >= 2 &&
+    email.includes('@') &&
+    password.length >= 8 &&
+    !passwordIssue &&
+    !isSubmitting;
+
+  const handleRegister = async () => {
+    if (!canSubmit) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await register({ email, password, name, city });
+      router.replace('/(tabs)');
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : `Регистрацията не успя. Провери дали API-то работи (${API_URL}).`
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.logoBadge}>
+          <Ionicons name="pricetags" size={30} color={COLORS.greenBright} />
+        </View>
+        <Text style={styles.title}>Създай профил</Text>
+        <Text style={styles.subtitle}>
+          Публикувай реални цени, сканирай касови бележки и предпази другите от капани.
+        </Text>
+
+        <Text style={styles.label}>Име</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="напр. Иван Петров"
+          placeholderTextColor={COLORS.textMuted}
+          value={name}
+          onChangeText={setName}
+          autoCapitalize="words"
+        />
+
+        <Text style={styles.label}>Имейл</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="ime@example.com"
+          placeholderTextColor={COLORS.textMuted}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+
+        <Text style={styles.label}>Парола</Text>
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={[styles.input, styles.passwordInput]}
+            placeholder="поне 8 символа, буква и цифра"
+            placeholderTextColor={COLORS.textMuted}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+          />
+          <TouchableOpacity
+            style={styles.eyeBtn}
+            onPress={() => setShowPassword((v) => !v)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={19}
+              color={COLORS.textSecondary}
+            />
+          </TouchableOpacity>
+        </View>
+        {passwordIssue && <Text style={styles.hintWarn}>{passwordIssue}</Text>}
+
+        <Text style={styles.label}>Град</Text>
+        <CityPickerDropdown
+          selectedCity={city}
+          onSelectCity={setCity}
+          includeAllOption={false}
+          label="Твоят град"
+        />
+
+        {error && (
+          <View style={styles.errorBox}>
+            <Ionicons name="alert-circle" size={17} color={COLORS.redBright} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
+          onPress={handleRegister}
+          disabled={!canSubmit}
+          activeOpacity={0.88}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator color={COLORS.black} />
+          ) : (
+            <>
+              <Ionicons name="person-add" size={18} color={COLORS.black} />
+              <Text style={styles.submitText}>Създай профил</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        <Link href="/(auth)/login" asChild>
+          <TouchableOpacity style={styles.switchBtn}>
+            <Text style={styles.switchText}>
+              Вече имаш профил? <Text style={styles.switchTextAccent}>Влез</Text>
+            </Text>
+          </TouchableOpacity>
+        </Link>
+
+        <Text style={styles.apiHint}>Сървър: {API_URL}</Text>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: COLORS.bgPrimary },
+  scroll: { padding: 22, paddingTop: 60, paddingBottom: 40 },
+  logoBadge: {
+    width: 62,
+    height: 62,
+    borderRadius: 20,
+    backgroundColor: COLORS.greenSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.greenBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  title: { color: COLORS.textPrimary, fontSize: 27, fontWeight: '900', letterSpacing: 0.3 },
+  subtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 13.5,
+    lineHeight: 20,
+    marginTop: 6,
+    marginBottom: 22,
+  },
+  label: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 6,
+    marginTop: 12,
+    letterSpacing: 0.3,
+  },
+  input: {
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
+    borderRadius: 13,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    color: COLORS.textPrimary,
+    fontSize: 14.5,
+  },
+  passwordRow: { flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, paddingRight: 44 },
+  eyeBtn: { position: 'absolute', right: 13, padding: 2 },
+  hintWarn: { color: COLORS.goldBright, fontSize: 11.5, marginTop: 6, fontWeight: '700' },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.redSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.redBorder,
+    borderRadius: 12,
+    padding: 11,
+    marginTop: 16,
+  },
+  errorText: { flex: 1, color: COLORS.redBright, fontSize: 12.5, fontWeight: '700' },
+  submitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.greenBright,
+    borderRadius: 14,
+    paddingVertical: 15,
+    marginTop: 22,
+  },
+  submitBtnDisabled: { opacity: 0.45 },
+  submitText: { color: COLORS.black, fontSize: 15, fontWeight: '900' },
+  switchBtn: { alignItems: 'center', marginTop: 18, padding: 8 },
+  switchText: { color: COLORS.textSecondary, fontSize: 13.5, fontWeight: '600' },
+  switchTextAccent: { color: COLORS.greenBright, fontWeight: '900' },
+  apiHint: {
+    color: COLORS.textMuted,
+    fontSize: 10.5,
+    textAlign: 'center',
+    marginTop: 22,
+  },
+});

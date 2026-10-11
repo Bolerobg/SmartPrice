@@ -19,14 +19,17 @@ export default function CommunityScreen() {
     totalCommunitySavedAllPosts,
     openDonationModal,
     userProfile,
+    communityStats,
   } = useApp();
 
-  const totalReceiptsCount = posts.filter((p) => p.receipt?.verifiedByAi).length;
-  const totalRedFlagsCount = posts.filter((p) => p.polarity === 'red').length;
+  // Реални броячи от базата (не измислени числа)
+  const totalReceiptsCount = communityStats?.verifiedReceipts ?? posts.filter((p) => p.receipt?.verifiedByAi).length;
+  const totalRedFlagsCount = communityStats?.redPosts ?? posts.filter((p) => p.polarity === 'red').length;
+  const totalGreenCount = communityStats?.greenPosts ?? posts.filter((p) => p.polarity === 'green').length;
 
-  // Месечна цел за сървъри и AI OCR скенер
+  // Реално събраното този месец от Stripe дарения (идва от базата)
   const monthlyGoalBgn = 800;
-  const currentRaisedBgn = 580 + userProfile.totalDonatedBgn;
+  const currentRaisedBgn = communityStats?.raisedThisMonthBgn ?? 0;
   const goalProgress = Math.min(100, Math.round((currentRaisedBgn / monthlyGoalBgn) * 100));
 
   return (
@@ -69,7 +72,7 @@ export default function CommunityScreen() {
             </View>
             <View style={styles.heroMiniBox}>
               <Text style={[styles.heroMiniVal, { color: COLORS.greenBright }]}>
-                {posts.length - totalRedFlagsCount}
+                {totalGreenCount}
               </Text>
               <Text style={styles.heroMiniLbl}>Топ оферти</Text>
             </View>

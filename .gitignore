@@ -4,8 +4,20 @@ node_modules/
 # Expo
 .expo/
 dist/
+dist-web/
 web-build/
 expo-env.d.ts
+
+# Локални артефакти
+tsc-out.txt
+
+# Локални помощни скриптове (не влизат в репото)
+server/push_to_github.sh
+server/import_keys.py
+server/import_stripe_key.py
+server/repoint_dns.py
+server/restart-tunnel.sh
+server/_test_receipt.jpg
 
 # Native
 .kotlin/

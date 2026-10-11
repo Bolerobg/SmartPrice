@@ -85,6 +85,7 @@ export default function AddPostScreen() {
   const [pricePaid, setPricePaid] = useState<string>('');
   const [referencePrice, setReferencePrice] = useState<string>('');
   const [unitQuantity, setUnitQuantity] = useState<string>('');
+  const [unitType, setUnitType] = useState<'g' | 'kg' | 'ml' | 'l' | 'pcs'>('g');
   const [isShrinkflation, setIsShrinkflation] = useState<boolean>(false);
   const [isFakePromo, setIsFakePromo] = useState<boolean>(false);
   const [imageUri, setImageUri] = useState<string>(SAMPLE_PHOTOS.restaurants);
@@ -114,9 +115,13 @@ export default function AddPostScreen() {
         setPlaceName((prev) => prev.trim() || info.detectedPlaceName || '');
       }
       setLocationDetectedLabel(
-        info.source === 'photo_exif'
-          ? '📍 Автоматично засечено от EXIF локацията на снимката'
-          : '📍 Автоматично засечен магазин и адрес по GPS'
+        !info.hasRealCoordinates
+          ? '📍 Няма GPS достъп — градът е предположен, провери го'
+          : info.source === 'photo_exif'
+            ? '📍 Засечено от EXIF локацията на снимката'
+            : info.detectedPlaceName
+              ? '📍 Засечен обект и адрес по GPS'
+              : '📍 Засечен адрес по GPS (обектът не е разпознат)'
       );
     } finally {
       setIsDetectingLocation(false);
@@ -246,7 +251,6 @@ export default function AddPostScreen() {
     try {
       const extracted = await analyzeReceiptImage({
         imageUri: selectedReceiptUri,
-        imageBase64: base64,
         category,
         polarity,
       });
@@ -258,13 +262,9 @@ export default function AddPostScreen() {
         setPlaceName(extracted.merchantName);
       }
       setPricePaid(String(extracted.totalAmount));
-      if (!referencePrice.trim()) {
-        setReferencePrice(
-          polarity === 'green'
-            ? String(Math.round(extracted.totalAmount * 1.65))
-            : String(Math.round(extracted.totalAmount * 0.52))
-        );
-      }
+      // ВАЖНО: не измисляме „стара/обичайна цена“. Преди кодът слагаше
+      // totalAmount × 1.65 и после показваше фалшива оценка на спестяване.
+      // Референсната цена се попълва само от потребителя.
       if (!title.trim()) {
         const firstItem = extracted.items[0]?.name || 'Продукт';
         setTitle(
@@ -366,8 +366,7 @@ export default function AddPostScreen() {
         pricePaid: numericPrice,
         referencePrice: numericRef && !isNaN(numericRef) ? numericRef : undefined,
         unitQuantity: !isNaN(numericUnitQty) && numericUnitQty > 0 ? numericUnitQty : undefined,
-        unitType: !isNaN(numericUnitQty) && numericUnitQty > 0 ? 'g' : undefined,
-        pricePerKgOrLiter: computedPricePerKg,
+        unitType: !isNaN(numericUnitQty) && numericUnitQty > 0 ? unitType : undefined,
         isShrinkflation,
         isFakePromo,
         imageUri: imageUri || SAMPLE_PHOTOS[category],
@@ -413,13 +412,18 @@ export default function AddPostScreen() {
   const parsedPrice = Number(pricePaid.replace(',', '.'));
   const parsedRef = Number(referencePrice.replace(',', '.'));
   const parsedUnitQty = Number(unitQuantity.replace(',', '.'));
-  const livePricePerKg =
+  // Цена за единица: г/мл се нормират към 1 кг/1 л, бр. си остава за брой.
+  const livePricePerUnit =
     !isNaN(parsedPrice) &&
     parsedPrice > 0 &&
     !isNaN(parsedUnitQty) &&
     parsedUnitQty > 0
-      ? Number(((parsedPrice / parsedUnitQty) * 1000).toFixed(2))
+      ? unitType === 'g' || unitType === 'ml'
+        ? Number(((parsedPrice / parsedUnitQty) * 1000).toFixed(2))
+        : Number((parsedPrice / parsedUnitQty).toFixed(2))
       : null;
+  const unitShortLabel =
+    unitType === 'g' || unitType === 'kg' ? 'кг' : unitType === 'pcs' ? 'бр.' : 'л';
   const liveDiffPercent =
     !isNaN(parsedPrice) &&
     parsedPrice > 0 &&
@@ -661,18 +665,59 @@ export default function AddPostScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: '700' }}>
-                ⚖️ Грамаж или обем (гр./мл — по избор):
+                ⚖️ Грамаж / обем / брой (по избор):
               </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 5 }}>
+                {(
+                  [
+                    { id: 'g', label: 'грама' },
+                    { id: 'kg', label: 'кг' },
+                    { id: 'ml', label: 'мл' },
+                    { id: 'l', label: 'литри' },
+                    { id: 'pcs', label: 'брой' },
+                  ] as const
+                ).map((option) => {
+                  const active = unitType === option.id;
+                  return (
+                    <TouchableOpacity
+                      key={option.id}
+                      onPress={() => setUnitType(option.id)}
+                      style={{
+                        backgroundColor: active ? COLORS.accentIndigo : COLORS.bgCardElevated,
+                        borderWidth: 1,
+                        borderColor: active ? COLORS.accentIndigo : COLORS.borderSubtle,
+                        borderRadius: 9,
+                        paddingHorizontal: 9,
+                        paddingVertical: 5,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: active ? COLORS.white : COLORS.textSecondary,
+                          fontSize: 11,
+                          fontWeight: active ? '800' : '600',
+                        }}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
               <TextInput
-                style={[styles.input, { marginTop: 4, paddingVertical: 8 }]}
-                placeholder="напр. 400 (за автоматична цена на 1 кг/л)"
+                style={[styles.input, { marginTop: 5, paddingVertical: 8 }]}
+                placeholder={
+                  unitType === 'pcs'
+                    ? 'напр. 10 (за цена за брой)'
+                    : `напр. 400 (за автоматична цена за 1 ${unitShortLabel})`
+                }
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="decimal-pad"
                 value={unitQuantity}
                 onChangeText={setUnitQuantity}
               />
             </View>
-            {livePricePerKg !== null && (
+            {livePricePerUnit !== null && (
               <View
                 style={{
                   backgroundColor: 'rgba(6, 182, 212, 0.14)',
@@ -686,10 +731,10 @@ export default function AddPostScreen() {
                 }}
               >
                 <Text style={{ color: COLORS.textMuted, fontSize: 9.5, fontWeight: '800' }}>
-                  ЦЕНА ЗА 1 КГ/Л
+                  ЦЕНА ЗА 1 {unitShortLabel.toUpperCase()}
                 </Text>
                 <Text style={{ color: COLORS.accentCyan, fontSize: 14, fontWeight: '900' }}>
-                  {livePricePerKg.toFixed(2)} лв.
+                  {livePricePerUnit.toFixed(2)} лв.
                 </Text>
               </View>
             )}

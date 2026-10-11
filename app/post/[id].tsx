@@ -20,6 +20,7 @@ import { ReceiptModalCard } from '@/components/ReceiptModalCard';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
+import { formatRelativeTime } from '@/src/lib/format';
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -583,7 +584,7 @@ export default function PostDetailScreen() {
                       <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>
                         {h.reportedBy}
                       </Text>{' '}
-                      ({h.recordedAt})
+                      ({formatRelativeTime(h.recordedAt)})
                     </Text>
                     <Text
                       style={{

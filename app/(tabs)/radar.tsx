@@ -24,10 +24,12 @@ export default function RadarScreen() {
   const [activeCategory, setActiveCategory] = useState<CategoryId>('all');
   const [activeCity, setActiveCity] = useState<string>('Всички градове');
 
+  // Ключовете са с малки букви, защото CityPickerDropdown чете counts[city.toLowerCase()]
   const cityCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const p of posts) {
-      counts[p.city] = (counts[p.city] || 0) + 1;
+      const key = p.city.toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
     }
     return counts;
   }, [posts]);

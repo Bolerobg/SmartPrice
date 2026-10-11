@@ -18,15 +18,7 @@ interface SmartPriceAssistantCardProps {
   onApplyQuickQuery: (q: string) => void;
 }
 
-const BENCHMARKS: { keywords: string[]; avgPrice: number; unitLabel: string }[] = [
-  { keywords: ['вода', 'минерална'], avgPrice: 2.5, unitLabel: 'бутилка вода в заведение' },
-  { keywords: ['кафе', 'еспресо', 'капучино'], avgPrice: 3.8, unitLabel: 'кафе / капучино' },
-  { keywords: ['зехтин'], avgPrice: 24.0, unitLabel: '1л студено пресован зехтин' },
-  { keywords: ['меню', 'обяд', 'супа', 'порция'], avgPrice: 14.5, unitLabel: 'обедно меню (супа + основно)' },
-  { keywords: ['нощувка', 'стая', 'хотел', 'airbnb', 'студио'], avgPrice: 120.0, unitLabel: 'нощувка за двама' },
-  { keywords: ['кашкавал', 'сирене'], avgPrice: 19.5, unitLabel: '1 кг сирене / кашкавал' },
-  { keywords: ['диагностика', 'сервиз', 'климатик'], avgPrice: 50.0, unitLabel: 'техническа диагностика / посещение' },
-];
+const BENCHMARKS: { keywords: string[]; avgPrice: number; unitLabel: string }[] = [];
 
 export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = ({
   filteredPosts,
@@ -124,30 +116,26 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
       });
     }
 
-    let baselineAvg = 0;
-    let baselineLabel = 'средната цена в общността';
-    let cheapestMatch: { price: number; place: string; city: string } | null = null;
-
-    if (matchingPrices.length > 0) {
-      baselineAvg =
-        matchingPrices.reduce((acc, m) => acc + m.price, 0) / matchingPrices.length;
-      cheapestMatch = matchingPrices.reduce(
-        (min, m) => (m.price < min.price ? m : min),
-        matchingPrices[0]
-      );
-    } else {
-      const bench = BENCHMARKS.find((b) =>
-        b.keywords.some((kw) => q.includes(kw))
-      );
-      if (bench) {
-        baselineAvg = bench.avgPrice;
-        baselineLabel = `обичайната цена за ${bench.unitLabel}`;
-      } else if (stats) {
-        baselineAvg = stats.avgPrice;
-      } else {
-        baselineAvg = 25;
-      }
+    // Ако общността няма данни за този продукт, НЕ измисляме „обичайна цена“.
+    // Преди тук имаше твърдо зададени стойности (зехтин 24 лв., нощувка 120 лв.),
+    // които приложението представяше като факт.
+    if (matchingPrices.length === 0) {
+      return {
+        status: 'unknown' as const,
+        headline: '🟡 Нямаме данни за тази цена',
+        detail:
+          'Общността още не е публикувала цени за този продукт. Публикувай ти — така следващият потребител ще има с какво да сравни.',
+        cheapestMatch: null,
+      };
     }
+
+    const baselineAvg =
+      matchingPrices.reduce((acc, m) => acc + m.price, 0) / matchingPrices.length;
+    const baselineLabel = `средната цена в общността (${matchingPrices.length} записа)`;
+    const cheapestMatch = matchingPrices.reduce(
+      (min, m) => (m.price < min.price ? m : min),
+      matchingPrices[0]!
+    );
 
     const ratio = (val - baselineAvg) / baselineAvg;
     const diffPercent = Math.round(Math.abs(ratio) * 100);

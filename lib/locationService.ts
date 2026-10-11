@@ -10,7 +10,9 @@ export interface DetectedLocationInfo {
   detectedPlaceName?: string;
   nearbyPlaces: string[];
   googleMapsUrl: string;
-  source: 'photo_exif' | 'device_gps' | 'ip_fallback';
+  source: 'photo_exif' | 'device_gps' | 'ip_fallback' | 'unavailable';
+  /** true = координатите идват от устройството/EXIF, не от приблизителен център на град */
+  hasRealCoordinates: boolean;
 }
 
 interface CityPresetLocation {
@@ -430,9 +432,10 @@ export async function detectUserAndStoreLocation(options?: {
     exifCoords?.latitude ?? deviceCoords?.latitude ?? preset.latitude;
   const longitude =
     exifCoords?.longitude ?? deviceCoords?.longitude ?? preset.longitude;
+  const hasRealCoordinates = Boolean(exifCoords || deviceCoords);
   const source: DetectedLocationInfo['source'] = exifCoords
     ? 'photo_exif'
-    : deviceCoords?.source ?? 'ip_fallback';
+    : deviceCoords?.source ?? 'unavailable';
 
   let detectedCity = matchBulgarianCity(fallbackCity, latitude, longitude);
   let detectedAddress = '';
@@ -540,22 +543,10 @@ export async function detectUserAndStoreLocation(options?: {
     }
   }
 
-  const matchedPreset =
-    CITY_PRESET_LOCATIONS[detectedCity] || CITY_PRESET_LOCATIONS['София'];
-
-  if (!detectedAddress) {
-    detectedAddress = matchedPreset.defaultAddress;
-  }
-
-  for (const s of matchedPreset.stores) {
-    if (!nearbyPlaces.includes(s)) {
-      nearbyPlaces.push(s);
-    }
-  }
-
-  if (!detectedPlaceName && nearbyPlaces.length > 0) {
-    detectedPlaceName = nearbyPlaces[0];
-  }
+  // ВАЖНО: преди тук се подаваха измислени адреси и имена на магазини от
+  // твърдо зададен списък (напр. „Kaufland София Център“), а UI-ът ги
+  // показваше като „автоматично засечен магазин“. Сега се показва само това,
+  // което реално е върнато от геокодера.
 
   const googleMapsUrl = buildGoogleMapsUrl({
     placeName: detectedPlaceName,
@@ -574,36 +565,28 @@ export async function detectUserAndStoreLocation(options?: {
     nearbyPlaces: nearbyPlaces.slice(0, 6),
     googleMapsUrl,
     source,
+    hasRealCoordinates,
   };
 }
 
 /**
- * Връща координатите за дадена публикация (от нейните GPS координати или по град)
+ * Връща координатите за дадена публикация — САМО ако са реални.
+ *
+ * Промяна спрямо старата версия: преди тук се измисляше отместване по хеша на
+ * ID-то около центъра на града, за да изглежда „📍 Около мен (GPS)“ реалистично.
+ * Това показваше фалшиви разстояния. Сега връщаме null, ако постът няма
+ * запазени координати, и UI-ът не показва разстояние.
  */
 export function getCoordinatesForPost(post: {
   latitude?: number;
   longitude?: number;
   city: string;
   id?: string;
-}): { latitude: number; longitude: number } {
-  if (
-    typeof post.latitude === 'number' &&
-    typeof post.longitude === 'number'
-  ) {
+}): { latitude: number; longitude: number } | null {
+  if (typeof post.latitude === 'number' && typeof post.longitude === 'number') {
     return { latitude: post.latitude, longitude: post.longitude };
   }
-  const preset =
-    CITY_PRESET_LOCATIONS[post.city] || CITY_PRESET_LOCATIONS['София'];
-  // Леко отместване по ID за реалистично локално разстояние в рамките на града (0.3 - 3.5 км)
-  const hash = (post.id || post.city)
-    .split('')
-    .reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  const offsetLat = ((hash % 17) - 8) * 0.0022;
-  const offsetLon = ((hash % 13) - 6) * 0.0025;
-  return {
-    latitude: preset.latitude + offsetLat,
-    longitude: preset.longitude + offsetLon,
-  };
+  return null;
 }
 
 /**
