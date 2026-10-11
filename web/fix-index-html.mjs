@@ -70,6 +70,22 @@ if (html.includes('<meta name="viewport"')) {
 // 2. CSS-ът преди </head>
 html = html.replace('</head>', `${CSS}\n  </head>`);
 
+// 2б. Иконата на приложението + PWA тагове.
+//     Без това телефонът слага произволна картинка (или буква) на началния
+//     екран. Иконите идват от web/make-icons.py и се копират от public/.
+const ICONS = `
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#0B1424" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SmartPrice" />`;
+
+html = html.replace('</head>', `${ICONS}\n  </head>`);
+
 // 3. Език
 html = html.replace('<html lang="en">', '<html lang="bg">');
 
