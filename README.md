@@ -4,6 +4,39 @@
 **собствен Node/TypeScript API**. Дизайнът и структурата на приложението са
 запазени — сменен е само източникът на данни: вече няма симулации.
 
+**Публикувано на: https://smart.lookthis.online**
+
+> ⚠️ **Валута:** България е в еврозоната и Stripe вече отказва BGN
+> („The currency bgn is no longer supported. Use eur instead.“).
+> Затова даренията са в **EUR**. Останалите цени в приложението все още се
+> показват в „лв.“ — пълната миграция към € е отделно решение.
+
+---
+
+## Публикуване (как е устроено)
+
+```
+Интернет → Cloudflare (smart.lookthis.online)
+         → Cloudflare Tunnel "smartprice"  → localhost:3030
+         → контейнер "smart" (nginx)
+              ├── /            → статично Expo web приложение
+              ├── /api/*       → контейнер smartprice-api:4000
+              └── /uploads/*   → контейнер smartprice-api:4000
+         → контейнер smartprice-db (PostgreSQL 16)
+```
+
+Един домейн, един тунел, три контейнера. nginx проксира API-то, затова няма
+CORS проблеми и API-то не е изложено директно.
+
+```bash
+docker compose up -d --build     # db + api + web
+bash server/final_check.sh       # типове + контейнери + публичен домейн
+```
+
+Тунелът: отделен тунел `smartprice` (не пипа основния `lookthis`).
+Конфиг `~/.cloudflared/smart-config.yml`, автоматичен старт
+`Startup\cloudflared-smart.vbs`.
+
 ---
 
 ## Архитектура

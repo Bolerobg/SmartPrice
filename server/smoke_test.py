@@ -254,16 +254,37 @@ def main() -> int:
     check("ранговете са последователни", ranks == list(range(1, len(ranks) + 1)), str(ranks))
 
     section("14. Честни грешки при липсваща конфигурация")
-    status, ocr = call("POST", "/api/ocr/receipt", {"imageUrl": "https://example.com/x.jpg"}, token=token)
-    check("OCR без ключ → 503 (не фалшива бележка)", status == 503, f"HTTP {status}")
-    check("съобщението казва какво липсва", "OPENROUTER_API_KEY" in json.dumps(ocr, ensure_ascii=False))
-    status, pay = call("POST", "/api/donations/checkout", {"amountBgn": 10, "tierId": "guardian"}, token=token)
-    check("плащане без Stripe → 503 (не фалшив успех)", status == 503, f"HTTP {status}")
-    check("съобщението казва какво липсва", "STRIPE_SECRET_KEY" in json.dumps(pay, ensure_ascii=False))
-    status, cfg = call("GET", "/api/donations/config")
-    check("конфигурацията на даренията е честна", cfg["enabled"] is False)
+    # Тези проверки зависят от това дали ключовете са налични. Ако са налични,
+    # проверяваме че пътят е РЕАЛЕН (а не че връща 503).
+    features = call("GET", "/api/health/features")[1]
+    print(f"        OCR: {features.get('ocr')} | плащания: {features.get('payments')}")
+
+    # Проверяваме ПРЕДИ да създадем каквото и да е дарение по-долу.
     status, mine = call("GET", "/api/donations/mine", token=token)
     check("моите дарения са празни", mine["items"] == [])
+
+    status, ocr = call("POST", "/api/ocr/receipt", {"imageUrl": "https://example.com/x.jpg"}, token=token)
+    if features.get("ocr"):
+        # Реален OCR: чужд URL се отхвърля (не се тегли отвън), без фалшива бележка
+        check("OCR е включен → чужд URL се отхвърля (не 200)", status != 200, f"HTTP {status}")
+    else:
+        check("OCR без ключ → 503 (не фалшива бележка)", status == 503, f"HTTP {status}")
+        check("съобщението казва какво липсва", "OPENROUTER_API_KEY" in json.dumps(ocr, ensure_ascii=False))
+
+    status, pay = call("POST", "/api/donations/checkout", {"amount": 10, "tierId": "guardian"}, token=token)
+    if features.get("payments"):
+        # Реален Stripe: създава се истинска Checkout сесия
+        check("плащанията са включени → създадена сесия", status == 201, f"HTTP {status}")
+        check(
+            "върнат е истински Stripe URL",
+            json.loads(json.dumps(pay)).get("checkoutUrl", "").startswith("https://checkout.stripe.com/"),
+        )
+    else:
+        check("плащане без Stripe → 503 (не фалшив успех)", status == 503, f"HTTP {status}")
+        check("съобщението казва какво липсва", "STRIPE_SECRET_KEY" in json.dumps(pay, ensure_ascii=False))
+
+    status, cfg = call("GET", "/api/donations/config")
+    check("конфигурацията на даренията е честна", cfg["enabled"] is features.get("payments"))
 
     section("15. Права и 404")
     status, _ = call("GET", "/api/posts/00000000-0000-0000-0000-000000000000")
