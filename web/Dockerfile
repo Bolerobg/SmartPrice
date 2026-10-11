@@ -20,6 +20,10 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npx expo export --platform web --output-dir /out
 
+# +html.tsx не се прилага при output:'single' — коригираме готовия index.html
+# (viewport за телефон + CSS, който спира разтягането на страницата)
+RUN node web/fix-index-html.mjs /out/index.html
+
 # --- Етап 2: nginx ---
 FROM nginx:alpine AS runtime
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf

@@ -195,7 +195,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const userProfile = authProfile ?? EMPTY_PROFILE;
     const isAuthenticated = Boolean(authProfile);
-    const nudgeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // ---------------------------------------------------- „Добави на началния екран“
     const [isAddToHomeOpen, setIsAddToHomeOpen] = useState(false);
@@ -327,12 +326,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     //   • след 8 реални действия, И поне 3 дни след предишното подсещане;
     //   • или когато потребителят мине праг на спестени пари (25/50/100 €…),
     //     защото тогава вече е усетил ползата.
-    useEffect(() => {
-      if (nudgeTimerRef.current) {
-        clearInterval(nudgeTimerRef.current);
-        nudgeTimerRef.current = null;
-      }
-    }, []);
 
     // ------------------------------------------------------------ Действия
 

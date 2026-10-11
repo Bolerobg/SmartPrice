@@ -105,7 +105,7 @@ export default function ProfileScreen() {
               <Text style={styles.monetizationSub}>
                 {userProfile.isSupporter
                   ? `Общо дарени през Stripe: ${userProfile.totalDonatedBgn.toFixed(2)} € Благодарим ти за подкрепата!`
-                  : `Приложението пита периодично (на всеки 3 действия или по таймер), докато не направиш дарение през Stripe.`}
+                  : `Приложението пита дискретно — най-рано след 8 действия и поне 3 дни след предишно напомняне, докато не направиш дарение през Stripe.`}
               </Text>
             </View>
           </View>
