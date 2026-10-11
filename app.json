@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "SmartPrice",
+    "slug": "smartprice",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "smartprice",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "bg.smartprice.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SmartPrice използва камерата за снимане на продукти, касови бележки и места.",
+        "NSPhotoLibraryUsageDescription": "SmartPrice използва галерията за прикачване на снимки и касови бележки."
+      }
+    },
+    "android": {
+      "package": "bg.smartprice.app",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SmartPrice има нужда от достъп до снимките ви, за да качвате продукти и касови бележки.",
+          "cameraPermission": "SmartPrice има нужда от достъп до камерата, за да сканирате касови бележки и цени."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}
