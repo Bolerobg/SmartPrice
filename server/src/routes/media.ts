@@ -251,6 +251,7 @@ export default async function mediaRoutes(app: FastifyInstance) {
   app.get('/api/health/features', async () => ({
     ocr: features.ocr,
     payments: features.payments,
+    mail: features.mail,
     ocrModel: features.ocr ? env.OCR_MODEL : null,
   }));
 }

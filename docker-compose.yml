@@ -46,7 +46,13 @@ services:
       OCR_MODEL: "${OCR_MODEL:-google/gemini-2.5-flash}"
       STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
-      STRIPE_CURRENCY: "${STRIPE_CURRENCY:-bgn}"
+      STRIPE_CURRENCY: "${STRIPE_CURRENCY:-eur}"
+      # Имейли (кодове за потвърждение и забравена парола)
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      MAIL_FROM: "${MAIL_FROM:-SmartPrice <info@human.lookthis.online>}"
+      VERIFICATION_CODE_TTL_MIN: "${VERIFICATION_CODE_TTL_MIN:-15}"
+      VERIFICATION_MAX_PER_HOUR: "${VERIFICATION_MAX_PER_HOUR:-5}"
+      VERIFICATION_MAX_ATTEMPTS: "${VERIFICATION_MAX_ATTEMPTS:-5}"
       SEED_DEMO_DATA: "${SEED_DEMO_DATA:-true}"
     ports:
       # API_HOST_BIND=0.0.0.0 позволява достъп от телефон в същата WiFi мрежа.

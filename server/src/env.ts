@@ -24,7 +24,23 @@ const schema = z.object({
 
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
-  STRIPE_CURRENCY: z.string().default('bgn'),
+  STRIPE_CURRENCY: z.string().default('eur'),
+
+  // Имейли (кодове за потвърждение и забравена парола) през Resend
+  RESEND_API_KEY: z.string().optional().default(''),
+  MAIL_FROM: z.string().default('SmartPrice <info@human.lookthis.online>'),
+  // Колко минути е валиден един код
+  VERIFICATION_CODE_TTL_MIN: z.coerce.number().int().positive().max(120).default(15),
+  // Колко кода може да поиска един имейл за 1 час
+  VERIFICATION_MAX_PER_HOUR: z.coerce.number().int().positive().max(20).default(5),
+  // Колко грешни опита се толерират преди кодът да се обезсили
+  VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
+  // САМО ЗА РАЗРАБОТКА: връща кода в отговора, за да се тества без поща.
+  // Работи само ако NODE_ENV != production. В продукция е забранено.
+  EXPOSE_DEV_CODES: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
 
   SEED_DEMO_DATA: z
     .string()
@@ -48,6 +64,7 @@ export const env = parsed.data;
 export const features = {
   ocr: Boolean(env.OPENROUTER_API_KEY),
   payments: Boolean(env.STRIPE_SECRET_KEY),
+  mail: Boolean(env.RESEND_API_KEY),
 } as const;
 
 export const isProd = env.NODE_ENV === 'production';

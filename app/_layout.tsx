@@ -1,46 +1,175 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { AppProvider } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/src/auth/AuthContext';
 import { DonationModal } from '@/components/DonationModal';
+import { ONBOARDING_SEEN_KEY } from './(auth)/onboarding';
 import { COLORS } from '@/constants/theme';
 
-/**
- * Пази приложението: невлезли потребители отиват на /(auth)/login.
- * Реална автентикация вместо досегашния „винаги влязъл“ mock профил.
- */
+/** Колко минимум да се вижда splash екранът (за да не премигва) */
+const MIN_SPLASH_MS = 1400;
+
+const SPLASH_HINTS = [
+  'Топ находки от реални хора',
+  'Червени флагове и скрити такси',
+  'AI скенер на касови бележки',
+  'Без реклами. Без платени ревюта.',
+];
+
+/* ------------------------------------------------------------------ */
+/*  Splash екран                                                       */
+/* ------------------------------------------------------------------ */
+const Splash: React.FC = () => {
+  const logoScale = useRef(new Animated.Value(0.7)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const glow = useRef(new Animated.Value(0)).current;
+  const textOpacity = useRef(new Animated.Value(0)).current;
+  const barWidth = useRef(new Animated.Value(0)).current;
+  const [hintIndex, setHintIndex] = useState(0);
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(logoScale, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }),
+      Animated.timing(logoOpacity, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(textOpacity, {
+        toValue: 1,
+        duration: 600,
+        delay: 220,
+        useNativeDriver: true,
+      }),
+      Animated.timing(barWidth, {
+        toValue: 1,
+        duration: MIN_SPLASH_MS - 200,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: false,
+      }),
+    ]).start();
+
+    // Меко „дишане“ на логото
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ])
+    ).start();
+
+    // Сменящи се подсказки
+    const t = setInterval(() => setHintIndex((i) => (i + 1) % SPLASH_HINTS.length), 1100);
+    return () => clearInterval(t);
+  }, [barWidth, glow, logoOpacity, logoScale, textOpacity]);
+
+  return (
+    <LinearGradient colors={['#0F172A', '#0B0F1A', '#0B0F1A']} style={styles.splash}>
+      <Animated.View
+        style={[
+          styles.glow,
+          {
+            opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.7] }),
+            transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] }) }],
+          },
+        ]}
+      />
+
+      <Animated.View
+        style={[
+          styles.logoWrap,
+          { opacity: logoOpacity, transform: [{ scale: logoScale }] },
+        ]}
+      >
+        <LinearGradient
+          colors={['#6366F1', '#06B6D4']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.logoGradient}
+        >
+          <Ionicons name="pricetags" size={40} color={COLORS.white} />
+        </LinearGradient>
+      </Animated.View>
+
+      <Animated.View style={{ opacity: textOpacity, alignItems: 'center' }}>
+        <Text style={styles.splashTitle}>SmartPrice</Text>
+        <Text style={styles.splashTagline}>
+          Реални цени. Честни места.{'\n'}Разобличени капани.
+        </Text>
+      </Animated.View>
+
+      <Animated.View style={[styles.hintPill, { opacity: textOpacity }]}>
+        <Text style={styles.hintPillText}>{SPLASH_HINTS[hintIndex]}</Text>
+      </Animated.View>
+
+      <View style={styles.barTrack}>
+        <Animated.View
+          style={[
+            styles.barFill,
+            { width: barWidth.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) },
+          ]}
+        />
+      </View>
+
+      <Text style={styles.splashFoot}>smart.lookthis.online</Text>
+    </LinearGradient>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/*  Порта: невлезнали → onboarding (първи път) или вход                 */
+/* ------------------------------------------------------------------ */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isBootstrapping, isAuthenticated } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
+  const [minTimePassed, setMinTimePassed] = useState(false);
+  const [onboardingSeen, setOnboardingSeen] = useState<boolean | null>(null);
+
   useEffect(() => {
-    if (isBootstrapping) return;
+    const t = setTimeout(() => setMinTimePassed(true), MIN_SPLASH_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const flag = await AsyncStorage.getItem(ONBOARDING_SEEN_KEY);
+      setOnboardingSeen(flag === '1');
+    })();
+  }, []);
+
+  const ready = !isBootstrapping && minTimePassed && onboardingSeen !== null;
+
+  useEffect(() => {
+    if (!ready) return;
     const inAuthGroup = segments[0] === '(auth)';
 
-    if (!isAuthenticated && !inAuthGroup) {
-      router.replace('/(auth)/login');
-    } else if (isAuthenticated && inAuthGroup) {
+    if (!isAuthenticated) {
+      if (!inAuthGroup) {
+        // Първото пускане води до обяснението, после до входа.
+        router.replace(onboardingSeen ? '/(auth)/login' : '/(auth)/onboarding');
+      }
+      return;
+    }
+
+    if (inAuthGroup) {
       router.replace('/(tabs)');
     }
-  }, [isBootstrapping, isAuthenticated, segments, router]);
+  }, [ready, isAuthenticated, onboardingSeen, segments, router]);
 
-  if (isBootstrapping) {
-    return (
-      <View style={styles.splash}>
-        <View style={styles.splashBadge}>
-          <Ionicons name="pricetags" size={34} color={COLORS.greenBright} />
-        </View>
-        <Text style={styles.splashTitle}>SmartPrice</Text>
-        <Text style={styles.splashSub}>Зареждане на профила…</Text>
-        <ActivityIndicator color={COLORS.greenBright} style={{ marginTop: 18 }} />
-      </View>
-    );
-  }
+  const showSplash = useMemo(
+    () => !ready,
+    [ready]
+  );
+
+  if (showSplash) return <Splash />;
 
   return <>{children}</>;
 }
@@ -78,27 +207,72 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bgPrimary },
   splash: {
     flex: 1,
-    backgroundColor: COLORS.bgPrimary,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    paddingHorizontal: 32,
   },
-  splashBadge: {
-    width: 78,
-    height: 78,
-    borderRadius: 24,
-    backgroundColor: COLORS.greenSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.greenBorder,
+  glow: {
+    position: 'absolute',
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: '#06B6D4',
+    opacity: 0.4,
+    top: '26%',
+  },
+  logoWrap: {
+    shadowColor: '#06B6D4',
+    shadowOpacity: 0.5,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  logoGradient: {
+    width: 92,
+    height: 92,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   splashTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 26,
+    color: COLORS.white,
+    fontSize: 32,
     fontWeight: '900',
-    marginTop: 16,
-    letterSpacing: 0.4,
+    letterSpacing: -0.8,
+    marginTop: 22,
   },
-  splashSub: { color: COLORS.textSecondary, fontSize: 13, marginTop: 6 },
+  splashTagline: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  hintPill: {
+    marginTop: 26,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  hintPillText: { color: COLORS.accentCyan, fontSize: 12.5, fontWeight: '800' },
+  barTrack: {
+    position: 'absolute',
+    bottom: 74,
+    width: 150,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  barFill: { height: 3, borderRadius: 2, backgroundColor: COLORS.accentCyan },
+  splashFoot: {
+    position: 'absolute',
+    bottom: 40,
+    color: COLORS.textMuted,
+    fontSize: 11,
+    letterSpacing: 0.5,
+  },
 });

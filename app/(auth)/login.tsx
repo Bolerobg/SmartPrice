@@ -36,6 +36,15 @@ export default function LoginScreen() {
       await login(email, password);
       router.replace('/(tabs)');
     } catch (err) {
+      // Паролата е вярна, но имейлът не е потвърден → пращаме на екрана с кода.
+      if (err instanceof ApiError && err.code === 'email_not_verified') {
+        const details = err.details as { email?: string } | undefined;
+        router.replace({
+          pathname: '/(auth)/verify',
+          params: { email: details?.email ?? email.trim().toLowerCase() },
+        });
+        return;
+      }
       setError(
         err instanceof ApiError
           ? err.message
@@ -102,6 +111,13 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
 
+        <Link href="/(auth)/forgot-password" asChild>
+          <TouchableOpacity style={styles.forgotBtn} activeOpacity={0.7}>
+            <Ionicons name="help-circle-outline" size={15} color={COLORS.textMuted} />
+            <Text style={styles.forgotText}>Забравена парола?</Text>
+          </TouchableOpacity>
+        </Link>
+
         {error && (
           <View style={styles.errorBox}>
             <Ionicons name="alert-circle" size={17} color={COLORS.redBright} />
@@ -132,14 +148,6 @@ export default function LoginScreen() {
             </Text>
           </TouchableOpacity>
         </Link>
-
-        <View style={styles.noteBox}>
-          <Ionicons name="information-circle-outline" size={15} color={COLORS.textMuted} />
-          <Text style={styles.noteText}>
-            Профилите и публикациите се пазят в твоята собствена PostgreSQL база на сървъра.
-            Няма външни доставчици на идентичност.
-          </Text>
-        </View>
 
         <Text style={styles.apiHint}>Сървър: {API_URL}</Text>
       </ScrollView>
@@ -229,4 +237,13 @@ const styles = StyleSheet.create({
   },
   noteText: { flex: 1, color: COLORS.textMuted, fontSize: 11.5, lineHeight: 17 },
   apiHint: { color: COLORS.textMuted, fontSize: 10.5, textAlign: 'center', marginTop: 18 },
+  forgotBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 5,
+    marginTop: 10,
+    paddingVertical: 4,
+  },
+  forgotText: { color: COLORS.textMuted, fontSize: 12.5, fontWeight: '700' },
 });

@@ -14,11 +14,15 @@
 import hashlib
 import hmac
 import json
+import os
 import random
 import sys
 import time
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sp_test_helpers import register_and_login  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "https://smart.lookthis.online"
 SECRET = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -92,17 +96,13 @@ def main():
 
     print(f"Сървър: {BASE}\n")
 
-    print("=== 1. Регистрация и създаване на дарение ===")
+    print("=== 1. Регистрация (с потвърждение) и създаване на дарение ===")
     email = f"wh.{random.randint(10000, 99999)}@smartprice.test"
-    status, body = call(
-        "POST",
-        "/api/auth/register",
-        {"email": email, "password": "TestParola123", "name": "Уебхук Тестов", "city": "София"},
-    )
-    check("регистрация -> 201", status == 201, f"HTTP {status}")
-    if status != 201:
+    status, body, token = register_and_login(BASE, email, "TestParola123", "Уебхук Тестов")
+    check("регистрация + потвърждение -> OK", bool(token), f"HTTP {status}")
+    if not token:
+        print("   ", body)
         return 1
-    token = body["accessToken"]
 
     status, checkout = call(
         "POST", "/api/donations/checkout", {"amount": 2, "tierId": "coffee", "isMonthly": False}, token=token

@@ -50,8 +50,12 @@ export default function RegisterScreen() {
     setIsSubmitting(true);
     setError(null);
     try {
-      await register({ email, password, name, city });
-      router.replace('/(tabs)');
+      const result = await register({ email, password, name, city });
+      // Профилът още не е потвърден → завеждаме потребителя на екрана с кода.
+      router.replace({
+        pathname: '/(auth)/verify',
+        params: { email: result.email },
+      });
     } catch (err) {
       setError(
         err instanceof ApiError

@@ -122,6 +122,10 @@ export async function buildApp() {
           message: isFastifyInternal
             ? generic[status] ?? 'Невалидна заявка.'
             : (err as Error).message || generic[status] || 'Невалидна заявка.',
+          // Детайлите се пазят: клиентът ги ползва (напр. кой имейл не е потвърден).
+          ...((err as { details?: unknown }).details !== undefined
+            ? { details: (err as { details?: unknown }).details }
+            : {}),
         },
       });
     }
@@ -139,7 +143,11 @@ export async function buildApp() {
     return {
       status: 'ok',
       database: db?.ok === 1,
-      features: { ocr: features.ocr, payments: features.payments },
+      features: {
+        ocr: features.ocr,
+        payments: features.payments,
+        mail: features.mail,
+      },
       time: new Date().toISOString(),
     };
   });

@@ -24,6 +24,7 @@ export const forbidden = (msg = 'Нямаш права за това дейст�
 export const notFound = (msg = 'Не е намерено.') => new AppError(404, 'not_found', msg);
 export const conflict = (msg: string) => new AppError(409, 'conflict', msg);
 export const tooLarge = (msg: string) => new AppError(413, 'payload_too_large', msg);
+export const tooManyRequests = (msg: string) => new AppError(429, 'rate_limited', msg);
 export const unavailable = (msg: string) => new AppError(503, 'unavailable', msg);
 
 export function sendError(reply: FastifyReply, err: unknown): FastifyReply {

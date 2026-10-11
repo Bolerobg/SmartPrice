@@ -12,10 +12,14 @@
 ВАЖНО: НЕ се извършва плащане — само се създават сесии, които изтичат сами.
 """
 import json
+import os
 import random
 import sys
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sp_test_helpers import register_and_login  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "https://smart.lookthis.online"
 UA = (
@@ -62,18 +66,13 @@ def main():
     check("има 3 нива на дарение", len(cfg.get("tiers", [])) == 3, str(len(cfg.get("tiers", []))))
     print(f"        нива: {[(t['id'], t['amount']) for t in cfg.get('tiers', [])]}")
 
-    print("\n=== 2. Регистрация ===")
+    print("\n=== 2. Регистрация и потвърждение по имейл ===")
     email = f"pay.{random.randint(10000, 99999)}@smartprice.test"
-    status, body = call(
-        "POST",
-        "/api/auth/register",
-        {"email": email, "password": "TestParola123", "name": "Платеж Тестов", "city": "София"},
-    )
-    check("регистрация -> 201", status == 201, f"HTTP {status}")
-    if status != 201:
+    status, body, token = register_and_login(BASE, email, "TestParola123", "Платеж Тестов")
+    check("регистрация + потвърждение -> OK", bool(token), f"HTTP {status}")
+    if not token:
         print("   ", body)
         return 1
-    token = body["accessToken"]
     check("нов профил НЕ е поддръжник", body["profile"]["isSupporter"] is False)
 
     print("\n=== 3. Еднократно дарение (реална Checkout сесия в Stripe) ===")

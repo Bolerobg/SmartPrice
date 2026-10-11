@@ -7,10 +7,34 @@
 from __future__ import annotations
 
 import json
+import os
 import random
+import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def mark_verified_in_db(email: str) -> None:
+    """
+    ТЕСТОВО удобство: отбелязва имейла като потвърден директно в базата.
+
+    Нужно е, когато тестът върви срещу продукцията — там кодът съществува само
+    в пощата и не може да се прочете от теста. Това НЕ е продуктова логика,
+    а начин да продължим теста след регистрацията.
+    """
+    subprocess.run(
+        [
+            "docker", "compose", "exec", "-T", "db",
+            "psql", "-U", "smartprice", "-d", "smartprice", "-c",
+            f"update profiles set email_verified_at = now() where email = '{email}'",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:4000"
 
@@ -71,16 +95,30 @@ def main() -> int:
     check("GET /api/health/features → 200", status == 200, f"HTTP {status}")
     print(f"        OCR: {feats.get('ocr')} | плащания: {feats.get('payments')}")
 
-    section("2. Регистрация")
+    section("2. Регистрация с потвърждение по имейл")
     status, reg = call(
         "POST",
         "/api/auth/register",
         {"email": email, "password": password, "name": name, "city": city},
     )
     check("регистрация → 201", status == 201, f"HTTP {status} {reg if status != 201 else ''}")
-    token = reg.get("accessToken") if isinstance(reg, dict) else None
+    check("иска потвърждение на имейла", reg.get("requiresVerification") is True)
+    check("НЕ дава токени преди потвърждение", "accessToken" not in reg)
+    check("казва, че имейлът е изпратен", reg.get("emailSent") is True, str(reg.get("emailSent")))
+
+    # Потвърждаване: в dev режим кодът идва в отговора, в продукция — само по пощата.
+    dev_code = reg.get("devCode")
+    if dev_code:
+        status, ver = call("POST", "/api/auth/verify-email", {"email": email, "code": dev_code})
+        check("потвърждение с кода → 200", status == 200, f"HTTP {status}")
+    else:
+        mark_verified_in_db(email)
+        status, ver = call("POST", "/api/auth/login", {"email": email, "password": password})
+        check("вход след потвърждение → 200", status == 200, f"HTTP {status}")
+
+    token = (ver or {}).get("accessToken")
     check("върнат accessToken", bool(token))
-    profile = reg.get("profile", {}) if isinstance(reg, dict) else {}
+    profile = (ver or {}).get("profile", {})
     check("името е запазено като UTF-8", profile.get("name") == name, repr(profile.get("name")))
     handle = profile.get("handle", "")
     check("handle е само латиница", bool(handle) and handle.isascii(), handle)
@@ -299,10 +337,21 @@ def main() -> int:
     check("несъществуващ пост → 404", status == 404, f"HTTP {status}")
     status, _ = call("PATCH", f"/api/posts/{post_id}", {"title": "Хакната"}, token=None)
     check("редакция без токен → 401", status == 401, f"HTTP {status}")
-    status, other = call(
+    other_email = f"other.{random.randint(1000, 9999)}@smartprice.test"
+    status, other_reg = call(
         "POST", "/api/auth/register",
-        {"email": f"other.{random.randint(1000,9999)}@smartprice.test", "password": password, "name": "Друг Тестов"},
+        {"email": other_email, "password": password, "name": "Друг Тестов"},
     )
+    other_dev_code = other_reg.get("devCode")
+    if other_dev_code:
+        status, other = call(
+            "POST", "/api/auth/verify-email", {"email": other_email, "code": other_dev_code}
+        )
+    else:
+        mark_verified_in_db(other_email)
+        status, other = call(
+            "POST", "/api/auth/login", {"email": other_email, "password": password}
+        )
     other_token = other["accessToken"]
     status, _ = call("PATCH", f"/api/posts/{post_id}", {"title": "Хакната от друг"}, token=other_token)
     check("редакция от чужд профил → 403", status == 403, f"HTTP {status}")

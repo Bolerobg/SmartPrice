@@ -234,6 +234,32 @@ export interface AuthResponse {
   profile: UserProfile;
 }
 
+/** Отговорът при регистрация: НЯМА токени, докато имейлът не се потвърди. */
+export interface RegisterResponse {
+  requiresVerification: true;
+  email: string;
+  /** Дали сървърът изобщо може да праща имейли (RESEND_API_KEY) */
+  emailSent: boolean;
+  message: string;
+  /** Връща се САМО в dev режим (EXPOSE_DEV_CODES=true извън production). */
+  devCode?: string;
+}
+
+export interface ResendCodeResponse {
+  sent: boolean;
+  emailSent: boolean;
+  alreadyVerified?: boolean;
+  message: string;
+  devCode?: string;
+}
+
+export interface ForgotPasswordResponse {
+  ok: true;
+  emailSent: boolean;
+  message: string;
+  devCode?: string;
+}
+
 export interface FeedResponse {
   items: PostItem[];
   total: number;
@@ -256,6 +282,7 @@ export interface CommunityStats {
 export interface FeatureFlags {
   ocr: boolean;
   payments: boolean;
+  mail: boolean;
   ocrModel: string | null;
 }
 
@@ -343,7 +370,7 @@ export const api = {
   features: () => rawRequest<FeatureFlags>('/api/health/features', { auth: false }),
 
   register: (input: { email: string; password: string; name: string; city?: string }) =>
-    rawRequest<AuthResponse>('/api/auth/register', {
+    rawRequest<RegisterResponse>('/api/auth/register', {
       method: 'POST',
       body: input,
       auth: false,
@@ -351,6 +378,38 @@ export const api = {
 
   login: (input: { email: string; password: string }) =>
     rawRequest<AuthResponse>('/api/auth/login', { method: 'POST', body: input, auth: false }),
+
+  /** Потвърждава имейла с кода от писмото и влиза директно. */
+  verifyEmail: (input: { email: string; code: string }) =>
+    rawRequest<AuthResponse>('/api/auth/verify-email', {
+      method: 'POST',
+      body: input,
+      auth: false,
+    }),
+
+  /** Иска нов код (потвърждение или нова парола). */
+  resendCode: (input: { email: string; purpose: 'email_verify' | 'password_reset' }) =>
+    rawRequest<ResendCodeResponse>('/api/auth/resend-code', {
+      method: 'POST',
+      body: input,
+      auth: false,
+    }),
+
+  /** Заявка за код за нова парола. Отговорът е еднакъв за познат и непознат имейл. */
+  forgotPassword: (input: { email: string }) =>
+    rawRequest<ForgotPasswordResponse>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: input,
+      auth: false,
+    }),
+
+  /** Задава нова парола с кода от писмото и влиза директно. */
+  resetPassword: (input: { email: string; code: string; newPassword: string }) =>
+    rawRequest<AuthResponse>('/api/auth/reset-password', {
+      method: 'POST',
+      body: input,
+      auth: false,
+    }),
 
   me: () => rawRequest<{ profile: UserProfile }>('/api/auth/me'),
 

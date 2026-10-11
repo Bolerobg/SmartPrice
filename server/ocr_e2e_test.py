@@ -15,6 +15,9 @@ import urllib.request
 
 from PIL import Image, ImageDraw, ImageFont
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sp_test_helpers import register_and_login  # noqa: E402
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "https://smart.lookthis.online"
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -105,18 +108,15 @@ def main():
         print("   OCR НЕ е включен — няма смисъл да продължавам.")
         return 1
 
-    # --- 1. Регистрация ---
+    # --- 1. Регистрация + потвърждение по имейл ---
     email = f"ocr.{random.randint(10000, 99999)}@smartprice.test"
-    status, body = request(
-        "POST",
-        "/api/auth/register",
-        body={"email": email, "password": "TestParola123", "name": "ОCR Тестов", "city": "София"},
+    status, body, token = register_and_login(
+        BASE, email, "TestParola123", "ОCR Тестов"
     )
-    print(f"\n1. Регистрация -> {status}")
-    if status != 201:
+    print(f"\n1. Регистрация и потвърждение -> {status}")
+    if not token:
         print("   ", body)
         return 1
-    token = json.loads(body)["accessToken"]
 
     # --- 2. Генериране на бележката ---
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_test_receipt.jpg")
