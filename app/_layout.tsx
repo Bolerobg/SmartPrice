@@ -10,6 +10,10 @@ import { AppProvider, useApp } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/src/auth/AuthContext';
 import { AddToHomeScreenModal } from '@/components/AddToHomeScreenModal';
 import { DonationModal } from '@/components/DonationModal';
+import { AlertHost } from '@/components/AlertHost';
+// Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
+// Импортът е само за страничния ефект и трябва да е преди първия Alert.alert.
+import '@/lib/alertHost';
 import { ONBOARDING_SEEN_KEY } from './(auth)/onboarding';
 import { COLORS } from '@/constants/theme';
 
@@ -209,6 +213,8 @@ export default function RootLayout() {
               />
             </Stack>
                         <DonationModal />
+            {/* Модалите за Alert.alert() — на web вградената функция е празна */}
+            <AlertHost />
           </View>
         </AuthGate>
       </AppProvider>

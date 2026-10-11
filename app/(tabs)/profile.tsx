@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   SafeAreaView,
@@ -21,11 +22,37 @@ import { useAuth } from '@/src/auth/AuthContext';
 
 export default function ProfileScreen() {
   const { userProfile, posts, openDonationModal, refreshAll, openAddToHome } = useApp();
-  const { logout } = useAuth();
+  const { logout, refreshProfile } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'badges' | 'bookmarks' | 'donations'>(
     'badges'
   );
+
+  // „Обнови данните от сървъра“ — тегли наново И профила (дарения, значки,
+  // спестени), не само потока. Иначе при натискане на екрана на профила
+  // визуално не се променяше нищо и изглеждаше, че бутонът не работи.
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [justRefreshed, setJustRefreshed] = useState(false);
+
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setJustRefreshed(false);
+    try {
+      await Promise.all([refreshAll(), refreshProfile()]);
+      setJustRefreshed(true);
+      setTimeout(() => setJustRefreshed(false), 2600);
+    } catch (err) {
+      Alert.alert(
+        'Не успя да се обнови',
+        err instanceof Error && err.message
+          ? err.message
+          : 'Провери връзката с интернет и опитай пак.'
+      );
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Показваме реда „сложи на началния екран“ само в браузър и само ако още
   // не е добавено — в истинското приложение е излишно.
@@ -121,27 +148,36 @@ export default function ProfileScreen() {
               </Text>
             </TouchableOpacity>
 
-            {!userProfile.isSupporter ? (
-              <TouchableOpacity
-                style={styles.testNudgeBtn}
-                onPress={() => void refreshAll()}
+            <TouchableOpacity
+              style={[styles.testNudgeBtn, isRefreshing && { opacity: 0.65 }]}
+              onPress={() => void handleRefresh()}
+              disabled={isRefreshing}
+              activeOpacity={0.85}
+            >
+              {isRefreshing ? (
+                <ActivityIndicator size="small" color={COLORS.goldBright} />
+              ) : (
+                <Ionicons
+                  name={justRefreshed ? 'checkmark-circle' : 'refresh-outline'}
+                  size={16}
+                  color={justRefreshed ? COLORS.greenBright : COLORS.goldBright}
+                />
+              )}
+              <Text
+                style={[
+                  styles.testNudgeBtnText,
+                  justRefreshed && { color: COLORS.greenBright },
+                ]}
               >
-                <Ionicons name="refresh-outline" size={16} color={COLORS.goldBright} />
-                <Text style={styles.testNudgeBtnText}>
-                  Обнови данните от сървъра
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.testNudgeBtn}
-                onPress={() => void refreshAll()}
-              >
-                <Ionicons name="refresh" size={16} color={COLORS.textSecondary} />
-                <Text style={[styles.testNudgeBtnText, { color: COLORS.textSecondary }]}>
-                  Обнови даренията
-                </Text>
-              </TouchableOpacity>
-            )}
+                {isRefreshing
+                  ? 'Обновява…'
+                  : justRefreshed
+                    ? 'Обновено ✓'
+                    : userProfile.isSupporter
+                      ? 'Обнови даренията'
+                      : 'Обнови данните от сървъра'}
+              </Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.testNudgeBtn}
