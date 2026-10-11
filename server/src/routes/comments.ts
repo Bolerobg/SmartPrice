@@ -45,7 +45,7 @@ export default async function commentRoutes(app: FastifyInstance) {
     const text =
       input.text.trim() ||
       (input.reportedPrice
-        ? `Актуална снимка с цена: ${input.reportedPrice.toFixed(2)} лв.`
+        ? `Актуална снимка с цена: ${input.reportedPrice.toFixed(2)} €`
         : 'Прикачена снимка с цена');
 
     if (!text.trim() && !input.imageUrl) {

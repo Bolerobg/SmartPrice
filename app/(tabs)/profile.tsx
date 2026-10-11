@@ -55,7 +55,7 @@ export default function ProfileScreen() {
           <View style={styles.statsGrid}>
             <View style={styles.statBox}>
               <Text style={[styles.statVal, { color: COLORS.greenBright }]}>
-                {userProfile.personalSavedBgn} лв.
+                {userProfile.personalSavedBgn} €
               </Text>
               <Text style={styles.statLbl}>Лично спестени</Text>
             </View>
@@ -93,7 +93,7 @@ export default function ProfileScreen() {
               </Text>
               <Text style={styles.monetizationSub}>
                 {userProfile.isSupporter
-                  ? `Общо дарени през Stripe: ${userProfile.totalDonatedBgn.toFixed(2)} лв. Благодарим ти за подкрепата!`
+                  ? `Общо дарени през Stripe: ${userProfile.totalDonatedBgn.toFixed(2)} € Благодарим ти за подкрепата!`
                   : `Приложението пита периодично (на всеки 3 действия или по таймер), докато не направиш дарение през Stripe.`}
               </Text>
             </View>
@@ -290,7 +290,7 @@ export default function ProfileScreen() {
                       Stripe ID: {don.paymentIntentId} • {don.createdAt}
                     </Text>
                   </View>
-                  <Text style={styles.donAmount}>{don.amountBgn.toFixed(2)} лв.</Text>
+                  <Text style={styles.donAmount}>{don.amountBgn.toFixed(2)} €</Text>
                 </View>
               ))
             )}

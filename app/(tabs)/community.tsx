@@ -49,7 +49,7 @@ export default function CommunityScreen() {
             <View>
               <Text style={styles.heroLabel}>СПЕСТЕНИ ПАРИ НА ОБЩНОСТТА</Text>
               <Text style={styles.heroBigAmount}>
-                {totalCommunitySavedAllPosts.toLocaleString('bg-BG')} лв.
+                {totalCommunitySavedAllPosts.toLocaleString('bg-BG')} €
               </Text>
             </View>
             <View style={styles.heroTrophyCircle}>
@@ -104,7 +104,7 @@ export default function CommunityScreen() {
 
           <View style={styles.fundingFooter}>
             <Text style={styles.fundingNumbers}>
-              Събрани: <Text style={{ color: COLORS.goldBright, fontWeight: '800' }}>{currentRaisedBgn} лв.</Text> от {monthlyGoalBgn} лв.
+              Събрани: <Text style={{ color: COLORS.goldBright, fontWeight: '800' }}>{currentRaisedBgn} €</Text> от {monthlyGoalBgn} €
             </Text>
 
             <TouchableOpacity
@@ -171,7 +171,7 @@ export default function CommunityScreen() {
 
                 <View style={styles.leaderSavedCol}>
                   <Text style={styles.leaderSavedAmount}>
-                    {user.communitySavedBgn.toLocaleString('bg-BG')} лв.
+                    {user.communitySavedBgn.toLocaleString('bg-BG')} €
                   </Text>
                   <Text style={styles.leaderSavedLabel}>спестени</Text>
                 </View>

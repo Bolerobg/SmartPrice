@@ -33,7 +33,7 @@ export function formatRelativeTime(iso: string | undefined | null): string {
   return date.toLocaleDateString('bg-BG', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-export function formatMoney(amount: number, currency = 'лв.'): string {
+export function formatMoney(amount: number, currency = '€'): string {
   if (!Number.isFinite(amount)) return `0.00 ${currency}`;
   return `${amount.toFixed(2)} ${currency}`;
 }
@@ -62,7 +62,7 @@ export function unitLabel(unitType?: string): string {
 
 export function formatPricePerUnit(price: number, unitType?: string): string {
   const label = unitLabel(unitType);
-  return label ? `${price.toFixed(2)} лв./${label}` : `${price.toFixed(2)} лв.`;
+  return label ? `${price.toFixed(2)} €/${label}` : `${price.toFixed(2)} €`;
 }
 
 /** Колко стара е една цена (за „потвърдена днес“). */

@@ -117,7 +117,7 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
     }
 
     // Ако общността няма данни за този продукт, НЕ измисляме „обичайна цена“.
-    // Преди тук имаше твърдо зададени стойности (зехтин 24 лв., нощувка 120 лв.),
+    // Преди тук имаше твърдо зададени стойности (зехтин 24 €, нощувка 120 €),
     // които приложението представяше като факт.
     if (matchingPrices.length === 0) {
       return {
@@ -144,7 +144,7 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
       return {
         status: 'green' as const,
         headline: `🟢 ОТЛИЧНА ЦЕНА! (-${diffPercent}% под ${baselineLabel})`,
-        detail: `Средната цена е ~${baselineAvg.toFixed(2)} лв. Спестяваш около ${(baselineAvg - val).toFixed(2)} лв.!`,
+        detail: `Средната цена е ~${baselineAvg.toFixed(2)} € Спестяваш около ${(baselineAvg - val).toFixed(2)} €!`,
         cheapestMatch,
       };
     }
@@ -152,9 +152,9 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
       return {
         status: 'red' as const,
         headline: `🔴 ВНИМАНИЕ: ВИСОКА НАДЦЕНКА (+${diffPercent}%)`,
-        detail: `Обичайната цена е ~${baselineAvg.toFixed(2)} лв.${
+        detail: `Обичайната цена е ~${baselineAvg.toFixed(2)} €${
           cheapestMatch
-            ? ` В „${cheapestMatch.place}“ (${cheapestMatch.city}) е засечено за ${cheapestMatch.price.toFixed(2)} лв.`
+            ? ` В „${cheapestMatch.place}“ (${cheapestMatch.city}) е засечено за ${cheapestMatch.price.toFixed(2)} €`
             : ''
         }`,
         cheapestMatch,
@@ -163,8 +163,8 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
 
     return {
       status: 'neutral' as const,
-      headline: `🟡 НОРМАЛНА ПАЗАРНА ЦЕНА (~${baselineAvg.toFixed(2)} лв.)`,
-      detail: `Цената от ${val.toFixed(2)} лв. е близка до ${baselineLabel}.`,
+      headline: `🟡 НОРМАЛНА ПАЗАРНА ЦЕНА (~${baselineAvg.toFixed(2)} €)`,
+      detail: `Цената от ${val.toFixed(2)} € е близка до ${baselineLabel}.`,
       cheapestMatch,
     };
   }, [allPosts, checkItemName, checkPriceInput, stats]);
@@ -208,21 +208,21 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
             <View style={styles.metricPill}>
               <Text style={styles.metricLabel}>Средна цена</Text>
               <Text style={styles.metricVal}>
-                {stats.avgPrice.toFixed(2)} лв.
+                {stats.avgPrice.toFixed(2)} €
               </Text>
             </View>
 
             <View style={styles.metricPill}>
               <Text style={styles.metricLabel}>Най-евтино</Text>
               <Text style={[styles.metricVal, { color: COLORS.greenBright }]}>
-                {stats.minPost.pricePaid.toFixed(2)} лв.
+                {stats.minPost.pricePaid.toFixed(2)} €
               </Text>
             </View>
 
             <View style={styles.metricPill}>
               <Text style={styles.metricLabel}>Най-скъпо</Text>
               <Text style={[styles.metricVal, { color: COLORS.redBright }]}>
-                {stats.maxPost.pricePaid.toFixed(2)} лв.
+                {stats.maxPost.pricePaid.toFixed(2)} €
               </Text>
             </View>
 
@@ -238,7 +238,7 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
             💡 <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>AI Съвет:</Text>{' '}
             {searchQuery.trim()
               ? `За „${searchQuery.trim()}“ открихме ${stats.greenCount} оферти и ${stats.redCount} сигнала за капан.`
-              : `Най-изгодната находка в момента е в „${stats.bestDeal.placeName}“ (${stats.bestDeal.city}) за ${stats.bestDeal.pricePaid.toFixed(2)} лв.`}
+              : `Най-изгодната находка в момента е в „${stats.bestDeal.placeName}“ (${stats.bestDeal.city}) за ${stats.bestDeal.pricePaid.toFixed(2)} €`}
           </Text>
         </>
       )}
@@ -259,7 +259,7 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
             />
             <TextInput
               style={[styles.checkerInput, { flex: 0.9 }]}
-              placeholder="Цена (лв.)"
+              placeholder="Цена (€)"
               placeholderTextColor={COLORS.textMuted}
               keyboardType="decimal-pad"
               value={checkPriceInput}
@@ -270,9 +270,9 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
           {/* Бързи примери за тестване с 1 клик */}
           <View style={styles.sampleChecksRow}>
             {[
-              { label: '☕ Кафе 6.50 лв.', item: 'кафе', price: '6.50' },
-              { label: '💧 Вода 8.00 лв.', item: 'вода', price: '8.00' },
-              { label: '🍲 Обяд 11.50 лв.', item: 'меню', price: '11.50' },
+              { label: '☕ Кафе 6.50 €', item: 'кафе', price: '6.50' },
+              { label: '💧 Вода 8.00 €', item: 'вода', price: '8.00' },
+              { label: '🍲 Обяд 11.50 €', item: 'меню', price: '11.50' },
             ].map((sample) => (
               <TouchableOpacity
                 key={sample.label}

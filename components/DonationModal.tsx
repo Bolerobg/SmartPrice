@@ -162,7 +162,7 @@ export const DonationModal: React.FC = () => {
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>Дарена сума:</Text>
                   <Text style={styles.receiptValue}>
-                    {successInfo.amount.toFixed(2)} лв. {isMonthly ? '(Месечно)' : '(Еднократно)'}
+                    {successInfo.amount.toFixed(2)} € {isMonthly ? '(Месечно)' : '(Еднократно)'}
                   </Text>
                 </View>
                 <View style={styles.receiptRow}>
@@ -228,13 +228,13 @@ export const DonationModal: React.FC = () => {
               {/* Статистика за прозрачност */}
               <View style={styles.impactBanner}>
                 <View style={styles.impactItem}>
-                  <Text style={styles.impactValue}>0 лв.</Text>
+                  <Text style={styles.impactValue}>0 €</Text>
                   <Text style={styles.impactLabel}>От платени реклами</Text>
                 </View>
                 <View style={styles.impactDivider} />
                 <View style={styles.impactItem}>
                   <Text style={[styles.impactValue, { color: COLORS.greenBright }]}>
-                    {userProfile.personalSavedBgn} лв.
+                    {userProfile.personalSavedBgn} €
                   </Text>
                   <Text style={styles.impactLabel}>Твои спестени пари</Text>
                 </View>
@@ -334,7 +334,7 @@ export const DonationModal: React.FC = () => {
 
               {/* Поле за произволна сума */}
               <View style={styles.customAmountBox}>
-                <Text style={styles.customAmountLabel}>Или въведи друга сума (лв.):</Text>
+                <Text style={styles.customAmountLabel}>Или въведи друга сума (€):</Text>
                 <TextInput
                   style={styles.customAmountInput}
                   placeholder="напр. 15"

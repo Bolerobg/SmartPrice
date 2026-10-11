@@ -328,7 +328,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                       🛒 МОЯТ СПИСЪК ({basketComparison.selectedCount} продукта)
                     </Text>
                     <Text style={styles.winnerStoreName}>
-                      Общо по твоите цени: {basketComparison.myTotal.toFixed(2)} лв.
+                      Общо по твоите цени: {basketComparison.myTotal.toFixed(2)} €
                     </Text>
                     {basketComparison.itemsWithCommunityData > 0 ? (
                       <Text style={styles.winnerSavingsSub}>
@@ -338,7 +338,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                         </Text>{' '}
                         от тях общността има по-ниска цена — можеш да спестиш до{' '}
                         <Text style={{ color: COLORS.greenBright, fontWeight: '900' }}>
-                          {basketComparison.totalPotentialSaving.toFixed(2)} лв.
+                          {basketComparison.totalPotentialSaving.toFixed(2)} €
                         </Text>
                       </Text>
                     ) : (
@@ -377,7 +377,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                         </Text>
                         <Text style={styles.storeCardTitle}>Твоята цена</Text>
                         <Text style={styles.storeCardPrice}>
-                          {row.item.myPrice.toFixed(2)} лв.
+                          {row.item.myPrice.toFixed(2)} €
                         </Text>
                         {row.cheapest ? (
                           <>
@@ -397,7 +397,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                                 { fontSize: 13, color: row.saving > 0 ? COLORS.greenBright : COLORS.textSecondary },
                               ]}
                             >
-                              {row.cheapest.price.toFixed(2)} лв.
+                              {row.cheapest.price.toFixed(2)} €
                             </Text>
                           </>
                         ) : (
@@ -426,7 +426,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                   />
                   <TextInput
                     style={[styles.input, { flex: 0.8 }]}
-                    placeholder="Цена лв."
+                    placeholder="Цена €"
                     placeholderTextColor={COLORS.textMuted}
                     keyboardType="decimal-pad"
                     value={customBasketPrice}
@@ -475,7 +475,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                         </Text>
                       </Text>
                       <Text style={styles.basketItemPrices}>
-                        Твоята цена: {item.myPrice.toFixed(2)} лв.
+                        Твоята цена: {item.myPrice.toFixed(2)} €
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -553,7 +553,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                       />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.smallLabel}>Цена на етикета (лв.):</Text>
+                      <Text style={styles.smallLabel}>Цена на етикета (€):</Text>
                       <TextInput
                         style={styles.input}
                         keyboardType="decimal-pad"
@@ -585,7 +585,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                       />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.smallLabel}>Цена на етикета (лв.):</Text>
+                      <Text style={styles.smallLabel}>Цена на етикета (€):</Text>
                       <TextInput
                         style={styles.input}
                         keyboardType="decimal-pad"
@@ -646,7 +646,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                             fontWeight: '900',
                           }}
                         >
-                          {shrinkAnalysis.perKgA.toFixed(2)} лв./
+                          {shrinkAnalysis.perKgA.toFixed(2)} €/
                           {unitMode === 'g_kg' ? 'кг' : 'л'}
                         </Text>
                       </View>
@@ -663,7 +663,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                               fontWeight: '900',
                             }}
                           >
-                            {shrinkAnalysis.perKgB.toFixed(2)} лв./
+                            {shrinkAnalysis.perKgB.toFixed(2)} €/
                             {unitMode === 'g_kg' ? 'кг' : 'л'}
                           </Text>
                         </View>
@@ -692,7 +692,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.smallLabel}>
-                        Макс. цена (лв., по избор):
+                        Макс. цена (€, по избор):
                       </Text>
                       <TextInput
                         style={styles.input}
@@ -795,7 +795,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                         <View style={{ flex: 1 }}>
                           <Text style={styles.alertTitle}>
                             „{alert.keyword}“{' '}
-                            {alert.maxPrice ? `под ${alert.maxPrice} лв.` : ''}
+                            {alert.maxPrice ? `под ${alert.maxPrice} €` : ''}
                           </Text>
                           <Text style={styles.alertMeta}>
                             📍 {alert.city} •{' '}
@@ -839,7 +839,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                               {m.polarity === 'green' ? '🟢' : '🔴'} {m.title}
                             </Text>
                             <Text style={styles.matchRowPrice}>
-                              {m.pricePaid.toFixed(2)} лв. →
+                              {m.pricePaid.toFixed(2)} € →
                             </Text>
                           </TouchableOpacity>
                         ))}

@@ -269,13 +269,13 @@ export default function AddPostScreen() {
         const firstItem = extracted.items[0]?.name || 'Продукт';
         setTitle(
           polarity === 'green'
-            ? `Супер находка: ${firstItem} за общо ${extracted.totalAmount.toFixed(2)} лв.!`
-            : `Внимание в ${extracted.merchantName}: ${extracted.totalAmount.toFixed(2)} лв. сметка!`
+            ? `Супер находка: ${firstItem} за общо ${extracted.totalAmount.toFixed(2)} €!`
+            : `Внимание в ${extracted.merchantName}: ${extracted.totalAmount.toFixed(2)} € сметка!`
         );
       }
       if (!description.trim()) {
         const summaryLines = extracted.items
-          .map((i) => `${i.name} (${i.totalPrice.toFixed(2)} лв.)`)
+          .map((i) => `${i.name} (${i.totalPrice.toFixed(2)} €)`)
           .join(', ');
         setDescription(
           polarity === 'green'
@@ -311,8 +311,8 @@ export default function AddPostScreen() {
     const finalTitle =
       title.trim() ||
       (isGreen
-        ? `Топ цена в ${finalPlace}: ${numericPrice.toFixed(2)} лв.!`
-        : `Внимание в ${finalPlace}: ${numericPrice.toFixed(2)} лв.!`);
+        ? `Топ цена в ${finalPlace}: ${numericPrice.toFixed(2)} €!`
+        : `Внимание в ${finalPlace}: ${numericPrice.toFixed(2)} €!`);
     const numericRef = referencePrice.trim()
       ? Number(referencePrice.replace(',', '.'))
       : undefined;
@@ -526,13 +526,13 @@ export default function AddPostScreen() {
                 <View style={styles.livePriceNumbers}>
                   <Text style={[styles.livePriceMain, { color: accentColor }]}>
                     {!isNaN(parsedPrice) && parsedPrice > 0
-                      ? `${parsedPrice.toFixed(2)} лв.`
+                      ? `${parsedPrice.toFixed(2)} €`
                       : 'Въведи цена долу'}
                   </Text>
                   {!isNaN(parsedRef) && parsedRef > 0 && (
                     <Text style={styles.livePriceRef}>
                       {isGreen ? 'вместо ' : 'реална: '}
-                      {parsedRef.toFixed(2)} лв.
+                      {parsedRef.toFixed(2)} €
                     </Text>
                   )}
                 </View>
@@ -621,7 +621,7 @@ export default function AddPostScreen() {
         {/* СТЪПКА 2: ЦЕНИ */}
         <View style={styles.priceInputsRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.label}>2. Цена от снимката (лв.) *</Text>
+            <Text style={styles.label}>2. Цена от снимката (€) *</Text>
             <TextInput
               style={[
                 styles.input,
@@ -637,7 +637,7 @@ export default function AddPostScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>
-              {isGreen ? 'Стара/обичайна (лв.):' : 'Реална стойност (лв.):'}
+              {isGreen ? 'Стара/обичайна (€):' : 'Реална стойност (€):'}
             </Text>
             <TextInput
               style={styles.input}
@@ -734,7 +734,7 @@ export default function AddPostScreen() {
                   ЦЕНА ЗА 1 {unitShortLabel.toUpperCase()}
                 </Text>
                 <Text style={{ color: COLORS.accentCyan, fontSize: 14, fontWeight: '900' }}>
-                  {livePricePerUnit.toFixed(2)} лв.
+                  {livePricePerUnit.toFixed(2)} €
                 </Text>
               </View>
             )}
@@ -839,8 +839,8 @@ export default function AddPostScreen() {
               }}
             >
               {isGreen
-                ? `Умна оценка: Спестяване от ${Math.abs(parsedRef - parsedPrice).toFixed(2)} лв. (-${liveDiffPercent}% спрямо нормалната цена)!`
-                : `Умна оценка: Надценка от +${Math.abs(parsedPrice - parsedRef).toFixed(2)} лв. (+${liveDiffPercent}% над реалната стойност)!`}
+                ? `Умна оценка: Спестяване от ${Math.abs(parsedRef - parsedPrice).toFixed(2)} € (-${liveDiffPercent}% спрямо нормалната цена)!`
+                : `Умна оценка: Надценка от +${Math.abs(parsedPrice - parsedRef).toFixed(2)} € (+${liveDiffPercent}% над реалната стойност)!`}
             </Text>
           </View>
         )}
@@ -1093,8 +1093,8 @@ export default function AddPostScreen() {
           style={styles.input}
           placeholder={
             isGreen
-              ? 'напр. Прясна риба + салата само за 14.90 лв.!'
-              : 'напр. 9.80 лв. за малка вода и 15% скрита такса!'
+              ? 'напр. Прясна риба + салата само за 14.90 €!'
+              : 'напр. 9.80 € за малка вода и 15% скрита такса!'
           }
           placeholderTextColor={COLORS.textMuted}
           value={title}

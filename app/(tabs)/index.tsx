@@ -238,7 +238,7 @@ export default function FeedScreen() {
           <Text style={styles.brandSub} numberOfLines={1}>
             Общността спести{' '}
             <Text style={styles.savedHighlight}>
-              {totalCommunitySavedAllPosts.toLocaleString('bg-BG')} лв.
+              {totalCommunitySavedAllPosts.toLocaleString('bg-BG')} €
             </Text>
           </Text>
         </View>
@@ -687,7 +687,7 @@ export default function FeedScreen() {
                 100% независими • Без платени ревюта
               </Text>
               <Text style={styles.nudgeSubtitle} numberOfLines={2}>
-                Ти все още не си дарил. Подкрепи ни през Stripe от 5 лв. →
+                Ти все още не си дарил. Подкрепи ни през Stripe от 2 € →
               </Text>
             </View>
           </View>

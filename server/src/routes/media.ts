@@ -148,8 +148,9 @@ async function callOpenRouter(imageDataUrl: string, categoryHint?: string, polar
     date: str(parsed.date, 40),
     time: str(parsed.time, 20),
     totalAmount: Number(totalAmount.toFixed(2)),
-    currency: currencyLabel(parsed.currency === 'EUR' ? 'EUR' : 'BGN'),
-    currencyCode: parsed.currency === 'EUR' ? 'EUR' : 'BGN',
+    // Валутата по подразбиране е EUR — България е в еврозоната.
+    currency: currencyLabel(parsed.currency === 'BGN' ? 'BGN' : 'EUR'),
+    currencyCode: parsed.currency === 'BGN' ? 'BGN' : 'EUR',
     confidenceScore: Math.min(1, Math.max(0, num(parsed.confidenceScore, 0))),
     verifiedByAi: true,
     items,

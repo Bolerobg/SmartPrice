@@ -454,7 +454,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setAuthProfile(result.profile);
         if (result.marked && result.savedAmount > 0) {
           void recordUserInteraction(
-            `Този пост ти спести ${result.savedAmount.toFixed(2)} лв.! Ако SmartPrice ти помага, подкрепи ни с дарение.`
+            `Този пост ти спести ${result.savedAmount.toFixed(2)} €! Ако SmartPrice ти помага, подкрепи ни с дарение.`
           );
         }
         return result.savedAmount;

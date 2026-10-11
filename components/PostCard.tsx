@@ -324,7 +324,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
                 </Text>
                 <Text style={styles.receiptMiniHighlight} numberOfLines={1}>
                   {highlightedReceiptItem.highlightReason ||
-                    `${highlightedReceiptItem.name}: ${highlightedReceiptItem.totalPrice.toFixed(2)} лв.`}
+                    `${highlightedReceiptItem.name}: ${highlightedReceiptItem.totalPrice.toFixed(2)} €`}
                 </Text>
               </View>
             </View>
