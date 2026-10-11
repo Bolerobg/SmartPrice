@@ -172,10 +172,24 @@ stripe listen --forward-to http://127.0.0.1:4000/api/donations/webhook
 ## Тестове
 
 ```bash
-python server/smoke_test.py              # срещу http://127.0.0.1:4000
-python server/smoke_test.py http://...   # срещу друг адрес
+# 89 проверки: auth, права, постове, реакции, коментари, цени, аларми, класация
+python server/smoke_test.py https://smart.lookthis.online
+
+# реален OCR: генерира бележка, качва я, разчита я
+python server/ocr_e2e_test.py
+
+# реални плащания: създава истински Stripe Checkout сесии (без плащане)
+python server/payment_e2e_test.py
+
+# webhook: подписва синтетично събитие и проверява целия път до значката
+python server/webhook_e2e_test.py https://smart.lookthis.online whsec_XXXX
 ```
 
-Покрива: автентикация и права (401/403/404/409/422), кирилица, публикации,
+Всичките работят и срещу `http://127.0.0.1:4000` (локално, без Cloudflare).
+Забележка: срещу публичния домейн тестовете трябва да изпращат истински
+`User-Agent`, защото Cloudflare блокира `Python-urllib` с 403.
+
+Покриват: автентикация и права (401/403/404/409/422), кирилица, публикации,
 реакции по полярност, „спести ми пари“ с реална сума, коментари, история на цени,
-отметки, аларми, класация, статистики и честните 503 при липсващ ключ.
+отметки, аларми, класация, статистики, реалния OCR, реалния Stripe Checkout и
+webhook-а (подпис → проверка → `succeeded` → значка, с idempotency и replay защита).

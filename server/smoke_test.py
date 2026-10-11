@@ -246,7 +246,15 @@ def main() -> int:
     check("броят постове е реален", stats["totalPosts"] >= 7, str(stats["totalPosts"]))
     check("green+red = всички", stats["greenPosts"] + stats["redPosts"] == stats["totalPosts"])
     check("потребителите са реални", stats["contributors"] >= 4, str(stats["contributors"]))
-    check("събрани средства не са измислени", stats["raisedThisMonthBgn"] == 0, str(stats["raisedThisMonthBgn"]))
+    # Старата версия на приложението показваше твърдо „Събрани 580 от 800 лв.“.
+    # Сега стойността идва от базата (сумата на успешните дарения този месец),
+    # затова проверяваме, че е реално число и НЕ е старата измислена константа.
+    raised = stats["raisedThisMonthBgn"]
+    check(
+        "събрани средства са реални (не твърдо 580)",
+        isinstance(raised, (int, float)) and raised >= 0 and raised != 580,
+        str(raised),
+    )
     status, board = call("GET", "/api/community/leaderboard")
     check("класация → 200", status == 200, f"HTTP {status}")
     check("в класацията има само хора с постове", len(board["items"]) >= 3, str(len(board["items"])))
