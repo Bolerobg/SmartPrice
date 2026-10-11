@@ -302,20 +302,23 @@ export const CITIES = [
   'Якоруда',
 ];
 
+/**
+ * ВАЖНО (валута): България е в еврозоната и Stripe вече НЕ приема BGN —
+ * връща „The currency bgn is no longer supported. Use eur instead.“
+ * Затова даренията са в евро.
+ */
 export const DONATION_TIERS = [
   {
     id: 'coffee',
-    amountBgn: 5,
-    amountEur: 2.5,
+    amount: 2,
     emoji: '☕',
     title: 'Едно кафе',
-    subtitle: 'Поддържа сървърите и AI скенера за 50 бележки',
+    subtitle: 'Поддържа сървърите и OCR скенера за 50 бележки',
     badgeName: 'Поддръжник',
   },
   {
     id: 'guardian',
-    amountBgn: 10,
-    amountEur: 5.0,
+    amount: 5,
     emoji: '🛡️',
     title: 'Пазител на Цените',
     subtitle: 'Най-популярен избор! Отключва Златна Значка в профила',
@@ -324,8 +327,7 @@ export const DONATION_TIERS = [
   },
   {
     id: 'legend',
-    amountBgn: 25,
-    amountEur: 12.5,
+    amount: 10,
     emoji: '🚀',
     title: 'Легенда на Общността',
     subtitle: 'Помага приложението да остане 100% без реклами и платени ревюта',

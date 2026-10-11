@@ -7,12 +7,15 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "api:up": "docker compose up -d --build",
+    "api:down": "docker compose down",
+    "api:logs": "docker compose logs -f api",
+    "api:test": "python server/smoke_test.py"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@supabase/supabase-js": "^2.46.1",
     "expo": "^57.0.0",
     "expo-asset": "~57.0.19",
     "expo-blur": "~57.0.3",
@@ -34,7 +37,6 @@
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
-    "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "^0.21.2",
     "react-native-worklets": "0.10.1"
   },

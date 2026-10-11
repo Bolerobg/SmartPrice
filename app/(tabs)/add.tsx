@@ -85,6 +85,7 @@ export default function AddPostScreen() {
   const [pricePaid, setPricePaid] = useState<string>('');
   const [referencePrice, setReferencePrice] = useState<string>('');
   const [unitQuantity, setUnitQuantity] = useState<string>('');
+  const [unitType, setUnitType] = useState<'g' | 'kg' | 'ml' | 'l' | 'pcs'>('g');
   const [isShrinkflation, setIsShrinkflation] = useState<boolean>(false);
   const [isFakePromo, setIsFakePromo] = useState<boolean>(false);
   const [imageUri, setImageUri] = useState<string>(SAMPLE_PHOTOS.restaurants);
@@ -114,9 +115,13 @@ export default function AddPostScreen() {
         setPlaceName((prev) => prev.trim() || info.detectedPlaceName || '');
       }
       setLocationDetectedLabel(
-        info.source === 'photo_exif'
-          ? '📍 Автоматично засечено от EXIF локацията на снимката'
-          : '📍 Автоматично засечен магазин и адрес по GPS'
+        !info.hasRealCoordinates
+          ? '📍 Няма GPS достъп — градът е предположен, провери го'
+          : info.source === 'photo_exif'
+            ? '📍 Засечено от EXIF локацията на снимката'
+            : info.detectedPlaceName
+              ? '📍 Засечен обект и адрес по GPS'
+              : '📍 Засечен адрес по GPS (обектът не е разпознат)'
       );
     } finally {
       setIsDetectingLocation(false);
@@ -246,7 +251,6 @@ export default function AddPostScreen() {
     try {
       const extracted = await analyzeReceiptImage({
         imageUri: selectedReceiptUri,
-        imageBase64: base64,
         category,
         polarity,
       });
@@ -258,24 +262,20 @@ export default function AddPostScreen() {
         setPlaceName(extracted.merchantName);
       }
       setPricePaid(String(extracted.totalAmount));
-      if (!referencePrice.trim()) {
-        setReferencePrice(
-          polarity === 'green'
-            ? String(Math.round(extracted.totalAmount * 1.65))
-            : String(Math.round(extracted.totalAmount * 0.52))
-        );
-      }
+      // ВАЖНО: не измисляме „стара/обичайна цена“. Преди кодът слагаше
+      // totalAmount × 1.65 и после показваше фалшива оценка на спестяване.
+      // Референсната цена се попълва само от потребителя.
       if (!title.trim()) {
         const firstItem = extracted.items[0]?.name || 'Продукт';
         setTitle(
           polarity === 'green'
-            ? `Супер находка: ${firstItem} за общо ${extracted.totalAmount.toFixed(2)} лв.!`
-            : `Внимание в ${extracted.merchantName}: ${extracted.totalAmount.toFixed(2)} лв. сметка!`
+            ? `Супер находка: ${firstItem} за общо ${extracted.totalAmount.toFixed(2)} €!`
+            : `Внимание в ${extracted.merchantName}: ${extracted.totalAmount.toFixed(2)} € сметка!`
         );
       }
       if (!description.trim()) {
         const summaryLines = extracted.items
-          .map((i) => `${i.name} (${i.totalPrice.toFixed(2)} лв.)`)
+          .map((i) => `${i.name} (${i.totalPrice.toFixed(2)} €)`)
           .join(', ');
         setDescription(
           polarity === 'green'
@@ -311,8 +311,8 @@ export default function AddPostScreen() {
     const finalTitle =
       title.trim() ||
       (isGreen
-        ? `Топ цена в ${finalPlace}: ${numericPrice.toFixed(2)} лв.!`
-        : `Внимание в ${finalPlace}: ${numericPrice.toFixed(2)} лв.!`);
+        ? `Топ цена в ${finalPlace}: ${numericPrice.toFixed(2)} €!`
+        : `Внимание в ${finalPlace}: ${numericPrice.toFixed(2)} €!`);
     const numericRef = referencePrice.trim()
       ? Number(referencePrice.replace(',', '.'))
       : undefined;
@@ -366,8 +366,7 @@ export default function AddPostScreen() {
         pricePaid: numericPrice,
         referencePrice: numericRef && !isNaN(numericRef) ? numericRef : undefined,
         unitQuantity: !isNaN(numericUnitQty) && numericUnitQty > 0 ? numericUnitQty : undefined,
-        unitType: !isNaN(numericUnitQty) && numericUnitQty > 0 ? 'g' : undefined,
-        pricePerKgOrLiter: computedPricePerKg,
+        unitType: !isNaN(numericUnitQty) && numericUnitQty > 0 ? unitType : undefined,
         isShrinkflation,
         isFakePromo,
         imageUri: imageUri || SAMPLE_PHOTOS[category],
@@ -413,13 +412,18 @@ export default function AddPostScreen() {
   const parsedPrice = Number(pricePaid.replace(',', '.'));
   const parsedRef = Number(referencePrice.replace(',', '.'));
   const parsedUnitQty = Number(unitQuantity.replace(',', '.'));
-  const livePricePerKg =
+  // Цена за единица: г/мл се нормират към 1 кг/1 л, бр. си остава за брой.
+  const livePricePerUnit =
     !isNaN(parsedPrice) &&
     parsedPrice > 0 &&
     !isNaN(parsedUnitQty) &&
     parsedUnitQty > 0
-      ? Number(((parsedPrice / parsedUnitQty) * 1000).toFixed(2))
+      ? unitType === 'g' || unitType === 'ml'
+        ? Number(((parsedPrice / parsedUnitQty) * 1000).toFixed(2))
+        : Number((parsedPrice / parsedUnitQty).toFixed(2))
       : null;
+  const unitShortLabel =
+    unitType === 'g' || unitType === 'kg' ? 'кг' : unitType === 'pcs' ? 'бр.' : 'л';
   const liveDiffPercent =
     !isNaN(parsedPrice) &&
     parsedPrice > 0 &&
@@ -522,13 +526,13 @@ export default function AddPostScreen() {
                 <View style={styles.livePriceNumbers}>
                   <Text style={[styles.livePriceMain, { color: accentColor }]}>
                     {!isNaN(parsedPrice) && parsedPrice > 0
-                      ? `${parsedPrice.toFixed(2)} лв.`
+                      ? `${parsedPrice.toFixed(2)} €`
                       : 'Въведи цена долу'}
                   </Text>
                   {!isNaN(parsedRef) && parsedRef > 0 && (
                     <Text style={styles.livePriceRef}>
                       {isGreen ? 'вместо ' : 'реална: '}
-                      {parsedRef.toFixed(2)} лв.
+                      {parsedRef.toFixed(2)} €
                     </Text>
                   )}
                 </View>
@@ -617,7 +621,7 @@ export default function AddPostScreen() {
         {/* СТЪПКА 2: ЦЕНИ */}
         <View style={styles.priceInputsRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.label}>2. Цена от снимката (лв.) *</Text>
+            <Text style={styles.label}>2. Цена от снимката (€) *</Text>
             <TextInput
               style={[
                 styles.input,
@@ -633,7 +637,7 @@ export default function AddPostScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>
-              {isGreen ? 'Стара/обичайна (лв.):' : 'Реална стойност (лв.):'}
+              {isGreen ? 'Стара/обичайна (€):' : 'Реална стойност (€):'}
             </Text>
             <TextInput
               style={styles.input}
@@ -661,18 +665,59 @@ export default function AddPostScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: '700' }}>
-                ⚖️ Грамаж или обем (гр./мл — по избор):
+                ⚖️ Грамаж / обем / брой (по избор):
               </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 5 }}>
+                {(
+                  [
+                    { id: 'g', label: 'грама' },
+                    { id: 'kg', label: 'кг' },
+                    { id: 'ml', label: 'мл' },
+                    { id: 'l', label: 'литри' },
+                    { id: 'pcs', label: 'брой' },
+                  ] as const
+                ).map((option) => {
+                  const active = unitType === option.id;
+                  return (
+                    <TouchableOpacity
+                      key={option.id}
+                      onPress={() => setUnitType(option.id)}
+                      style={{
+                        backgroundColor: active ? COLORS.accentIndigo : COLORS.bgCardElevated,
+                        borderWidth: 1,
+                        borderColor: active ? COLORS.accentIndigo : COLORS.borderSubtle,
+                        borderRadius: 9,
+                        paddingHorizontal: 9,
+                        paddingVertical: 5,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: active ? COLORS.white : COLORS.textSecondary,
+                          fontSize: 11,
+                          fontWeight: active ? '800' : '600',
+                        }}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
               <TextInput
-                style={[styles.input, { marginTop: 4, paddingVertical: 8 }]}
-                placeholder="напр. 400 (за автоматична цена на 1 кг/л)"
+                style={[styles.input, { marginTop: 5, paddingVertical: 8 }]}
+                placeholder={
+                  unitType === 'pcs'
+                    ? 'напр. 10 (за цена за брой)'
+                    : `напр. 400 (за автоматична цена за 1 ${unitShortLabel})`
+                }
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="decimal-pad"
                 value={unitQuantity}
                 onChangeText={setUnitQuantity}
               />
             </View>
-            {livePricePerKg !== null && (
+            {livePricePerUnit !== null && (
               <View
                 style={{
                   backgroundColor: 'rgba(6, 182, 212, 0.14)',
@@ -686,10 +731,10 @@ export default function AddPostScreen() {
                 }}
               >
                 <Text style={{ color: COLORS.textMuted, fontSize: 9.5, fontWeight: '800' }}>
-                  ЦЕНА ЗА 1 КГ/Л
+                  ЦЕНА ЗА 1 {unitShortLabel.toUpperCase()}
                 </Text>
                 <Text style={{ color: COLORS.accentCyan, fontSize: 14, fontWeight: '900' }}>
-                  {livePricePerKg.toFixed(2)} лв.
+                  {livePricePerUnit.toFixed(2)} €
                 </Text>
               </View>
             )}
@@ -794,8 +839,8 @@ export default function AddPostScreen() {
               }}
             >
               {isGreen
-                ? `Умна оценка: Спестяване от ${Math.abs(parsedRef - parsedPrice).toFixed(2)} лв. (-${liveDiffPercent}% спрямо нормалната цена)!`
-                : `Умна оценка: Надценка от +${Math.abs(parsedPrice - parsedRef).toFixed(2)} лв. (+${liveDiffPercent}% над реалната стойност)!`}
+                ? `Умна оценка: Спестяване от ${Math.abs(parsedRef - parsedPrice).toFixed(2)} € (-${liveDiffPercent}% спрямо нормалната цена)!`
+                : `Умна оценка: Надценка от +${Math.abs(parsedPrice - parsedRef).toFixed(2)} € (+${liveDiffPercent}% над реалната стойност)!`}
             </Text>
           </View>
         )}
@@ -1048,8 +1093,8 @@ export default function AddPostScreen() {
           style={styles.input}
           placeholder={
             isGreen
-              ? 'напр. Прясна риба + салата само за 14.90 лв.!'
-              : 'напр. 9.80 лв. за малка вода и 15% скрита такса!'
+              ? 'напр. Прясна риба + салата само за 14.90 €!'
+              : 'напр. 9.80 € за малка вода и 15% скрита такса!'
           }
           placeholderTextColor={COLORS.textMuted}
           value={title}

@@ -20,6 +20,7 @@ import { ReceiptModalCard } from '@/components/ReceiptModalCard';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
+import { formatRelativeTime } from '@/src/lib/format';
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -506,7 +507,7 @@ export default function PostDetailScreen() {
                     color: COLORS.textPrimary,
                     fontSize: 13,
                   }}
-                  placeholder="Въведи новата цена в магазина (лв.)..."
+                  placeholder="Въведи новата цена в магазина (€)..."
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="decimal-pad"
                   value={newReportedPrice}
@@ -583,7 +584,7 @@ export default function PostDetailScreen() {
                       <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>
                         {h.reportedBy}
                       </Text>{' '}
-                      ({h.recordedAt})
+                      ({formatRelativeTime(h.recordedAt)})
                     </Text>
                     <Text
                       style={{
@@ -592,7 +593,7 @@ export default function PostDetailScreen() {
                         fontWeight: '900',
                       }}
                     >
-                      {h.price.toFixed(2)} лв.
+                      {h.price.toFixed(2)} €
                     </Text>
                   </View>
                 ))}
@@ -622,7 +623,7 @@ export default function PostDetailScreen() {
             />
             <Text style={styles.bigHelpedBtnText} numberOfLines={2}>
               {post.userMarkedHelped
-                ? `Отбелязано! Общо спестени ${post.communitySavedBgn} лв. от ${post.helpedCount} души`
+                ? `Отбелязано! Общо спестени ${post.communitySavedBgn} € от ${post.helpedCount} души`
                 : `${isGreen ? '💰 Тази оферта ми спести пари!' : '🛡️ Този сигнал ме спаси от капан!'} (${post.helpedCount})`}
             </Text>
           </TouchableOpacity>
@@ -632,7 +633,7 @@ export default function PostDetailScreen() {
             style={styles.supportPromptStrip}
             onPress={() =>
               openDonationModal(
-                `Благодарение на сигнала за „${post.placeName}“, общността вече си е спестила ${post.communitySavedBgn} лв.! Подкрепи SmartPrice чрез Stripe.`
+                `Благодарение на сигнала за „${post.placeName}“, общността вече си е спестила ${post.communitySavedBgn} €! Подкрепи SmartPrice чрез Stripe.`
               )
             }
           >
@@ -686,7 +687,7 @@ export default function PostDetailScreen() {
                               color={COLORS.greenBright}
                             />
                             <Text style={styles.commentPriceTagText}>
-                              Заснета цена: {c.reportedPrice.toFixed(2)} лв.
+                              Заснета цена: {c.reportedPrice.toFixed(2)} €
                             </Text>
                           </View>
                         )}
@@ -709,7 +710,7 @@ export default function PostDetailScreen() {
               />
             ) : null}
             <View style={{ flex: 1 }}>
-              <Text style={styles.commentAttachLabel}>Цена на снимката (лв.):</Text>
+              <Text style={styles.commentAttachLabel}>Цена на снимката (€):</Text>
               <TextInput
                 style={styles.commentPriceInput}
                 placeholder="напр. 12.50"

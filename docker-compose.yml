@@ -1,0 +1,76 @@
+name: smartprice
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: smartprice-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-smartprice}"
+      POSTGRES_USER: "${POSTGRES_USER:-smartprice}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      # 5432 и 5433 на хоста са заети от други проекти → ползваме 5434
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5434}:5432"
+    volumes:
+      - smartprice_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smartprice} -d ${POSTGRES_DB:-smartprice}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: smartprice-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      PORT: "4000"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-smartprice}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-smartprice}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required}"
+      JWT_ACCESS_TTL: "${JWT_ACCESS_TTL:-900}"
+      JWT_REFRESH_TTL: "${JWT_REFRESH_TTL:-2592000}"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:4000}"
+      UPLOAD_DIR: "/data/uploads"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-12}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENROUTER_BASE_URL: "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}"
+      OCR_MODEL: "${OCR_MODEL:-google/gemini-2.5-flash}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
+      STRIPE_CURRENCY: "${STRIPE_CURRENCY:-bgn}"
+      SEED_DEMO_DATA: "${SEED_DEMO_DATA:-true}"
+    ports:
+      # API_HOST_BIND=0.0.0.0 позволява достъп от телефон в същата WiFi мрежа.
+      # По подразбиране е само localhost (по-безопасно).
+      - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-4000}:4000"
+    volumes:
+      - smartprice_uploads:/data/uploads
+
+  # Web приложението (Expo export) + nginx, който проксира /api и /uploads
+  # към API-то. Всичко излиза на един домейн през Cloudflare тунела.
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        EXPO_PUBLIC_API_URL: ${PUBLIC_BASE_URL:-https://smart.lookthis.online}
+        EXPO_PUBLIC_DEEP_LINK_SCHEME: ${EXPO_PUBLIC_DEEP_LINK_SCHEME:-smartprice}
+    container_name: smart
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-3030}:80"
+
+volumes:
+  smartprice_pgdata:
+  smartprice_uploads:

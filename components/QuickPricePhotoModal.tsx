@@ -154,7 +154,7 @@ export const QuickPricePhotoModal: React.FC<QuickPricePhotoModalProps> = ({
   const handlePublish = async () => {
     const numericPrice = Number(pricePaid.replace(',', '.'));
     if (!pricePaid.trim() || isNaN(numericPrice) || numericPrice <= 0) {
-      Alert.alert('Въведи цена', 'Моля, напиши цената от снимката (в лв.).');
+      Alert.alert('Въведи цена', 'Моля, напиши цената от снимката (в €).');
       return;
     }
     if (!itemTitle.trim() && !placeName.trim()) {
@@ -170,8 +170,8 @@ export const QuickPricePhotoModal: React.FC<QuickPricePhotoModalProps> = ({
     const finalTitle =
       itemTitle.trim() ||
       (isGreen
-        ? `Топ цена в ${finalPlace}: ${numericPrice.toFixed(2)} лв.!`
-        : `Висока цена в ${finalPlace}: ${numericPrice.toFixed(2)} лв.!`);
+        ? `Топ цена в ${finalPlace}: ${numericPrice.toFixed(2)} €!`
+        : `Висока цена в ${finalPlace}: ${numericPrice.toFixed(2)} €!`);
 
     const numericRef =
       referencePrice.trim() !== ''
@@ -210,8 +210,8 @@ export const QuickPricePhotoModal: React.FC<QuickPricePhotoModalProps> = ({
         description:
           note.trim() ||
           (isGreen
-            ? `Споделена снимка с реална цена (${numericPrice.toFixed(2)} лв.) от ${finalPlace}${finalAddress ? ` (${finalAddress})` : ''}, ${city}.`
-            : `Внимание! Снимана цена от ${numericPrice.toFixed(2)} лв. в ${finalPlace}${finalAddress ? ` (${finalAddress})` : ''}, ${city}.`),
+            ? `Споделена снимка с реална цена (${numericPrice.toFixed(2)} €) от ${finalPlace}${finalAddress ? ` (${finalAddress})` : ''}, ${city}.`
+            : `Внимание! Снимана цена от ${numericPrice.toFixed(2)} € в ${finalPlace}${finalAddress ? ` (${finalAddress})` : ''}, ${city}.`),
         placeName: finalPlace,
         city,
         address: finalAddress,
@@ -319,8 +319,8 @@ export const QuickPricePhotoModal: React.FC<QuickPricePhotoModalProps> = ({
                   </Text>
                   <Text style={[styles.livePriceValue, { color: accentColor }]}>
                     {!isNaN(parsedPrice) && parsedPrice > 0
-                      ? `${parsedPrice.toFixed(2)} лв.`
-                      : '0.00 лв.'}
+                      ? `${parsedPrice.toFixed(2)} €`
+                      : '0.00 €'}
                   </Text>
                 </View>
                 {diffPercent !== null && (
@@ -401,7 +401,7 @@ export const QuickPricePhotoModal: React.FC<QuickPricePhotoModalProps> = ({
             {/* Полета за цена */}
             <View style={styles.priceRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.inputLabel}>Цена от снимката (лв.) *</Text>
+                <Text style={styles.inputLabel}>Цена от снимката (€) *</Text>
                 <TextInput
                   style={[
                     styles.priceInputBig,
@@ -417,7 +417,7 @@ export const QuickPricePhotoModal: React.FC<QuickPricePhotoModalProps> = ({
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.inputLabel}>
-                  {isGreen ? 'Стара/нормална (лв.)' : 'Реална цена (лв.)'}
+                  {isGreen ? 'Стара/нормална (€)' : 'Реална цена (€)'}
                 </Text>
                 <TextInput
                   style={styles.input}

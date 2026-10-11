@@ -1,0 +1,15 @@
+# Контекстът за билд на web образа не трябва да включва тези неща
+node_modules
+.git
+.gitignore
+.expo
+dist
+dist-web
+web-build
+server/node_modules
+server/dist
+.env
+.env.*
+!.env.example
+*.log
+tsc-out.txt

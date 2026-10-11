@@ -1,0 +1,223 @@
+import { many, one } from '../db.js';
+import { mapPost, type CommentRow, type PostRow, type PriceHistoryRow, type ReceiptItemRow, type ReceiptRow } from './mappers.js';
+
+export type SortMode = 'newest' | 'best_savings' | 'lowest_price' | 'highest_price' | 'most_helped';
+
+export interface FeedFilters {
+  postId?: string;
+  polarity?: 'green' | 'red';
+  category?: string;
+  city?: string;
+  q?: string;
+  authorId?: string;
+  bookmarkedBy?: string;
+  sort?: SortMode;
+  limit: number;
+  offset: number;
+}
+
+const SORTS: Record<SortMode, string> = {
+  newest: 'p.created_at desc',
+  best_savings: 'abs(coalesce(p.reference_price, p.price_paid) - p.price_paid) desc nulls last',
+  lowest_price: 'p.price_paid asc',
+  highest_price: 'p.price_paid desc',
+  most_helped: 'p.helped_count desc, p.created_at desc',
+};
+
+interface Where {
+  clauses: string[];
+  values: unknown[];
+}
+
+function buildWhere(filters: FeedFilters): Where {
+  const clauses: string[] = [`p.status = 'published'`];
+  const values: unknown[] = [];
+
+  const bind = (value: unknown): string => {
+    values.push(value);
+    return `$${values.length}`;
+  };
+
+  if (filters.postId) clauses.push(`p.id = ${bind(filters.postId)}`);
+  if (filters.polarity) clauses.push(`p.polarity = ${bind(filters.polarity)}`);
+  if (filters.category && filters.category !== 'all') {
+    clauses.push(`p.category = ${bind(filters.category)}`);
+  }
+  if (filters.city && filters.city !== 'Всички градове') {
+    clauses.push(`lower(p.city) = lower(${bind(filters.city)})`);
+  }
+  if (filters.authorId) clauses.push(`p.author_id = ${bind(filters.authorId)}`);
+
+  if (filters.q && filters.q.trim().length > 0) {
+    const like = `%${filters.q.trim()}%`;
+    const p = bind(like);
+    clauses.push(`(
+      p.title ilike ${p}
+      or p.description ilike ${p}
+      or p.place_name ilike ${p}
+      or p.city ilike ${p}
+      or coalesce(p.address, '') ilike ${p}
+      or p.platform_tag ilike ${p}
+      or coalesce(p.custom_platform_label, '') ilike ${p}
+      or coalesce(p.custom_category_label, '') ilike ${p}
+      or array_to_string(p.tags, ' ') ilike ${p}
+      or a.name ilike ${p}
+      or a.handle ilike ${p}
+      or p.price_paid::text ilike ${p}
+      or exists (
+        select 1 from receipts rc
+        join receipt_items ri on ri.receipt_id = rc.id
+        where rc.post_id = p.id
+          and (ri.name ilike ${p} or coalesce(ri.highlight_reason, '') ilike ${p})
+      )
+      or exists (
+        select 1 from comments c
+        where c.post_id = p.id and c.status = 'published' and c.body ilike ${p}
+      )
+    )`);
+  }
+
+  if (filters.bookmarkedBy) {
+    clauses.push(
+      `exists (select 1 from post_bookmarks b where b.post_id = p.id and b.user_id = ${bind(filters.bookmarkedBy)})`
+    );
+  }
+
+  return { clauses, values };
+}
+
+const RECEIPT_SELECT = `
+  select rc.*, p.image_url as receipt_image_url
+    from receipts rc
+    join posts p on p.id = rc.post_id
+   where rc.post_id = any($1::uuid[])
+`;
+
+/**
+ * Зарежда постове + цялата им свързана информация наведнъж (без N+1),
+ * добавяйки „моето“ състояние (реакция, отметка, потвърждение, helped).
+ */
+export async function loadPosts(filters: FeedFilters, userId: string | null) {
+  const where = buildWhere(filters);
+  const sortSql = SORTS[filters.sort ?? 'newest'];
+
+  const limitPlaceholder = `$${where.values.length + 1}`;
+  const offsetPlaceholder = `$${where.values.length + 2}`;
+
+  const rows = await many<PostRow>(
+    `select v.*
+       from v_posts_full v
+       join posts p on p.id = v.id
+       join profiles a on a.id = v.author_id
+      where ${where.clauses.join(' and ')}
+      order by ${sortSql}
+      limit ${limitPlaceholder} offset ${offsetPlaceholder}`,
+    [...where.values, filters.limit, filters.offset]
+  );
+
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return [];
+
+  const [history, receipts, items, comments] = await Promise.all([
+    many<PriceHistoryRow>(
+      `select ph.*, pr.name as reporter_name
+         from price_history ph
+         left join profiles pr on pr.id = ph.reported_by
+        where ph.post_id = any($1::uuid[])
+        order by ph.created_at asc`,
+      [ids]
+    ),
+    many<ReceiptRow & { receipt_image_url: string | null }>(RECEIPT_SELECT, [ids]),
+    many<ReceiptItemRow & { receipt_id: string }>(
+      `select ri.*
+         from receipt_items ri
+         join receipts rc on rc.id = ri.receipt_id
+        where rc.post_id = any($1::uuid[])
+        order by ri.position asc`,
+      [ids]
+    ),
+    many<CommentRow>(
+      `select c.*, a.name as author_name, a.handle as author_handle,
+              a.avatar_url as author_avatar, a.is_supporter as author_is_supporter
+         from comments c
+         join profiles a on a.id = c.author_id
+        where c.post_id = any($1::uuid[]) and c.status = 'published'
+        order by c.created_at asc`,
+      [ids]
+    ),
+  ]);
+
+  let myReactions = new Map<string, string>();
+  let myHelped = new Set<string>();
+  let myBookmarks = new Set<string>();
+  let myConfirmed = new Set<string>();
+
+  if (userId) {
+    const [reactions, helped, bookmarks, confirmed] = await Promise.all([
+      many<{ post_id: string; reaction_key: string }>(
+        'select post_id, reaction_key from post_reactions where user_id = $1 and post_id = any($2::uuid[])',
+        [userId, ids]
+      ),
+      many<{ post_id: string }>(
+        'select post_id from post_helped_marks where user_id = $1 and post_id = any($2::uuid[])',
+        [userId, ids]
+      ),
+      many<{ post_id: string }>(
+        'select post_id from post_bookmarks where user_id = $1 and post_id = any($2::uuid[])',
+        [userId, ids]
+      ),
+      many<{ post_id: string }>(
+        `select distinct post_id from price_history
+          where reported_by = $1 and status = 'confirmed' and post_id = any($2::uuid[])`,
+        [userId, ids]
+      ),
+    ]);
+    myReactions = new Map(reactions.map((r) => [r.post_id, r.reaction_key]));
+    myHelped = new Set(helped.map((r) => r.post_id));
+    myBookmarks = new Set(bookmarks.map((r) => r.post_id));
+    myConfirmed = new Set(confirmed.map((r) => r.post_id));
+  }
+
+  function groupBy<T>(list: T[], key: (item: T) => string): Map<string, T[]> {
+    const map = new Map<string, T[]>();
+    for (const row of list) {
+      const k = key(row);
+      const bucket = map.get(k);
+      if (bucket) bucket.push(row);
+      else map.set(k, [row]);
+    }
+    return map;
+  }
+
+  const historyByPost = groupBy(history, (h) => h.post_id);
+  const receiptByPost = new Map(receipts.map((r) => [r.post_id, r]));
+  const itemsByReceipt = groupBy(items, (i) => i.receipt_id);
+  const commentsByPost = groupBy(comments, (c) => c.post_id);
+
+  return rows.map((post) => {
+    const receipt = receiptByPost.get(post.id) ?? null;
+    return mapPost({
+      post,
+      priceHistory: historyByPost.get(post.id) ?? [],
+      receipt,
+      receiptItems: receipt ? itemsByReceipt.get(receipt.id) ?? [] : [],
+      comments: commentsByPost.get(post.id) ?? [],
+      userReaction: myReactions.get(post.id) ?? null,
+      userMarkedHelped: myHelped.has(post.id),
+      isBookmarked: myBookmarks.has(post.id),
+      userConfirmedValidToday: myConfirmed.has(post.id),
+    });
+  });
+}
+
+export async function countPosts(filters: FeedFilters): Promise<number> {
+  const where = buildWhere(filters);
+  const row = await one<{ total: number }>(
+    `select count(*) as total
+       from posts p
+       join profiles a on a.id = p.author_id
+      where ${where.clauses.join(' and ')}`,
+    where.values
+  );
+  return row?.total ?? 0;
+}

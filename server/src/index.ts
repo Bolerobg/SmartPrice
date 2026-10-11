@@ -1,0 +1,186 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import jwt from '@fastify/jwt';
+import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
+import { mkdir } from 'node:fs/promises';
+
+import { env, features, isProd } from './env.js';
+import { closePool, one } from './db.js';
+import { runMigrations } from './migrate.js';
+import { sendError } from './lib/errors.js';
+
+import authRoutes from './routes/auth.js';
+import postRoutes from './routes/posts.js';
+import commentRoutes from './routes/comments.js';
+import mediaRoutes from './routes/media.js';
+import donationRoutes from './routes/donations.js';
+import communityRoutes from './routes/community.js';
+import { seedDemoData } from './seed.js';
+
+export async function buildApp() {
+  const app = Fastify({
+    logger: isProd
+      ? { level: 'info' }
+      : { level: 'debug', transport: undefined },
+    bodyLimit: 2 * 1024 * 1024,
+    trustProxy: true,
+  });
+
+  // --- CORS ---------------------------------------------------------------
+  const origins =
+    env.CORS_ORIGINS.trim() === '*'
+      ? true
+      : env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
+  await app.register(cors, { origin: origins, credentials: false });
+
+  // --- JWT ----------------------------------------------------------------
+  await app.register(jwt, {
+    secret: env.JWT_SECRET,
+    sign: { algorithm: 'HS256' },
+  });
+
+  // --- Rate limit ---------------------------------------------------------
+  await app.register(rateLimit, {
+    global: true,
+    max: isProd ? 300 : 2000,
+    timeWindow: '1 minute',
+    errorResponseBuilder: () => ({
+      error: { code: 'rate_limited', message: 'Твърде много заявки. Опитай отново след минута.' },
+    }),
+  });
+
+  // --- Multipart (качване на снимки) --------------------------------------
+  await app.register(multipart, {
+    limits: {
+      fileSize: env.MAX_UPLOAD_MB * 1024 * 1024,
+      files: 1,
+      fields: 10,
+    },
+  });
+
+  // --- Сурово тяло за Stripe webhook-а ------------------------------------
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req, body, done) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = body as Buffer;
+      const text = (body as Buffer).toString('utf8');
+      if (!text) return done(null, {});
+      try {
+        done(null, JSON.parse(text));
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    }
+  );
+
+  // --- Качените снимки ----------------------------------------------------
+  await mkdir(env.UPLOAD_DIR, { recursive: true });
+  await app.register(fastifyStatic, {
+    root: env.UPLOAD_DIR,
+    prefix: '/uploads/',
+    decorateReply: false,
+    maxAge: '7d',
+  });
+
+  // --- Единен формат на грешките ------------------------------------------
+  app.setErrorHandler((err, _req, reply) => {
+    if ((err as { statusCode?: number }).statusCode === 429) {
+      return reply.status(429).send({
+        error: { code: 'rate_limited', message: 'Твърде много заявки. Опитай отново след минута.' },
+      });
+    }
+
+    // Грешки на Fastify с клиентски статус (415, 413, 400...) се връщат както са,
+    // вместо да се превръщат в 500. Така клиентът вижда истинската причина.
+    const status = (err as { statusCode?: number }).statusCode;
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      const code = (err as { code?: string }).code ?? 'bad_request';
+      const isFastifyInternal = typeof code === 'string' && code.startsWith('FST_ERR');
+
+      // Вътрешните грешки на Fastify имат технически текст — даваме разбираемо съобщение.
+      // Всички останали (напр. от Stripe) пазят истинската причина, за да може да се
+      // диагностицира, вместо да се крие зад „Невалидна заявка“.
+      const generic: Record<number, string> = {
+        400: 'Невалидна заявка.',
+        404: 'Няма такъв endpoint.',
+        413: 'Тялото на заявката е твърде голямо.',
+        415: 'Неподдържан тип съдържание. Изпрати Content-Type: application/json.',
+        422: 'Подадените данни са невалидни.',
+      };
+
+      if (!isFastifyInternal) {
+        // eslint-disable-next-line no-console
+        console.error(`[api] ${status} ${code}: ${(err as Error).message}`);
+      }
+
+      return reply.status(status).send({
+        error: {
+          code,
+          message: isFastifyInternal
+            ? generic[status] ?? 'Невалидна заявка.'
+            : (err as Error).message || generic[status] || 'Невалидна заявка.',
+        },
+      });
+    }
+
+    return sendError(reply, err);
+  });
+
+  app.setNotFoundHandler((_req, reply) =>
+    reply.status(404).send({ error: { code: 'not_found', message: 'Няма такъв endpoint.' } })
+  );
+
+  // --- Здраве -------------------------------------------------------------
+  app.get('/api/health', async () => {
+    const db = await one<{ ok: number }>('select 1 as ok');
+    return {
+      status: 'ok',
+      database: db?.ok === 1,
+      features: { ocr: features.ocr, payments: features.payments },
+      time: new Date().toISOString(),
+    };
+  });
+
+  // --- Маршрути -----------------------------------------------------------
+  await app.register(authRoutes);
+  await app.register(postRoutes);
+  await app.register(commentRoutes);
+  await app.register(mediaRoutes);
+  await app.register(donationRoutes);
+  await app.register(communityRoutes);
+
+  return app;
+}
+
+async function main() {
+  await runMigrations();
+
+  if (env.SEED_DEMO_DATA) {
+    await seedDemoData();
+  }
+
+  const app = await buildApp();
+  await app.listen({ port: env.PORT, host: '0.0.0.0' });
+  app.log.info(
+    `SmartPrice API слуша на :${env.PORT} — OCR: ${features.ocr ? 'да' : 'НЕ'}, плащания: ${
+      features.payments ? 'да' : 'НЕ'
+    }`
+  );
+
+  const shutdown = async (signal: string) => {
+    app.log.info(`Получен ${signal} — затварям...`);
+    await app.close().catch(() => undefined);
+    await closePool().catch(() => undefined);
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+}
+
+main().catch((err) => {
+  console.error('[SmartPrice API] Фатална грешка при старт:', err);
+  process.exit(1);
+});

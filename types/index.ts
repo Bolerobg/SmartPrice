@@ -143,7 +143,7 @@ export interface PostItem {
   reactions: PostReactions;
   userReaction?: ReactionKey;
   helpedCount: number; // Брой хора натиснали "Спести ми пари / Спаси ме от капан"
-  communitySavedBgn: number; // Общо спестени лв. на общността от този пост
+  communitySavedBgn: number; // Общо спестени € на общността от този пост
   userMarkedHelped?: boolean;
   isBookmarked?: boolean;
   comments: CommentItem[];

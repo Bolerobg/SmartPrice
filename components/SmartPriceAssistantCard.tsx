@@ -18,15 +18,7 @@ interface SmartPriceAssistantCardProps {
   onApplyQuickQuery: (q: string) => void;
 }
 
-const BENCHMARKS: { keywords: string[]; avgPrice: number; unitLabel: string }[] = [
-  { keywords: ['вода', 'минерална'], avgPrice: 2.5, unitLabel: 'бутилка вода в заведение' },
-  { keywords: ['кафе', 'еспресо', 'капучино'], avgPrice: 3.8, unitLabel: 'кафе / капучино' },
-  { keywords: ['зехтин'], avgPrice: 24.0, unitLabel: '1л студено пресован зехтин' },
-  { keywords: ['меню', 'обяд', 'супа', 'порция'], avgPrice: 14.5, unitLabel: 'обедно меню (супа + основно)' },
-  { keywords: ['нощувка', 'стая', 'хотел', 'airbnb', 'студио'], avgPrice: 120.0, unitLabel: 'нощувка за двама' },
-  { keywords: ['кашкавал', 'сирене'], avgPrice: 19.5, unitLabel: '1 кг сирене / кашкавал' },
-  { keywords: ['диагностика', 'сервиз', 'климатик'], avgPrice: 50.0, unitLabel: 'техническа диагностика / посещение' },
-];
+const BENCHMARKS: { keywords: string[]; avgPrice: number; unitLabel: string }[] = [];
 
 export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = ({
   filteredPosts,
@@ -124,30 +116,26 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
       });
     }
 
-    let baselineAvg = 0;
-    let baselineLabel = 'средната цена в общността';
-    let cheapestMatch: { price: number; place: string; city: string } | null = null;
-
-    if (matchingPrices.length > 0) {
-      baselineAvg =
-        matchingPrices.reduce((acc, m) => acc + m.price, 0) / matchingPrices.length;
-      cheapestMatch = matchingPrices.reduce(
-        (min, m) => (m.price < min.price ? m : min),
-        matchingPrices[0]
-      );
-    } else {
-      const bench = BENCHMARKS.find((b) =>
-        b.keywords.some((kw) => q.includes(kw))
-      );
-      if (bench) {
-        baselineAvg = bench.avgPrice;
-        baselineLabel = `обичайната цена за ${bench.unitLabel}`;
-      } else if (stats) {
-        baselineAvg = stats.avgPrice;
-      } else {
-        baselineAvg = 25;
-      }
+    // Ако общността няма данни за този продукт, НЕ измисляме „обичайна цена“.
+    // Преди тук имаше твърдо зададени стойности (зехтин 24 €, нощувка 120 €),
+    // които приложението представяше като факт.
+    if (matchingPrices.length === 0) {
+      return {
+        status: 'unknown' as const,
+        headline: '🟡 Нямаме данни за тази цена',
+        detail:
+          'Общността още не е публикувала цени за този продукт. Публикувай ти — така следващият потребител ще има с какво да сравни.',
+        cheapestMatch: null,
+      };
     }
+
+    const baselineAvg =
+      matchingPrices.reduce((acc, m) => acc + m.price, 0) / matchingPrices.length;
+    const baselineLabel = `средната цена в общността (${matchingPrices.length} записа)`;
+    const cheapestMatch = matchingPrices.reduce(
+      (min, m) => (m.price < min.price ? m : min),
+      matchingPrices[0]!
+    );
 
     const ratio = (val - baselineAvg) / baselineAvg;
     const diffPercent = Math.round(Math.abs(ratio) * 100);
@@ -156,7 +144,7 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
       return {
         status: 'green' as const,
         headline: `🟢 ОТЛИЧНА ЦЕНА! (-${diffPercent}% под ${baselineLabel})`,
-        detail: `Средната цена е ~${baselineAvg.toFixed(2)} лв. Спестяваш около ${(baselineAvg - val).toFixed(2)} лв.!`,
+        detail: `Средната цена е ~${baselineAvg.toFixed(2)} € Спестяваш около ${(baselineAvg - val).toFixed(2)} €!`,
         cheapestMatch,
       };
     }
@@ -164,9 +152,9 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
       return {
         status: 'red' as const,
         headline: `🔴 ВНИМАНИЕ: ВИСОКА НАДЦЕНКА (+${diffPercent}%)`,
-        detail: `Обичайната цена е ~${baselineAvg.toFixed(2)} лв.${
+        detail: `Обичайната цена е ~${baselineAvg.toFixed(2)} €${
           cheapestMatch
-            ? ` В „${cheapestMatch.place}“ (${cheapestMatch.city}) е засечено за ${cheapestMatch.price.toFixed(2)} лв.`
+            ? ` В „${cheapestMatch.place}“ (${cheapestMatch.city}) е засечено за ${cheapestMatch.price.toFixed(2)} €`
             : ''
         }`,
         cheapestMatch,
@@ -175,8 +163,8 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
 
     return {
       status: 'neutral' as const,
-      headline: `🟡 НОРМАЛНА ПАЗАРНА ЦЕНА (~${baselineAvg.toFixed(2)} лв.)`,
-      detail: `Цената от ${val.toFixed(2)} лв. е близка до ${baselineLabel}.`,
+      headline: `🟡 НОРМАЛНА ПАЗАРНА ЦЕНА (~${baselineAvg.toFixed(2)} €)`,
+      detail: `Цената от ${val.toFixed(2)} € е близка до ${baselineLabel}.`,
       cheapestMatch,
     };
   }, [allPosts, checkItemName, checkPriceInput, stats]);
@@ -220,21 +208,21 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
             <View style={styles.metricPill}>
               <Text style={styles.metricLabel}>Средна цена</Text>
               <Text style={styles.metricVal}>
-                {stats.avgPrice.toFixed(2)} лв.
+                {stats.avgPrice.toFixed(2)} €
               </Text>
             </View>
 
             <View style={styles.metricPill}>
               <Text style={styles.metricLabel}>Най-евтино</Text>
               <Text style={[styles.metricVal, { color: COLORS.greenBright }]}>
-                {stats.minPost.pricePaid.toFixed(2)} лв.
+                {stats.minPost.pricePaid.toFixed(2)} €
               </Text>
             </View>
 
             <View style={styles.metricPill}>
               <Text style={styles.metricLabel}>Най-скъпо</Text>
               <Text style={[styles.metricVal, { color: COLORS.redBright }]}>
-                {stats.maxPost.pricePaid.toFixed(2)} лв.
+                {stats.maxPost.pricePaid.toFixed(2)} €
               </Text>
             </View>
 
@@ -250,7 +238,7 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
             💡 <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>AI Съвет:</Text>{' '}
             {searchQuery.trim()
               ? `За „${searchQuery.trim()}“ открихме ${stats.greenCount} оферти и ${stats.redCount} сигнала за капан.`
-              : `Най-изгодната находка в момента е в „${stats.bestDeal.placeName}“ (${stats.bestDeal.city}) за ${stats.bestDeal.pricePaid.toFixed(2)} лв.`}
+              : `Най-изгодната находка в момента е в „${stats.bestDeal.placeName}“ (${stats.bestDeal.city}) за ${stats.bestDeal.pricePaid.toFixed(2)} €`}
           </Text>
         </>
       )}
@@ -271,7 +259,7 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
             />
             <TextInput
               style={[styles.checkerInput, { flex: 0.9 }]}
-              placeholder="Цена (лв.)"
+              placeholder="Цена (€)"
               placeholderTextColor={COLORS.textMuted}
               keyboardType="decimal-pad"
               value={checkPriceInput}
@@ -282,9 +270,9 @@ export const SmartPriceAssistantCard: React.FC<SmartPriceAssistantCardProps> = (
           {/* Бързи примери за тестване с 1 клик */}
           <View style={styles.sampleChecksRow}>
             {[
-              { label: '☕ Кафе 6.50 лв.', item: 'кафе', price: '6.50' },
-              { label: '💧 Вода 8.00 лв.', item: 'вода', price: '8.00' },
-              { label: '🍲 Обяд 11.50 лв.', item: 'меню', price: '11.50' },
+              { label: '☕ Кафе 6.50 €', item: 'кафе', price: '6.50' },
+              { label: '💧 Вода 8.00 €', item: 'вода', price: '8.00' },
+              { label: '🍲 Обяд 11.50 €', item: 'меню', price: '11.50' },
             ].map((sample) => (
               <TouchableOpacity
                 key={sample.label}

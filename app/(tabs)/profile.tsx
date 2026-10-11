@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   Image,
   SafeAreaView,
   ScrollView,
@@ -12,15 +13,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { PostCard } from '@/components/PostCard';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/src/auth/AuthContext';
 
 export default function ProfileScreen() {
-  const {
-    userProfile,
-    posts,
-    openDonationModal,
-    triggerPeriodicNudgeNow,
-    resetSupporterStatusForDemo,
-  } = useApp();
+  const { userProfile, posts, openDonationModal, refreshAll } = useApp();
+  const { logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'badges' | 'bookmarks' | 'donations'>(
     'badges'
@@ -58,7 +55,7 @@ export default function ProfileScreen() {
           <View style={styles.statsGrid}>
             <View style={styles.statBox}>
               <Text style={[styles.statVal, { color: COLORS.greenBright }]}>
-                {userProfile.personalSavedBgn} лв.
+                {userProfile.personalSavedBgn} €
               </Text>
               <Text style={styles.statLbl}>Лично спестени</Text>
             </View>
@@ -96,7 +93,7 @@ export default function ProfileScreen() {
               </Text>
               <Text style={styles.monetizationSub}>
                 {userProfile.isSupporter
-                  ? `Общо дарени през Stripe: ${userProfile.totalDonatedBgn.toFixed(2)} лв. Благодарим ти за подкрепата!`
+                  ? `Общо дарени през Stripe: ${userProfile.totalDonatedBgn.toFixed(2)} € Благодарим ти за подкрепата!`
                   : `Приложението пита периодично (на всеки 3 действия или по таймер), докато не направиш дарение през Stripe.`}
               </Text>
             </View>
@@ -116,24 +113,43 @@ export default function ProfileScreen() {
             {!userProfile.isSupporter ? (
               <TouchableOpacity
                 style={styles.testNudgeBtn}
-                onPress={triggerPeriodicNudgeNow}
+                onPress={() => void refreshAll()}
               >
-                <Ionicons name="notifications-outline" size={16} color={COLORS.goldBright} />
+                <Ionicons name="refresh-outline" size={16} color={COLORS.goldBright} />
                 <Text style={styles.testNudgeBtnText}>
-                  Тествай периодичното питане
+                  Обнови данните от сървъра
                 </Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
                 style={styles.testNudgeBtn}
-                onPress={resetSupporterStatusForDemo}
+                onPress={() => void refreshAll()}
               >
                 <Ionicons name="refresh" size={16} color={COLORS.textSecondary} />
                 <Text style={[styles.testNudgeBtnText, { color: COLORS.textSecondary }]}>
-                  Нулирай за тест на напомнянето
+                  Обнови даренията
                 </Text>
               </TouchableOpacity>
             )}
+
+            <TouchableOpacity
+              style={styles.testNudgeBtn}
+              onPress={() =>
+                Alert.alert('Изход от профила', 'Сигурен ли си, че искаш да излезеш?', [
+                  { text: 'Отказ', style: 'cancel' },
+                  {
+                    text: 'Излез',
+                    style: 'destructive',
+                    onPress: () => void logout(),
+                  },
+                ])
+              }
+            >
+              <Ionicons name="log-out-outline" size={16} color={COLORS.redBright} />
+              <Text style={[styles.testNudgeBtnText, { color: COLORS.redBright }]}>
+                Излез от профила
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -274,7 +290,7 @@ export default function ProfileScreen() {
                       Stripe ID: {don.paymentIntentId} • {don.createdAt}
                     </Text>
                   </View>
-                  <Text style={styles.donAmount}>{don.amountBgn.toFixed(2)} лв.</Text>
+                  <Text style={styles.donAmount}>{don.amountBgn.toFixed(2)} €</Text>
                 </View>
               ))
             )}
