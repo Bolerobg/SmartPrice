@@ -13,6 +13,7 @@ import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAt, formatPricePerUnit } from '@/src/lib/format';
 import { computePriceStats, priceTrendLabel } from '@/lib/priceHistory';
+import { Avatar } from '@/components/Avatar';
 import { PostItem, ReactionKey } from '@/types';
 
 interface PostCardProps {
@@ -191,7 +192,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
         style={styles.cardBodyTap}
       >
         <View style={styles.headerRow}>
-          <Image source={{ uri: post.author.avatar }} style={styles.avatar} />
+          <Avatar uri={post.author.avatar} name={post.author.name} size={38} />
           <View style={styles.authorMeta}>
             <View style={styles.authorNameRow}>
               <Text style={styles.authorName} numberOfLines={1}>

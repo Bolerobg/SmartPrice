@@ -1,6 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Image,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -11,10 +10,25 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
+import { Avatar } from '@/components/Avatar';
+
+type BoardTab = 'saved' | 'checkers' | 'points';
+
+/** „1 проверка“ / „2 проверки“ — броячите да звучат човешки. */
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+const BOARD_TABS: { key: BoardTab; label: string; icon: string }[] = [
+  { key: 'saved', label: 'Топ спестили', icon: 'pricetags-outline' },
+  { key: 'checkers', label: 'Проверяващи', icon: 'search-outline' },
+  { key: 'points', label: 'Точки доверие', icon: 'star-outline' },
+];
 
 export default function CommunityScreen() {
   const {
     leaderboard,
+    fetchLeaderboard,
     posts,
     totalCommunitySavedAllPosts,
     openDonationModal,
@@ -28,6 +42,38 @@ export default function CommunityScreen() {
   const totalGreenCount = communityStats?.greenPosts ?? posts.filter((p) => p.polarity === 'green').length;
 
   // Реално събраното този месец от Stripe дарения (идва от базата)
+  // Ранглистата се тегли наново при смяна на таба — трите подреждания
+  // показват различни хора, защото има три различни начина да си полезен.
+  const [boardTab, setBoardTab] = useState<BoardTab>('saved');
+  const [board, setBoard] = useState(leaderboard);
+  const [boardLoading, setBoardLoading] = useState(false);
+
+  useEffect(() => {
+    setBoard(leaderboard);
+  }, [leaderboard]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBoardLoading(true);
+    fetchLeaderboard(boardTab)
+      .then((items) => {
+        if (!cancelled) setBoard(items);
+      })
+      .catch(() => {
+        if (!cancelled && boardTab === 'saved') setBoard(leaderboard);
+      })
+      .finally(() => {
+        if (!cancelled) setBoardLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardTab]);
+
+  const weeklyChampion = [...board].sort((a, b) => b.checksLast7d - a.checksLast7d)[0];
+  const showChampion = boardTab === 'checkers' && (weeklyChampion?.checksLast7d ?? 0) > 0;
+
   const monthlyGoalBgn = 800;
   const currentRaisedBgn = communityStats?.raisedThisMonthBgn ?? 0;
   const goalProgress = Math.min(100, Math.round((currentRaisedBgn / monthlyGoalBgn) * 100));
@@ -117,10 +163,68 @@ export default function CommunityScreen() {
           </View>
         </View>
 
-        {/* Ранглиста на Топ Ловците на Цени */}
+        {/* Ранглиста — три начина да си полезен */}
         <Text style={styles.sectionHeading}>🏆 Топ Защитници на Потребителите</Text>
+
+        <View style={styles.boardTabs}>
+          {BOARD_TABS.map((tab) => {
+            const active = boardTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                onPress={() => setBoardTab(tab.key)}
+                activeOpacity={0.85}
+                style={[styles.boardTab, active && styles.boardTabActive]}
+              >
+                <Ionicons
+                  name={tab.icon as never}
+                  size={13}
+                  color={active ? COLORS.black : COLORS.textSecondary}
+                />
+                <Text style={[styles.boardTabText, active && styles.boardTabTextActive]}>
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Проверяващ на седмицата — кой е обиколил най-много места тия дни */}
+        {showChampion && weeklyChampion && (
+          <View style={styles.championCard}>
+            <Text style={styles.championCrown}>👑 ПРОВЕРЯВАЩ НА СЕДМИЦАТА</Text>
+            <View style={styles.championRow}>
+              <Avatar
+                uri={weeklyChampion.avatar}
+                name={weeklyChampion.name}
+                size={42}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.championName} numberOfLines={1}>
+                  {weeklyChampion.name}
+                </Text>
+                <Text style={styles.championMeta}>
+                  {plural(weeklyChampion.checksLast7d, 'проверка', 'проверки')} през последните 7 дни
+                </Text>
+              </View>
+              <View style={styles.championPoints}>
+                <Text style={styles.championPointsValue}>{weeklyChampion.reputationPoints}</Text>
+                <Text style={styles.championPointsLabel}>точки</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         <View style={styles.leaderboardList}>
-          {leaderboard.map((user) => {
+          {boardLoading && board.length === 0 && (
+            <Text style={styles.boardEmpty}>Зареждаме ранглистата…</Text>
+          )}
+          {!boardLoading && board.length === 0 && (
+            <Text style={styles.boardEmpty}>
+              Още никой не е проверявал чужда цена. Първият ще е на върха.
+            </Text>
+          )}
+          {board.map((user) => {
             const isMe = user.id === 'user-me';
             return (
               <View
@@ -148,7 +252,12 @@ export default function CommunityScreen() {
                   </Text>
                 </View>
 
-                <Image source={{ uri: user.avatar }} style={styles.leaderAvatar} />
+                <Avatar
+                  uri={user.avatar}
+                  name={user.name}
+                  size={42}
+                  borderColor={isMe ? COLORS.accentIndigo : undefined}
+                />
 
                 <View style={styles.leaderInfo}>
                   <View style={styles.leaderNameRow}>
@@ -163,17 +272,40 @@ export default function CommunityScreen() {
                       />
                     )}
                   </View>
-                  <Text style={styles.leaderMeta}>
-                    🧾 {user.verifiedReceipts} бележки • 🟢 {user.greenPosts} • 🔴{' '}
-                    {user.redFlagsExposed}
+                  <Text style={styles.leaderMeta} numberOfLines={1}>
+                    {boardTab === 'checkers'
+                      ? `🔍 ${plural(user.priceChecks, 'проверка', 'проверки')} • ✏️ ${plural(user.priceCorrections, 'поправка', 'поправки')}`
+                      : boardTab === 'points'
+                        ? `⭐ ${plural(user.reputationPoints, 'точка', 'точки')} • 🔍 ${plural(user.priceChecks, 'проверка', 'проверки')}`
+                        : `🧾 ${plural(user.verifiedReceipts, 'бележка', 'бележки')} • 🟢 ${user.greenPosts} • 🔴 ${user.redFlagsExposed}`}
                   </Text>
+                  {user.badgeTitle && user.badgeTitle !== 'Ловец на цени' ? (
+                    <Text style={styles.leaderBadge} numberOfLines={1}>
+                      {user.badgeTitle}
+                    </Text>
+                  ) : null}
                 </View>
 
                 <View style={styles.leaderSavedCol}>
-                  <Text style={styles.leaderSavedAmount}>
-                    {user.communitySavedBgn.toLocaleString('bg-BG')} €
+                  <Text
+                    style={[
+                      styles.leaderSavedAmount,
+                      boardTab !== 'saved' && { color: COLORS.goldBright },
+                    ]}
+                  >
+                    {boardTab === 'checkers'
+                      ? `${user.checksLast7d}`
+                      : boardTab === 'points'
+                        ? `${user.reputationPoints}`
+                        : `${user.communitySavedBgn.toLocaleString('bg-BG')} €`}
                   </Text>
-                  <Text style={styles.leaderSavedLabel}>спестени</Text>
+                  <Text style={styles.leaderSavedLabel}>
+                    {boardTab === 'checkers'
+                      ? 'тази седмица'
+                      : boardTab === 'points'
+                        ? 'точки'
+                        : 'спестени'}
+                  </Text>
                 </View>
               </View>
             );
@@ -350,6 +482,70 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 10,
   },
+  boardTabs: {
+    flexDirection: 'row',
+    gap: 7,
+    marginBottom: 12,
+  },
+  boardTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 6,
+  },
+  boardTabActive: {
+    backgroundColor: COLORS.goldBright,
+    borderColor: COLORS.goldBright,
+  },
+  boardTabText: {
+    color: COLORS.textSecondary,
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  boardTabTextActive: { color: COLORS.black },
+
+  championCard: {
+    backgroundColor: COLORS.goldSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 12,
+  },
+  championCrown: {
+    color: COLORS.goldBright,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+    marginBottom: 9,
+  },
+  championRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  championAvatar: { width: 42, height: 42, borderRadius: 21 },
+  championName: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '900' },
+  championMeta: { color: COLORS.textSecondary, fontSize: 11, marginTop: 3 },
+  championPoints: { alignItems: 'flex-end' },
+  championPointsValue: { color: COLORS.goldBright, fontSize: 16, fontWeight: '900' },
+  championPointsLabel: { color: COLORS.textMuted, fontSize: 10 },
+
+  boardEmpty: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    paddingVertical: 14,
+  },
+  leaderBadge: {
+    color: COLORS.accentCyan,
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: 3,
+  },
   leaderboardList: {
     gap: 10,
   },
@@ -402,7 +598,7 @@ const styles = StyleSheet.create({
   },
   leaderMeta: {
     color: COLORS.textSecondary,
-    fontSize: 11.5,
+    fontSize: 11,
     marginTop: 3,
   },
   leaderSavedCol: {

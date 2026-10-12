@@ -18,6 +18,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ReceiptModalCard } from '@/components/ReceiptModalCard';
 import { PublicPostPreview } from '@/components/PublicPostPreview';
 import { PriceHistoryCard } from '@/components/PriceHistoryCard';
+import { Avatar } from '@/components/Avatar';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
@@ -189,7 +190,7 @@ export default function PostDetailScreen() {
         >
           {/* Автор и локация */}
           <View style={styles.authorBox}>
-            <Image source={{ uri: post.author.avatar }} style={styles.avatar} />
+            <Avatar uri={post.author.avatar} name={post.author.name} size={44} />
             <View style={{ flex: 1 }}>
               <View style={styles.authorNameRow}>
                 <Text style={styles.authorName} numberOfLines={1}>
@@ -441,7 +442,7 @@ export default function PostDetailScreen() {
             <View style={styles.commentsList}>
               {post.comments.map((c) => (
                 <View key={c.id} style={styles.commentCard}>
-                  <Image source={{ uri: c.authorAvatar }} style={styles.commentAvatar} />
+                  <Avatar uri={c.authorAvatar} name={c.authorName} size={34} />
                   <View style={{ flex: 1 }}>
                     <View style={styles.commentHeader}>
                       <Text style={styles.commentAuthor} numberOfLines={1}>

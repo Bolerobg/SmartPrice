@@ -25,8 +25,28 @@ const alertSchema = z.object({
 
 export default async function communityRoutes(app: FastifyInstance) {
   // ------------------------------------------------------------ Класация (реални данни)
+  /**
+   * Ранглиста. Има три подреждания, защото има три различни начина да си
+   * полезен: да качиш оферта, която спестява пари; да провериш чужда цена
+   * на място; или просто да трупаш точки доверие.
+   *   • sort=saved    (по подразбиране) — колко пари е спестил на хората
+   *   • sort=checkers — колко цени е проверил на място
+   *   • sort=points   — точки доверие
+   */
   app.get('/api/community/leaderboard', async (req) => {
-    const q = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(req.query);
+    const q = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(100).default(50),
+        sort: z.enum(['saved', 'checkers', 'points']).default('saved'),
+      })
+      .parse(req.query);
+
+    const orderBy =
+      q.sort === 'checkers'
+        ? 'price_checks desc, checks_last_7d desc, reputation_points desc'
+        : q.sort === 'points'
+          ? 'reputation_points desc, price_checks desc'
+          : 'community_saved_bgn desc, verified_receipts desc, reputation_points desc';
 
     const rows = await many<{
       id: string;
@@ -40,17 +60,29 @@ export default async function communityRoutes(app: FastifyInstance) {
       red_flags: number;
       posts_count: number;
       reputation_points: number;
+      price_checks: number;
+      price_corrections: number;
+      checks_last_7d: number;
     }>(
       `select id, name, handle, avatar_url, is_supporter, verified_receipts,
-              community_saved_bgn, green_posts, red_flags, posts_count, reputation_points
+              community_saved_bgn, green_posts, red_flags, posts_count,
+              reputation_points, price_checks, price_corrections, checks_last_7d
          from v_leaderboard
-        where posts_count > 0
-        order by community_saved_bgn desc, verified_receipts desc, reputation_points desc
+        where posts_count > 0 or price_checks > 0
+        order by ${orderBy}
         limit $1`,
       [q.limit]
     );
 
+    const badgeFor = (r: { is_supporter: boolean; price_corrections: number }) =>
+      r.price_corrections >= 5
+        ? 'Коригирал цените ' + r.price_corrections + ' пъти'
+        : r.is_supporter
+          ? 'Пазител на Общността'
+          : 'Ловец на цени';
+
     return {
+      sort: q.sort,
       items: rows.map((r, index) => ({
         id: r.id,
         rank: index + 1,
@@ -62,7 +94,11 @@ export default async function communityRoutes(app: FastifyInstance) {
         communitySavedBgn: r.community_saved_bgn,
         greenPosts: r.green_posts,
         redFlagsExposed: r.red_flags,
-        badgeTitle: r.is_supporter ? 'Пазител на Общността' : 'Ловец на цени',
+        reputationPoints: r.reputation_points,
+        priceChecks: r.price_checks,
+        priceCorrections: r.price_corrections,
+        checksLast7d: r.checks_last_7d,
+        badgeTitle: badgeFor(r),
       })),
     };
   });

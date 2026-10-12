@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import type {
   CategoryId,
   CommentItem,
+  LeaderboardSort,
   LeaderboardUser,
   PlatformTag,
   PostItem,
@@ -493,10 +494,11 @@ export const api = {
 
   communityStats: () => rawRequest<CommunityStats>('/api/community/stats', { auth: false }),
 
-  leaderboard: (limit = 50) =>
-    rawRequest<{ items: LeaderboardUser[] }>(`/api/community/leaderboard?limit=${limit}`, {
-      auth: false,
-    }),
+  leaderboard: (limit = 50, sort: LeaderboardSort = 'saved') =>
+    rawRequest<{ items: LeaderboardUser[]; sort: LeaderboardSort }>(
+      `/api/community/leaderboard?limit=${limit}&sort=${sort}`,
+      { auth: false }
+    ),
 
   publicProfile: (id: string) => rawRequest<{ profile: UserProfile }>(`/api/community/users/${id}`),
 

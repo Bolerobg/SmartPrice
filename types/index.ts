@@ -159,6 +159,8 @@ export interface BadgeItem {
   color: string;
 }
 
+export type LeaderboardSort = 'saved' | 'checkers' | 'points';
+
 export interface LeaderboardUser {
   id: string;
   rank: number;
@@ -170,6 +172,14 @@ export interface LeaderboardUser {
   communitySavedBgn: number;
   greenPosts: number;
   redFlagsExposed: number;
+  /** Точки доверие (трупат се и от проверки на цени). */
+  reputationPoints: number;
+  /** Колко чужди цени е проверил на място. */
+  priceChecks: number;
+  /** Колко от тях са били реални поправки. */
+  priceCorrections: number;
+  /** Проверки през последните 7 дни. */
+  checksLast7d: number;
   badgeTitle: string;
 }
 

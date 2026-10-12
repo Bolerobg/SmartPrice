@@ -29,6 +29,7 @@ import {
 import type {
   CategoryId,
   CommentItem,
+  LeaderboardSort,
   LeaderboardUser,
   PlatformTag,
   PostItem,
@@ -93,6 +94,8 @@ interface AppContextValue {
   posts: PostItem[];
   userProfile: UserProfile;
   leaderboard: LeaderboardUser[];
+  /** Ранглиста с избрано подреждане (за табовете в Общност). */
+  fetchLeaderboard: (sort: LeaderboardSort) => Promise<LeaderboardUser[]>;
   priceAlerts: AlertWithMatches[];
   communityStats: CommunityStats | null;
   features: FeatureFlags | null;
@@ -338,6 +341,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     //     защото тогава вече е усетил ползата.
 
     // ------------------------------------------------------------ Действия
+
+  const fetchLeaderboard = useCallback(async (sort: LeaderboardSort) => {
+    const res = await api.leaderboard(50, sort);
+    return res.items;
+  }, []);
 
   const recordUserInteraction = useCallback(
     async (reasonHint?: string) => {
@@ -685,6 +693,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       posts,
       userProfile,
       leaderboard,
+      fetchLeaderboard,
       priceAlerts,
       communityStats,
       features,
@@ -737,6 +746,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       posts,
       userProfile,
       leaderboard,
+      fetchLeaderboard,
       priceAlerts,
       communityStats,
       features,
