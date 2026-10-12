@@ -379,6 +379,61 @@ export const DonationModal: React.FC = () => {
                 </Text>
               </View>
 
+              {/* Доверие: неща, които българският потребител ПОЗНАВА.
+                  Име на доставчик не помага тук — затова картите, катинарът,
+                  3D Secure и „не пазим данните“ вършат тази работа. */}
+              {paymentsEnabled && (
+                <View style={styles.trustCard}>
+                  <Text style={styles.trustTitle}>Приемаме карти</Text>
+
+                  <View style={styles.brandRow}>
+                    <View style={[styles.brandBadge, { backgroundColor: '#1A1F71' }]}>
+                      <Text style={[styles.brandText, { fontStyle: 'italic' }]}>VISA</Text>
+                    </View>
+                    <View style={[styles.brandBadge, { backgroundColor: '#16181D' }]}>
+                      <View style={styles.mcCircles}>
+                        <View style={[styles.mcCircle, { backgroundColor: '#EB001B' }]} />
+                        <View style={[styles.mcCircle, { backgroundColor: '#F79E1B', marginLeft: -7 }]} />
+                      </View>
+                      <Text style={styles.brandText}>mastercard</Text>
+                    </View>
+                    <View style={[styles.brandBadge, { backgroundColor: '#0F4C9C' }]}>
+                      <Text style={styles.brandText}>Maestro</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.trustRow}>
+                    <Ionicons name="lock-closed" size={14} color={COLORS.greenBright} />
+                    <Text style={styles.trustText}>
+                      <Text style={styles.trustStrong}>Защитено плащане</Text> — данните пътуват
+                      криптирано.
+                    </Text>
+                  </View>
+
+                  <View style={styles.trustRow}>
+                    <Ionicons name="phone-portrait-outline" size={14} color={COLORS.accentCyan} />
+                    <Text style={styles.trustText}>
+                      Потвърждаваш с <Text style={styles.trustStrong}>SMS от банката</Text> (3D Secure).
+                    </Text>
+                  </View>
+
+                  <View style={styles.trustRow}>
+                    <Ionicons name="eye-off-outline" size={14} color={COLORS.accentCyan} />
+                    <Text style={styles.trustText}>
+                      <Text style={styles.trustStrong}>Не пазим данните на картата ти.</Text> Те
+                      остават само в банката.
+                    </Text>
+                  </View>
+
+                  <View style={styles.trustRow}>
+                    <Ionicons name="shield-checkmark" size={14} color={COLORS.goldBright} />
+                    <Text style={styles.trustText}>
+                      Плащаш на страницата на банката — <Text style={styles.trustStrong}>не в приложението</Text>.
+                    </Text>
+                  </View>
+                </View>
+              )}
+
               {pendingSessionId && (
                 <View
                   style={{
@@ -775,6 +830,39 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '800',
   },
+  trustCard: {
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 14,
+    padding: 13,
+    marginTop: 10,
+  },
+  trustTitle: {
+    color: COLORS.textMuted,
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  brandRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 13 },
+  brandBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 7,
+    minWidth: 62,
+  },
+  brandText: { color: COLORS.white, fontSize: 12, fontWeight: '900', letterSpacing: 0.3 },
+  mcCircles: { flexDirection: 'row', alignItems: 'center' },
+  mcCircle: { width: 13, height: 13, borderRadius: 7, opacity: 0.95 },
+  trustRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginTop: 9 },
+  trustText: { flex: 1, color: COLORS.textSecondary, fontSize: 11.5, lineHeight: 17 },
+  trustStrong: { color: COLORS.textPrimary, fontWeight: '800' },
   doneButton: {
     width: '100%',
     backgroundColor: COLORS.greenPrimary,
