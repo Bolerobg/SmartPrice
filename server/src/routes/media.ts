@@ -1,8 +1,4 @@
-import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, unlink } from 'node:fs/promises';
-import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { one } from '../db.js';
@@ -10,6 +6,13 @@ import { env, features } from '../env.js';
 import { requireUserId } from '../lib/auth.js';
 import { badRequest, tooLarge, unavailable } from '../lib/errors.js';
 import { currencyLabel } from '../lib/mappers.js';
+import {
+  getImage,
+  publicUrl,
+  putImage,
+  storageDriver,
+  type StorageDriver,
+} from '../lib/storage.js';
 
 const ALLOWED_MIME = new Map<string, string>([
   ['image/jpeg', 'jpg'],
@@ -173,45 +176,45 @@ export default async function mediaRoutes(app: FastifyInstance) {
 
     const maxBytes = env.MAX_UPLOAD_MB * 1024 * 1024;
     const storedName = `${randomUUID()}.${extension}`;
-    const target = path.join(env.UPLOAD_DIR, storedName);
 
-    await mkdir(env.UPLOAD_DIR, { recursive: true });
-
+    // Събираме файла в паметта (макс. 12 MB по подразбиране) и после го
+    // записваме там, където е избрано — диск или S3. Така и двата пътя
+    // минават през една проверка за размер.
+    const chunks: Buffer[] = [];
     let bytes = 0;
-    let aborted = false;
-    file.file.on('data', (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (bytes > maxBytes) {
-        aborted = true;
-        file.file.destroy(new Error('too_large'));
-      }
-    });
+    let tooBig = false;
 
-    try {
-      await pipeline(file.file, createWriteStream(target));
-    } catch (err) {
-      await unlink(target).catch(() => undefined);
-      if (aborted || (err as Error).message === 'too_large') {
-        throw tooLarge(`Снимката е твърде голяма (макс. ${env.MAX_UPLOAD_MB} MB).`);
+    for await (const chunk of file.file) {
+      const buf = chunk as Buffer;
+      bytes += buf.length;
+      if (bytes > maxBytes) {
+        tooBig = true;
+        file.file.destroy();
+        break;
       }
-      throw err;
+      chunks.push(buf);
     }
 
+    if (tooBig) {
+      throw tooLarge(`Снимката е твърде голяма (макс. ${env.MAX_UPLOAD_MB} MB).`);
+    }
     if (bytes === 0) {
-      await unlink(target).catch(() => undefined);
       throw badRequest('Файлът е празен.');
     }
 
+    await putImage(storedName, Buffer.concat(chunks), file.mimetype);
+
     await one(
-      `insert into uploads (owner_id, stored_name, mime_type, byte_size)
-       values ($1,$2,$3,$4) returning id`,
-      [userId, storedName, file.mimetype, bytes]
+      `insert into uploads (owner_id, stored_name, mime_type, byte_size, storage)
+       values ($1,$2,$3,$4,$5) returning id`,
+      [userId, storedName, file.mimetype, bytes, storageDriver]
     );
 
     return reply.status(201).send({
-      url: `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/uploads/${storedName}`,
+      url: publicUrl(storedName),
       byteSize: bytes,
       mimeType: file.mimetype,
+      storage: storageDriver,
     });
   });
 
@@ -228,19 +231,36 @@ export default async function mediaRoutes(app: FastifyInstance) {
 
     let imageDataUrl = input.imageUrl;
     if (!imageDataUrl.startsWith('data:')) {
-      // Приемаме само наши собствени качени файлове (без SSRF към произволни адреси)
-      const prefix = `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/uploads/`;
-      if (!imageDataUrl.startsWith(prefix)) {
+      // Приемаме само наши собствени качени файлове (без SSRF към произволни
+      // адреси). Снимката може да е на диска ИЛИ в S3 — приемаме и двата адреса.
+      const prefixes = [
+        `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/uploads/`,
+        env.S3_PUBLIC_BASE_URL
+          ? `${env.S3_PUBLIC_BASE_URL.replace(/\/$/, '')}/`
+          : '',
+      ].filter(Boolean);
+
+      const prefix = prefixes.find((p) => imageDataUrl.startsWith(p));
+      if (!prefix) {
         throw badRequest('Снимката трябва да е качена през /api/uploads.');
       }
-      const storedName = imageDataUrl.slice(prefix.length);
-      const upload = await one<{ mime_type: string }>(
-        'select mime_type from uploads where stored_name = $1',
+
+      // Ключът в S3 може да има префикс (напр. `uploads/`) — махаме и него.
+      let storedName = imageDataUrl.slice(prefix.length);
+      const keyPrefix = env.S3_KEY_PREFIX.replace(/^\/+|\/+$/g, '');
+      if (keyPrefix && storedName.startsWith(`${keyPrefix}/`)) {
+        storedName = storedName.slice(keyPrefix.length + 1);
+      }
+
+      const upload = await one<{ mime_type: string; storage: string }>(
+        'select mime_type, storage from uploads where stored_name = $1',
         [storedName]
       );
       if (!upload) throw badRequest('Файлът не е намерен.');
 
-      const buffer = await readFile(path.join(env.UPLOAD_DIR, storedName));
+      // Четем оттам, откъдето е качен — иначе OCR-ът на стари снимки щеше
+      // да се счупи в момента, в който включим S3.
+      const buffer = await getImage(storedName, upload.storage as StorageDriver);
       imageDataUrl = `data:${upload.mime_type};base64,${buffer.toString('base64')}`;
     }
 
