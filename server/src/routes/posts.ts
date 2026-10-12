@@ -210,6 +210,14 @@ export default async function postRoutes(app: FastifyInstance) {
       );
       const id = res.rows[0]!.id;
 
+      // Първата точка от историята на цената. Без нея новите оферти нямаха
+      // „откъде тръгна цената“ и не можеше да се сметне поскъпнало ли е.
+      await client.query(
+        `insert into price_history (post_id, price, status, reported_by)
+         values ($1,$2,'initial',$3)`,
+        [id, input.pricePaid, userId]
+      );
+
       if (input.receipt) {
         const r = input.receipt;
         const receiptRes = await client.query<{ id: string }>(

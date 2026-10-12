@@ -12,6 +12,7 @@ import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAt, formatPricePerUnit } from '@/src/lib/format';
+import { computePriceStats, priceTrendLabel } from '@/lib/priceHistory';
 import { PostItem, ReactionKey } from '@/types';
 
 interface PostCardProps {
@@ -215,6 +216,95 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
               <Text style={styles.postedAtText} numberOfLines={1}>
                 {formatPostedAt(post.createdAt)}
               </Text>
+            </View>
+
+            {/* Жива ли е цената: движила ли се е и кога за последно е проверена.
+                Това кара човека да отвори офертата — и да я провери, ако е минал оттам. */}
+            <View style={styles.liveRow}>
+              {(() => {
+                const stats = computePriceStats(post);
+                const trend = priceTrendLabel(stats);
+                return (
+                  <>
+                    {trend && (
+                      <View
+                        style={[
+                          styles.liveChip,
+                          {
+                            backgroundColor:
+                              stats.direction === 'down'
+                                ? COLORS.greenSoftBg
+                                : COLORS.redSoftBg,
+                            borderColor:
+                              stats.direction === 'down'
+                                ? COLORS.greenBorder
+                                : COLORS.redBorder,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={stats.direction === 'down' ? 'trending-down' : 'trending-up'}
+                          size={11}
+                          color={
+                            stats.direction === 'down'
+                              ? COLORS.greenBright
+                              : COLORS.redBright
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.liveChipText,
+                            {
+                              color:
+                                stats.direction === 'down'
+                                  ? COLORS.greenBright
+                                  : COLORS.redBright,
+                            },
+                          ]}
+                        >
+                          {trend}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View
+                      style={[
+                        styles.liveChip,
+                        {
+                          backgroundColor: stats.isFresh
+                            ? COLORS.greenSoftBg
+                            : COLORS.goldSoftBg,
+                          borderColor: stats.isFresh
+                            ? COLORS.greenBorder
+                            : COLORS.goldBorder,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={stats.isFresh ? 'checkmark-circle' : 'time-outline'}
+                        size={11}
+                        color={stats.isFresh ? COLORS.greenBright : COLORS.goldBright}
+                      />
+                      <Text
+                        style={[
+                          styles.liveChipText,
+                          {
+                            color: stats.isFresh ? COLORS.greenBright : COLORS.goldBright,
+                          },
+                        ]}
+                      >
+                        {stats.daysSinceCheck === null
+                          ? 'непроверена'
+                          : stats.daysSinceCheck === 0
+                            ? 'проверена днес'
+                            : stats.daysSinceCheck === 1
+                              ? 'проверена вчера'
+                              : `непроверена ${stats.daysSinceCheck} дни`}
+                      </Text>
+                    </View>
+                  </>
+                );
+              })()}
             </View>
           </View>
 
@@ -752,6 +842,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flexShrink: 1,
   },
+  liveRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 7,
+  },
+  liveChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  liveChipText: { fontSize: 10, fontWeight: '800' },
   bookmarkBtn: {
     padding: 5,
     flexShrink: 0,

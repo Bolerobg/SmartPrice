@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ReceiptModalCard } from '@/components/ReceiptModalCard';
 import { PublicPostPreview } from '@/components/PublicPostPreview';
+import { PriceHistoryCard } from '@/components/PriceHistoryCard';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
@@ -31,8 +32,6 @@ export default function PostDetailScreen() {
     posts,
     addComment,
     markPostHelpedMe,
-    confirmPriceValidToday,
-    reportUpdatedPrice,
     toggleBookmark,
     openDonationModal,
     openShare,
@@ -43,8 +42,6 @@ export default function PostDetailScreen() {
   const [commentPrice, setCommentPrice] = useState<string>('');
   const [showPriceInput, setShowPriceInput] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
-  const [showUpdatePriceBox, setShowUpdatePriceBox] = useState(false);
-  const [newReportedPrice, setNewReportedPrice] = useState('');
 
   // Гост, дошъл по споделен линк: показваме публичен преглед на офертата.
   // Без това линкът водеше до екран за вход и получателят не виждаше нищо.
@@ -385,236 +382,8 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* История на цената и Потвърждаване на живо */}
-          <View
-            style={{
-              backgroundColor: COLORS.bgCard,
-              borderWidth: 1,
-              borderColor: COLORS.borderStrong,
-              borderRadius: 18,
-              padding: 14,
-              marginBottom: 14,
-              gap: 10,
-            }}
-          >
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1 }}>
-                <Ionicons name="trending-up" size={18} color={COLORS.greenBright} />
-                <Text
-                  style={{
-                    color: COLORS.textPrimary,
-                    fontSize: 13.5,
-                    fontWeight: '800',
-                    flex: 1,
-                  }}
-                >
-                  📊 Актуалност и История на цената
-                </Text>
-              </View>
-              <Text
-                style={{
-                  color: COLORS.greenBright,
-                  fontSize: 11,
-                  fontWeight: '800',
-                }}
-              >
-                {post.lastVerifiedAt || 'Проверено днес'}
-              </Text>
-            </View>
-
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => confirmPriceValidToday(post.id)}
-                style={{
-                  flex: 1,
-                  backgroundColor: post.userConfirmedValidToday
-                    ? COLORS.greenSoftBg
-                    : COLORS.bgCardElevated,
-                  borderWidth: 1,
-                  borderColor: post.userConfirmedValidToday
-                    ? COLORS.greenPrimary
-                    : COLORS.borderSubtle,
-                  borderRadius: 12,
-                  paddingVertical: 10,
-                  paddingHorizontal: 10,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                }}
-              >
-                <Ionicons
-                  name="checkmark-done-circle"
-                  size={16}
-                  color={
-                    post.userConfirmedValidToday
-                      ? COLORS.greenBright
-                      : COLORS.textSecondary
-                  }
-                />
-                <Text
-                  style={{
-                    color: post.userConfirmedValidToday
-                      ? COLORS.greenBright
-                      : COLORS.textPrimary,
-                    fontSize: 11.5,
-                    fontWeight: '800',
-                  }}
-                  numberOfLines={1}
-                >
-                  ✅ Валидна днес ({post.verifiedValidTodayCount || 1})
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => setShowUpdatePriceBox((p) => !p)}
-                style={{
-                  flex: 1,
-                  backgroundColor: showUpdatePriceBox
-                    ? COLORS.goldSoftBg
-                    : COLORS.bgCardElevated,
-                  borderWidth: 1,
-                  borderColor: showUpdatePriceBox
-                    ? COLORS.goldPrimary
-                    : COLORS.borderSubtle,
-                  borderRadius: 12,
-                  paddingVertical: 10,
-                  paddingHorizontal: 10,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                }}
-              >
-                <Ionicons name="sync-circle" size={16} color={COLORS.goldBright} />
-                <Text
-                  style={{
-                    color: COLORS.goldBright,
-                    fontSize: 11.5,
-                    fontWeight: '800',
-                  }}
-                  numberOfLines={1}
-                >
-                  🔄 Променена цена?
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {showUpdatePriceBox && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <TextInput
-                  style={{
-                    flex: 1,
-                    backgroundColor: COLORS.bgCardElevated,
-                    borderWidth: 1,
-                    borderColor: COLORS.goldBorder,
-                    borderRadius: 11,
-                    paddingHorizontal: 12,
-                    paddingVertical: 9,
-                    color: COLORS.textPrimary,
-                    fontSize: 13,
-                  }}
-                  placeholder="Въведи новата цена в магазина (€)..."
-                  placeholderTextColor={COLORS.textMuted}
-                  keyboardType="decimal-pad"
-                  value={newReportedPrice}
-                  onChangeText={setNewReportedPrice}
-                />
-                <TouchableOpacity
-                  onPress={() => {
-                    const num = Number(newReportedPrice.replace(',', '.'));
-                    if (!isNaN(num) && num > 0) {
-                      reportUpdatedPrice(post.id, num);
-                      setNewReportedPrice('');
-                      setShowUpdatePriceBox(false);
-                    }
-                  }}
-                  style={{
-                    backgroundColor: COLORS.goldPrimary,
-                    borderRadius: 11,
-                    paddingHorizontal: 13,
-                    paddingVertical: 10,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: COLORS.black,
-                      fontSize: 12,
-                      fontWeight: '900',
-                    }}
-                  >
-                    Обнови
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Хронология на цената */}
-            <View style={{ gap: 5, marginTop: 2 }}>
-              {(
-                post.priceHistory || [
-                  {
-                    id: 'init',
-                    price: post.pricePaid,
-                    recordedAt: post.createdAt,
-                    reportedBy: post.author.name,
-                    status: 'initial' as const,
-                  },
-                ]
-              )
-                .slice(-4)
-                .map((h) => (
-                  <View
-                    key={h.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      backgroundColor: COLORS.bgCardElevated,
-                      borderRadius: 9,
-                      paddingHorizontal: 10,
-                      paddingVertical: 6,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: COLORS.textSecondary,
-                        fontSize: 11.5,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {h.status === 'confirmed'
-                        ? '✅ Потвърдена от '
-                        : h.status === 'changed'
-                        ? '🔄 Обновена от '
-                        : '📸 Качена от '}
-                      <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>
-                        {h.reportedBy}
-                      </Text>{' '}
-                      ({formatRelativeTime(h.recordedAt)})
-                    </Text>
-                    <Text
-                      style={{
-                        color: accentColor,
-                        fontSize: 12,
-                        fontWeight: '900',
-                      }}
-                    >
-                      {h.price.toFixed(2)} €
-                    </Text>
-                  </View>
-                ))}
-            </View>
-          </View>
+          {/* История на цената + „Беше ли на място?“ */}
+          <PriceHistoryCard post={post} />
 
           {/* Пълна касова бележка (AI OCR) */}
           {post.receipt && (
