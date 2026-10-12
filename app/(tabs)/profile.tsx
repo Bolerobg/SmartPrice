@@ -20,6 +20,7 @@ import { COLORS } from '@/constants/theme';
 import { formatPostedAt } from '@/src/lib/format';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
+import { useRouter } from 'expo-router';
 
 const BADGE_UNITS: Record<string, string> = {
   price_checks: 'проверки',
@@ -37,6 +38,7 @@ function unitFor(badge: { metric?: string | null }): string {
 }
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const { userProfile, posts, openDonationModal, refreshAll, openAddToHome } = useApp();
   const { logout, refreshProfile } = useAuth();
 
@@ -244,6 +246,28 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>
         )}
+
+        {/* Как работи приложението — същата презентация, но по всяко време.
+            Първото обяснение се вижда само веднъж и след месец човекът вече
+            не помни половината функции. */}
+        <TouchableOpacity
+          style={styles.installRow}
+          onPress={() => router.push('/tour?review=1')}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Как работи приложението"
+        >
+          <View style={styles.installIcon}>
+            <Ionicons name="school-outline" size={19} color={COLORS.goldBright} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.installTitle}>Как работи приложението</Text>
+            <Text style={styles.installSub}>
+              Кратък преговор на всичко, което SmartPrice може
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+        </TouchableOpacity>
 
         {/* Табове в профила */}
         <View style={styles.subTabsRow}>
