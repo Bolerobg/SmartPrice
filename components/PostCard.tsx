@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
-import { formatPricePerUnit, formatRelativeTime } from '@/src/lib/format';
+import { formatPostedAt, formatPricePerUnit } from '@/src/lib/format';
 import { PostItem, ReactionKey } from '@/types';
 
 interface PostCardProps {
@@ -208,8 +208,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
               <Text style={styles.placeNameText} numberOfLines={1}>
                 {post.placeName} • {post.city}
               </Text>
-              <Text style={styles.timeText} numberOfLines={1}>
-                • {formatRelativeTime(post.createdAt)}
+            </View>
+            {/* Кога е сложена офертата — точната дата, не само „преди N дни“ */}
+            <View style={styles.postedAtRow}>
+              <Ionicons name="calendar-outline" size={11} color={COLORS.textMuted} />
+              <Text style={styles.postedAtText} numberOfLines={1}>
+                {formatPostedAt(post.createdAt)}
               </Text>
             </View>
           </View>
@@ -735,6 +739,18 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 11,
     flexShrink: 0,
+  },
+  postedAtRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  postedAtText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    flexShrink: 1,
   },
   bookmarkBtn: {
     padding: 5,

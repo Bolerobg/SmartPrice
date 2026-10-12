@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import { COLORS } from '@/constants/theme';
 import { api } from '@/src/api/client';
 import { openInGoogleMaps } from '@/lib/locationService';
-import { formatRelativeTime } from '@/src/lib/format';
+import { formatPostedAtLong } from '@/src/lib/format';
 import { postVerdict, shareViaSystem, hasSystemShare, buildShareMessage } from '@/lib/share';
 import type { PostItem } from '@/types';
 
@@ -127,7 +127,12 @@ export const PublicPostPreview: React.FC<Props> = ({ id }) => {
             {post.placeName} · {post.city}
           </Text>
         </View>
-        <Text style={styles.timeText}>{formatRelativeTime(post.createdAt)}</Text>
+        <View style={styles.postedAtRow}>
+          <Ionicons name="calendar-outline" size={13} color={COLORS.textMuted} />
+          <Text style={styles.timeText}>
+            Офертата е сложена {formatPostedAtLong(post.createdAt)}
+          </Text>
+        </View>
 
         {post.imageUri ? (
           <Image source={{ uri: post.imageUri }} style={styles.hero} resizeMode="cover" />
@@ -266,7 +271,8 @@ const styles = StyleSheet.create({
   title: { color: COLORS.textPrimary, fontSize: 21, fontWeight: '900', lineHeight: 28 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
   metaText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '700' },
-  timeText: { color: COLORS.textMuted, fontSize: 11.5, marginTop: 4 },
+  postedAtRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  timeText: { flex: 1, color: COLORS.textMuted, fontSize: 11.5 },
   hero: { width: '100%', height: 210, borderRadius: 18, marginTop: 16 },
   priceCard: {
     flexDirection: 'row',

@@ -21,7 +21,7 @@ import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { openInGoogleMaps } from '@/lib/locationService';
-import { formatRelativeTime } from '@/src/lib/format';
+import { formatPostedAt, formatPostedAtLong, formatRelativeTime } from '@/src/lib/format';
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -213,6 +213,13 @@ export default function PostDetailScreen() {
                 📍 {post.placeName} • {post.city} ({post.customPlatformLabel || post.platformTag}
                 {post.customCategoryLabel ? ` • ${post.customCategoryLabel}` : ''})
               </Text>
+              {/* Кога е сложена офертата */}
+              <View style={styles.postedAtRow}>
+                <Ionicons name="calendar-outline" size={13} color={COLORS.textMuted} />
+                <Text style={styles.postedAtText} numberOfLines={2}>
+                  Офертата е сложена {formatPostedAtLong(post.createdAt)}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -678,7 +685,7 @@ export default function PostDetailScreen() {
                           color={COLORS.goldBright}
                         />
                       )}
-                      <Text style={styles.commentTime}>• {c.createdAt}</Text>
+                      <Text style={styles.commentTime}>• {formatPostedAt(c.createdAt)}</Text>
                     </View>
                     <Text style={styles.commentBody}>{c.text}</Text>
                     {c.imageUri && (
@@ -778,6 +785,19 @@ export default function PostDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  postedAtRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 7,
+  },
+  postedAtText: {
+    flex: 1,
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.bgPrimary,

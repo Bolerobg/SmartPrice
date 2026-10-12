@@ -35,6 +35,26 @@ function isAbsoluteImage(url: string | undefined): url is string {
   return typeof url === 'string' && /^https?:\/\//i.test(url);
 }
 
+/** Кога е сложена офертата — на български, за прегледа в чата.
+ *  Ползваме софийско време, за да съвпада с приложението (UTC би показало
+ *  грешен ден за оферти, сложени вечерта). */
+function postedAtLabel(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('bg-BG', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'Europe/Sofia',
+    }).format(d);
+  } catch {
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
+  }
+}
+
 export default async function ogRoutes(app: FastifyInstance): Promise<void> {
   app.get('/og/post/:id', async (req, reply) => {
     const parsed = z.object({ id: z.string().uuid() }).safeParse(req.params);
@@ -77,6 +97,8 @@ export default async function ogRoutes(app: FastifyInstance): Promise<void> {
       );
     }
     if (post.receipt) descriptionParts.push('🧾 Доказано с касова бележка');
+    const posted = postedAtLabel(post.createdAt);
+    if (posted) descriptionParts.push(`🗓 Сложена на ${posted}`);
     if (post.description) descriptionParts.push(post.description);
 
     const description = clamp(descriptionParts.join(' · '), 300);

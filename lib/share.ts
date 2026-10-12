@@ -12,6 +12,7 @@
  * приложения, а системното споделяне е само една от опциите.
  */
 import { Linking, Platform, Share } from 'react-native';
+import { formatPostedAtLong } from '@/src/lib/format';
 import type { PostItem } from '@/types';
 
 /** Публичният адрес на приложението (за линкове, които се пращат навън). */
@@ -47,6 +48,9 @@ export function buildShareText(post: PostItem): string {
     `💬 ${post.title}`,
     `💳 Платено: ${post.pricePaid.toFixed(2)} ${post.currency}`,
   ];
+
+  const postedAt = formatPostedAtLong(post.createdAt);
+  if (postedAt) lines.push(`🗓 Офертата е сложена ${postedAt}`);
 
   if (post.referencePrice && post.referencePrice > post.pricePaid) {
     const saved = post.referencePrice - post.pricePaid;
