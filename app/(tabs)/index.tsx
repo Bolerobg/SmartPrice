@@ -729,7 +729,7 @@ export default function FeedScreen() {
           style={styles.communityNudgeBanner}
           onPress={() =>
             openDonationModal(
-              'SmartPrice е независим проект без реклами. Подкрепи ни с дарение през Stripe и вземи златна значка „Пазител на Общността“!',
+              'SmartPrice е независим проект без реклами. Подкрепи ни с дарение и вземи златна значка „Пазител на Общността“!',
               true
             )
           }
@@ -744,7 +744,7 @@ export default function FeedScreen() {
                 100% независими • Без платени ревюта
               </Text>
               <Text style={styles.nudgeSubtitle} numberOfLines={2}>
-                Ти все още не си дарил. Подкрепи ни през Stripe от 2 € →
+                Ти все още не си дарил. Подкрепи ни от 2 € →
               </Text>
             </View>
           </View>

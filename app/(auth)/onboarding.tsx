@@ -246,7 +246,7 @@ const DonateDemo: React.FC = () => {
       <View style={demo.hintRow}>
         <Ionicons name="finger-print" size={14} color={COLORS.accentCyan} />
         <Text style={[demo.hint, { color: COLORS.accentCyan }]}>
-          {amount ? `${amount} € — ще отвориш защитената страница на Stripe` : 'Натисни сума'}
+          {amount ? `${amount} € — ще отвориш защитената страница за плащане` : 'Натисни сума'}
         </Text>
       </View>
     </View>
@@ -326,7 +326,7 @@ export default function OnboardingScreen() {
         eyebrow: 'НЕЗАВИСИМОСТ',
         title: 'Ти решаваш дали да подкрепиш',
         body:
-          'Приложението е безплатно и без реклами. Ако ти е полезно, можеш да го подкрепиш с малка сума през Stripe.\n\nНищо не е задължително — всички функции остават отворени.',
+          'Приложението е безплатно и без реклами. Ако ти е полезно, можеш да го подкрепиш с малка сума.\n\nНищо не е задължително — всички функции остават отворени.',
         interactive: <DonateDemo />,
       },
     ],

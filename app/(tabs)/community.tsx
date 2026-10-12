@@ -85,7 +85,7 @@ export default function CommunityScreen() {
             <View style={styles.fundingBadge}>
               <Ionicons name="heart" size={14} color={COLORS.goldBright} />
               <Text style={styles.fundingBadgeText}>
-                100% ФИНАНСИРАНО ОТ ПОТРЕБИТЕЛИТЕ (STRIPE)
+                100% ФИНАНСИРАНО ОТ ХОРАТА КАТО ТЕБ
               </Text>
             </View>
             <Text style={styles.fundingPercent}>{goalProgress}%</Text>
@@ -111,8 +111,8 @@ export default function CommunityScreen() {
               style={styles.donateSmallBtn}
               onPress={() => openDonationModal()}
             >
-              <Ionicons name="card" size={14} color={COLORS.black} />
-              <Text style={styles.donateSmallBtnText}>Дари чрез Stripe</Text>
+              <Ionicons name="heart" size={14} color={COLORS.black} />
+              <Text style={styles.donateSmallBtnText}>Подкрепи проекта</Text>
             </TouchableOpacity>
           </View>
         </View>

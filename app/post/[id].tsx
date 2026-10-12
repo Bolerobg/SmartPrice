@@ -649,13 +649,13 @@ export default function PostDetailScreen() {
             style={styles.supportPromptStrip}
             onPress={() =>
               openDonationModal(
-                `Благодарение на сигнала за „${post.placeName}“, общността вече си е спестила ${post.communitySavedBgn} €! Подкрепи SmartPrice чрез Stripe.`
+                `Благодарение на сигнала за „${post.placeName}“, общността вече си е спестила ${post.communitySavedBgn} €! Подкрепи SmartPrice.`
               )
             }
           >
             <Ionicons name="heart-circle" size={22} color={COLORS.goldBright} />
             <Text style={styles.supportPromptText}>
-              Полезен ли ти беше този сигнал? Подкрепи SmartPrice с дарение през Stripe →
+              Полезен ли ти беше този сигнал? Подкрепи SmartPrice с дарение →
             </Text>
           </TouchableOpacity>
 

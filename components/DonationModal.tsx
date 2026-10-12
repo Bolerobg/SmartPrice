@@ -72,7 +72,7 @@ export const DonationModal: React.FC = () => {
             stopPolling();
             setPendingSessionId(null);
             setSuccessInfo({
-              message: 'Плащането е потвърдено от Stripe. Благодарим ти!',
+              message: 'Плащането е потвърдено. Благодарим ти за подкрепата!',
               amount,
             });
           }
@@ -111,7 +111,7 @@ export const DonationModal: React.FC = () => {
       if (canOpen) {
         await Linking.openURL(result.checkoutUrl);
       } else {
-        throw new ApiError(0, 'cannot_open', 'Не успях да отворя страницата за плащане на Stripe.');
+        throw new ApiError(0, 'cannot_open', 'Не успях да отворя защитената страница за плащане.');
       }
 
       setPendingSessionId(result.sessionId);
@@ -167,7 +167,7 @@ export const DonationModal: React.FC = () => {
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>Обработка:</Text>
-                  <Text style={styles.receiptValue}>Stripe (потвърдено)</Text>
+                  <Text style={styles.receiptValue}>Потвърдено плащане</Text>
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>Статус на напомнянията:</Text>
@@ -211,7 +211,7 @@ export const DonationModal: React.FC = () => {
                   >
                     {isPeriodicNudge
                       ? 'ПЕРИОДИЧНО НАПОМНЯНЕ • НЕ СИ ДАРИЛ ВСЕ ОЩЕ'
-                      : '100% НЕЗАВИСИМА ОБЩНОСТ • STRIPE ДАРЕНИЯ'}
+                      : '100% НЕЗАВИСИМА ОБЩНОСТ • БЕЗ РЕКЛАМИ'}
                   </Text>
                 </View>
 
@@ -374,8 +374,8 @@ export const DonationModal: React.FC = () => {
                   }}
                 >
                   {paymentsEnabled
-                    ? 'Ще бъдеш пренасочен към защитената страница на Stripe. Картата се въвежда само там — приложението не я вижда.'
-                    : 'Плащанията още не са включени на сървъра (липсва STRIPE_SECRET_KEY). Даренията са временно недостъпни.'}
+                    ? 'Ще бъдеш пренасочен към защитената страница за плащане. Картата се въвежда само там — приложението не я вижда.'
+                    : 'Плащанията в момента не са достъпни. Опитай отново по-късно.'}
                 </Text>
               </View>
 
@@ -393,7 +393,7 @@ export const DonationModal: React.FC = () => {
                 >
                   <ActivityIndicator size="small" color={COLORS.accentCyan} />
                   <Text style={{ flex: 1, color: COLORS.textSecondary, fontSize: 11.5, fontWeight: '700' }}>
-                    Чакам потвърждение от Stripe…
+                    Чакам потвърждение за плащането…
                   </Text>
                 </View>
               )}
@@ -432,7 +432,7 @@ export const DonationModal: React.FC = () => {
                   <>
                     <Ionicons name="lock-closed" size={17} color={COLORS.black} />
                     <Text style={styles.stripeDonateBtnText}>
-                      Дари {finalAmount.toFixed(2)} € през Stripe{' '}
+                      Подкрепи с {finalAmount.toFixed(2)} €{' '}
                       {isMonthly ? '/ месец' : ''}
                     </Text>
                   </>

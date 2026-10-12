@@ -17,6 +17,7 @@ import {
   isAlreadyInstalled,
 } from '@/components/AddToHomeScreenModal';
 import { COLORS } from '@/constants/theme';
+import { formatPostedAt } from '@/src/lib/format';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 
@@ -126,13 +127,13 @@ export default function ProfileScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.monetizationTitle}>
                 {userProfile.isSupporter
-                  ? 'Статус: Активен Дарител (Напомнянията са спрени)'
-                  : 'Статус: Още не си дарил (Периодично напомняне активно)'}
+                  ? 'Статус: Пазител на Общността 💛 (напомнянията са спрени)'
+                  : 'Статус: Още не си подкрепил проекта'}
               </Text>
               <Text style={styles.monetizationSub}>
                 {userProfile.isSupporter
-                  ? `Общо дарени през Stripe: ${userProfile.totalDonatedBgn.toFixed(2)} € Благодарим ти за подкрепата!`
-                  : `Приложението пита дискретно — най-рано след 8 действия и поне 3 дни след предишно напомняне, докато не направиш дарение през Stripe.`}
+                  ? `Твоята подкрепа: ${userProfile.totalDonatedBgn.toFixed(2)} € — благодарим ти! Ти си „Пазител на Общността“.`
+                  : `Можеш да подкрепиш SmartPrice по всяко време. Питаме дискретно — най-рано след 8 действия и поне 3 дни след предишно напомняне.`}
               </Text>
             </View>
           </View>
@@ -142,9 +143,9 @@ export default function ProfileScreen() {
               style={styles.stripePrimaryBtn}
               onPress={() => openDonationModal()}
             >
-              <Ionicons name="card" size={16} color={COLORS.black} />
+              <Ionicons name="heart" size={16} color={COLORS.black} />
               <Text style={styles.stripePrimaryBtnText}>
-                {userProfile.isSupporter ? 'Направи ново дарение' : 'Дари чрез Stripe'}
+                {userProfile.isSupporter ? 'Подкрепи отново' : 'Подкрепи SmartPrice'}
               </Text>
             </TouchableOpacity>
 
@@ -343,7 +344,7 @@ export default function ProfileScreen() {
               <View style={styles.emptyBox}>
                 <Ionicons name="heart-outline" size={38} color={COLORS.goldBright} />
                 <Text style={styles.emptyText}>
-                  Все още нямаш направени дарения през Stripe. Подкрепи общността, за да отключиш VIP значка и да спреш периодичните напомняния!
+                  Все още не си подкрепил SmartPrice. Стани „Пазител на Общността“ — златна значка и без напомняния!
                 </Text>
               </View>
             ) : (
@@ -354,7 +355,7 @@ export default function ProfileScreen() {
                       {don.tierName} {don.isMonthly ? '(Месечен абонамент)' : '(Еднократно)'}
                     </Text>
                     <Text style={styles.donMeta}>
-                      Stripe ID: {don.paymentIntentId} • {don.createdAt}
+                      Реф. №{don.paymentIntentId.slice(-8).toUpperCase()} • {formatPostedAt(don.createdAt)}
                     </Text>
                   </View>
                   <Text style={styles.donAmount}>{don.amountBgn.toFixed(2)} €</Text>
