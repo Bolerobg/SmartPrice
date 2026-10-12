@@ -81,9 +81,26 @@ export default function RegisterScreen() {
           <Ionicons name="pricetags" size={30} color={COLORS.greenBright} />
         </View>
         <Text style={styles.title}>Създай профил</Text>
+        <Text style={styles.slogan}>Помагаме си взаимно. Безплатно.</Text>
         <Text style={styles.subtitle}>
           Публикувай реални цени, сканирай касови бележки и предпази другите от капани.
         </Text>
+
+        {/* Ако още не е гледал презентацията — тук е последният шанс преди формата */}
+        <TouchableOpacity
+          style={styles.tourBtn}
+          onPress={() => router.push('/tour?review=1&cta=register')}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Виж как работи приложението"
+        >
+          <Ionicons name="play-circle" size={19} color={COLORS.accentCyan} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tourBtnText}>Още не знаеш как работи?</Text>
+            <Text style={styles.tourBtnSub}>Виж 10 екрана с примери — 30 секунди</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+        </TouchableOpacity>
 
         <Text style={styles.label}>Име</Text>
         <TextInput
@@ -192,6 +209,28 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   title: { color: COLORS.textPrimary, fontSize: 27, fontWeight: '900', letterSpacing: 0.3 },
+  slogan: {
+    color: COLORS.accentCyan,
+    fontSize: 15.5,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  tourBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    width: '100%',
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(6,182,212,0.5)',
+    backgroundColor: 'rgba(6,182,212,0.10)',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  tourBtnText: { color: COLORS.accentCyan, fontSize: 13.5, fontWeight: '900' },
+  tourBtnSub: { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
   subtitle: {
     color: COLORS.textSecondary,
     fontSize: 13.5,

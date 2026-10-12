@@ -105,8 +105,13 @@ const Splash: React.FC = () => {
 
       <Animated.View style={{ opacity: textOpacity, alignItems: 'center' }}>
         <Text style={styles.splashTitle}>SmartPrice</Text>
+
+        {/* Слоганът: защо съществува приложението, не какво прави.
+            „Помагаме си взаимно“ е идеята; „безплатно“ е обещанието. */}
+        <Text style={styles.splashSlogan}>Помагаме си взаимно. Безплатно.</Text>
+
         <Text style={styles.splashTagline}>
-          Реални цени. Честни места.{'\n'}Разобличени капани.
+          Всеки споделя цена — всички печелим.{'\n'}Без реклами. Без платени ревюта.
         </Text>
       </Animated.View>
 
@@ -162,7 +167,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // Споделена оферта (post/<id>) се показва и на гости — иначе линкът,
       // пратен на приятел, водеше само до екран за вход.
       const isPublicPost = segments[0] === 'post';
-      if (!inAuthGroup && !isPublicPost) {
+      // Презентацията (/tour) се показва и на невлезли — точно това искаме:
+      // човекът да я види ПРЕДИ да се регистрира.
+      const isPublicTour = segments[0] === 'tour';
+      if (!inAuthGroup && !isPublicPost && !isPublicTour) {
         // Първото пускане води до обяснението, после до входа.
         router.replace(onboardingSeen ? '/(auth)/login' : '/(auth)/onboarding');
       }
@@ -268,6 +276,14 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: -0.8,
     marginTop: 22,
+  },
+  splashSlogan: {
+    color: COLORS.accentCyan,
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginTop: 12,
+    letterSpacing: -0.2,
   },
   splashTagline: {
     color: COLORS.textSecondary,

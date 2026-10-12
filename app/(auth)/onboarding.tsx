@@ -460,8 +460,14 @@ export default function OnboardingScreen() {
    * Същият екран се ползва и като „преговор“ отвътре в приложението
    * (/tour?review=1) — тогава не пращаме никъде, а просто се връщаме назад.
    */
-  const { review } = useLocalSearchParams<{ review?: string }>();
+  const { review, cta } = useLocalSearchParams<{ review?: string; cta?: string }>();
   const isReview = review === '1';
+  /**
+   * Отваряне от екрана за вход/регистрация: /tour?review=1&cta=register
+   * Тогава последният бутон не е „Готово“, а „Регистрирай се безплатно“ —
+   * презентацията завършва с покана, а не просто със затваряне.
+   */
+  const ctaRegister = cta === 'register';
   // Ширината се взема динамично — така работи и при завъртане/преоразмеряване
   // в браузър, а не само при първоначално зареждане.
   const { width: pageWidth } = useWindowDimensions();
@@ -585,13 +591,18 @@ export default function OnboardingScreen() {
   );
 
   const finish = useCallback(async () => {
+    if (ctaRegister) {
+      await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, '1');
+      router.replace('/(auth)/register');
+      return;
+    }
     if (isReview) {
       router.back();
       return;
     }
     await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, '1');
     router.replace('/(auth)/register');
-  }, [router, isReview]);
+  }, [router, isReview, ctaRegister]);
 
   const skip = useCallback(async () => {
     if (isReview) {
@@ -702,7 +713,7 @@ export default function OnboardingScreen() {
               activeOpacity={0.9}
             >
               <Text style={styles.primaryBtnText}>
-                {isReview ? 'Готово' : 'Създай профил'}
+                {ctaRegister ? 'Регистрирай се безплатно' : isReview ? 'Готово' : 'Създай профил'}
               </Text>
             </TouchableOpacity>
             {!isReview && (
