@@ -6,7 +6,6 @@ import {
   Platform,
   SafeAreaView,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -17,14 +16,17 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ReceiptModalCard } from '@/components/ReceiptModalCard';
+import { PublicPostPreview } from '@/components/PublicPostPreview';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/src/auth/AuthContext';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { formatRelativeTime } from '@/src/lib/format';
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const {
     posts,
     addComment,
@@ -33,6 +35,7 @@ export default function PostDetailScreen() {
     reportUpdatedPrice,
     toggleBookmark,
     openDonationModal,
+    openShare,
   } = useApp();
 
   const [commentText, setCommentText] = useState('');
@@ -42,6 +45,12 @@ export default function PostDetailScreen() {
   const [showComparison, setShowComparison] = useState(false);
   const [showUpdatePriceBox, setShowUpdatePriceBox] = useState(false);
   const [newReportedPrice, setNewReportedPrice] = useState('');
+
+  // Гост, дошъл по споделен линк: показваме публичен преглед на офертата.
+  // Без това линкът водеше до екран за вход и получателят не виждаше нищо.
+  if (!isAuthenticated) {
+    return <PublicPostPreview id={id} />;
+  }
 
   const post = posts.find((p) => p.id === id);
 
@@ -121,15 +130,9 @@ export default function PostDetailScreen() {
     setShowPriceInput(false);
   };
 
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        message: `${isGreen ? '🟢 ТОП НАХОДКА' : '🔴 ЧЕРВЕН ФЛАГ'}: ${post.title} в ${post.placeName} (${post.city}) - ${post.pricePaid.toFixed(2)} ${post.currency}! Споделено в SmartPrice.`,
-      });
-    } catch {
-      // Игнориране
-    }
-  };
+  // Общ лист за споделяне (виж components/ShareModal.tsx). Преди беше
+  // Share.share(), което на десктоп браузър не правеше нищо.
+  const handleShare = () => openShare(post);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -171,7 +174,13 @@ export default function PostDetailScreen() {
                 color={post.isBookmarked ? COLORS.goldBright : COLORS.textPrimary}
               />
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleShare} style={styles.navIconBtn}>
+            <TouchableOpacity
+              onPress={handleShare}
+              style={styles.navIconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Сподели офертата"
+              testID="share-post"
+            >
               <Ionicons name="share-social-outline" size={21} color={COLORS.textPrimary} />
             </TouchableOpacity>
           </View>

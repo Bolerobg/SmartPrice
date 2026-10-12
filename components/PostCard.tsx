@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Image,
-  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -27,6 +26,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
     markPostHelpedMe,
     confirmPriceValidToday,
     toggleBookmark,
+    openShare,
   } = useApp();
   const [showComparisonImage, setShowComparisonImage] = useState(false);
 
@@ -48,16 +48,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
   const highlightedReceiptItem =
     post.receipt?.items.find((i) => i.highlightReason) || post.receipt?.items[0];
 
-  const handleShare = async () => {
-    try {
-      const verdictText = isGreen ? '🟢 ТОП НАХОДКА' : '🔴 ЧЕРВЕН ФЛАГ (НЕ ХОДИ!)';
-      await Share.share({
-        message: `${verdictText} в SmartPrice!\n📍 ${post.placeName} (${post.city})\n💬 ${post.title}\n💳 Платено: ${post.pricePaid.toFixed(2)} ${post.currency}${post.receipt ? ' (Доказано с касова бележка 🧾)' : ''}`,
-      });
-    } catch {
-      // Игнориране
-    }
-  };
+  // Отваря общия лист за споделяне (виж components/ShareModal.tsx).
+  // Преди тук беше Share.share(), което на десктоп браузър се проваляше
+  // безшумно и пращаше само текст, без линк към офертата.
+  const handleShare = () => openShare(post);
 
   const renderReactions = () => {
     if (isGreen) {
@@ -592,7 +586,13 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
             <Text style={styles.iconActionText}>{post.comments.length}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.iconActionBtn} onPress={handleShare}>
+          <TouchableOpacity
+            style={styles.iconActionBtn}
+            onPress={handleShare}
+            accessibilityRole="button"
+            accessibilityLabel="Сподели офертата"
+            testID="share-post"
+          >
             <Ionicons name="share-social-outline" size={17} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>

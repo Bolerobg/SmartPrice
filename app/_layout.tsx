@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from '@/src/auth/AuthContext';
 import { AddToHomeScreenModal } from '@/components/AddToHomeScreenModal';
 import { DonationModal } from '@/components/DonationModal';
 import { AlertHost } from '@/components/AlertHost';
+import { ShareModal } from '@/components/ShareModal';
 // Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
 // Импортът е само за страничния ефект и трябва да е преди първия Alert.alert.
 import '@/lib/alertHost';
@@ -132,7 +133,7 @@ const Splash: React.FC = () => {
 /* ------------------------------------------------------------------ */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isBootstrapping, isAuthenticated } = useAuth();
-  const { isAddToHomeOpen, addToHomeMode, closeAddToHome } = useApp();
+  const { isAddToHomeOpen, addToHomeMode, closeAddToHome, sharingPost, closeShare } = useApp();
   const segments = useSegments();
   const router = useRouter();
 
@@ -158,7 +159,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!isAuthenticated) {
-      if (!inAuthGroup) {
+      // Споделена оферта (post/<id>) се показва и на гости — иначе линкът,
+      // пратен на приятел, водеше само до екран за вход.
+      const isPublicPost = segments[0] === 'post';
+      if (!inAuthGroup && !isPublicPost) {
         // Първото пускане води до обяснението, после до входа.
         router.replace(onboardingSeen ? '/(auth)/login' : '/(auth)/onboarding');
       }
@@ -187,6 +191,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           onClose={closeAddToHome}
           mode={addToHomeMode}
         />
+        <ShareModal post={sharingPost} onClose={closeShare} />
       </>
     );
   }

@@ -152,6 +152,11 @@ interface AppContextValue {
         openAddToHome: (mode?: 'invite' | 'help') => void;
         closeAddToHome: () => void;
 
+    /** Споделяне на оферта (един общ лист за цялото приложение) */
+    sharingPost: PostItem | null;
+    openShare: (post: PostItem) => void;
+    closeShare: () => void;
+
     totalCommunitySavedAllPosts: number;
   }
 
@@ -210,6 +215,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Отбелязваме, че вече сме показали поканата, за да не досаждаме пак.
         void saveAddToHomeSeen();
       }, []);
+
+    // ---------------------------------------------------- Споделяне на оферта
+    const [sharingPost, setSharingPost] = useState<PostItem | null>(null);
+    const openShare = useCallback((post: PostItem) => setSharingPost(post), []);
+    const closeShare = useCallback(() => setSharingPost(null), []);
 
       // Показваме поканата САМО веднъж, и то само в браузър, ако още не е
       // добавено на началния екран. В истинското приложение е излишно.
@@ -717,6 +727,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             openAddToHome,
             closeAddToHome,
 
+            sharingPost,
+            openShare,
+            closeShare,
+
             totalCommunitySavedAllPosts,
           }),
     [
@@ -759,6 +773,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             addToHomeMode,
             openAddToHome,
             closeAddToHome,
+
+            sharingPost,
+            openShare,
+            closeShare,
 
             totalCommunitySavedAllPosts,
           ]
