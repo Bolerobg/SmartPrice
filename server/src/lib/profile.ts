@@ -1,4 +1,5 @@
 import { many, one } from '../db.js';
+import { badgeMetrics, progressFor, syncBadges } from './badges.js';
 import { notFound } from './errors.js';
 import { mapProfile } from './mappers.js';
 
@@ -31,15 +32,23 @@ export async function loadFullProfile(userId: string) {
 
   if (!profile) throw notFound('Профилът не е намерен.');
 
-  const badges = await many<{
+  // Значките се отключват според реалната активност — първо ги сверяваме,
+  // за да светне заслуженото още при първото отваряне на профила.
+  await syncBadges(userId);
+  const metrics = await badgeMetrics(userId);
+
+  const badgeRows = await many<{
     id: string;
     title: string;
     icon: string;
     description: string;
     color: string;
     unlocked: boolean;
+    metric: string | null;
+    threshold: number;
   }>(
     `select b.id, b.title, b.icon, b.description, b.color,
+            b.metric, b.threshold,
             (pb.unlocked_at is not null) as unlocked
        from badges b
        left join profile_badges pb
@@ -47,6 +56,12 @@ export async function loadFullProfile(userId: string) {
       order by b.sort_order`,
     [userId]
   );
+
+  // Към всяка значка даваме и докъде е стигнал човекът („3 / 5“).
+  const badges = badgeRows.map((b) => ({
+    ...b,
+    progress: metrics ? progressFor(b.metric, metrics) : 0,
+  }));
 
   const donations = await many<{
     id: string;

@@ -21,6 +21,21 @@ import { formatPostedAt } from '@/src/lib/format';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 
+const BADGE_UNITS: Record<string, string> = {
+  price_checks: 'проверки',
+  price_corrections: 'поправки',
+  reputation_points: 'точки',
+  posts: 'оферти',
+  receipts: 'бележки',
+  red_flags: 'червени флага',
+  savings: '€',
+  supporter: '',
+};
+
+function unitFor(badge: { metric?: string | null }): string {
+  return badge.metric ? (BADGE_UNITS[badge.metric] ?? '') : '';
+}
+
 export default function ProfileScreen() {
   const { userProfile, posts, openDonationModal, refreshAll, openAddToHome } = useApp();
   const { logout, refreshProfile } = useAuth();
@@ -28,6 +43,15 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'badges' | 'bookmarks' | 'donations'>(
     'badges'
   );
+
+  // Значките: отключените отгоре, а от заключените — тази, която е най-близо.
+  const sortedBadges = [...userProfile.badges].sort((a, b) => {
+    if (a.unlocked !== b.unlocked) return a.unlocked ? -1 : 1;
+    const ra = (a.progress ?? 0) / Math.max(1, a.threshold ?? 1);
+    const rb = (b.progress ?? 0) / Math.max(1, b.threshold ?? 1);
+    return rb - ra;
+  });
+  const nextBadge = sortedBadges.find((b) => !b.unlocked && (b.threshold ?? 0) > 0);
 
   // „Обнови данните от сървъра“ — тегли наново И профила (дарения, значки,
   // спестени), не само потока. Иначе при натискане на екрана на профила
@@ -288,38 +312,86 @@ export default function ProfileScreen() {
         {/* Съдържание според избрания таб */}
         {activeTab === 'badges' && (
           <View style={styles.badgesGrid}>
-            {userProfile.badges.map((badge) => (
-              <View
-                key={badge.id}
-                style={[
-                  styles.badgeCard,
-                  !badge.unlocked && { opacity: 0.5 },
-                ]}
-              >
+            {/* Какво следва — най-близката значка, за да има цел пред очите */}
+            {nextBadge && (
+              <View style={styles.nextBadgeCard}>
+                <Ionicons name="flag" size={15} color={COLORS.goldBright} />
+                <Text style={styles.nextBadgeText}>
+                  Следваща: <Text style={styles.nextBadgeStrong}>{nextBadge.title}</Text>
+                  {' — '}
+                  {nextBadge.threshold && nextBadge.progress !== undefined
+                    ? `още ${Math.max(0, nextBadge.threshold - nextBadge.progress)} ${unitFor(nextBadge)}`
+                    : 'още малко'}
+                </Text>
+              </View>
+            )}
+
+            {sortedBadges.map((badge) => {
+              const threshold = badge.threshold ?? 0;
+              const progress = badge.progress ?? 0;
+              const pct =
+                threshold > 0 ? Math.min(100, Math.round((progress / threshold) * 100)) : 0;
+
+              return (
                 <View
+                  key={badge.id}
                   style={[
-                    styles.badgeIconCircle,
-                    { backgroundColor: `${badge.color}22`, borderColor: badge.color },
+                    styles.badgeCard,
+                    !badge.unlocked && styles.badgeCardLocked,
+                    badge.unlocked && { borderColor: `${badge.color}66` },
                   ]}
                 >
-                  <Ionicons name={badge.icon as any} size={22} color={badge.color} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.badgeHeaderRow}>
-                    <Text style={styles.badgeTitle}>{badge.title}</Text>
-                    <Text
-                      style={[
-                        styles.badgeStatus,
-                        { color: badge.unlocked ? COLORS.greenBright : COLORS.textMuted },
-                      ]}
-                    >
-                      {badge.unlocked ? '✓ Отключена' : 'Заключена'}
-                    </Text>
+                  <View
+                    style={[
+                      styles.badgeIconCircle,
+                      {
+                        backgroundColor: badge.unlocked ? `${badge.color}22` : COLORS.bgCardElevated,
+                        borderColor: badge.unlocked ? badge.color : COLORS.borderSubtle,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={badge.unlocked ? (badge.icon as any) : 'lock-closed'}
+                      size={20}
+                      color={badge.unlocked ? badge.color : COLORS.textMuted}
+                    />
                   </View>
-                  <Text style={styles.badgeDesc}>{badge.description}</Text>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.badgeHeaderRow}>
+                      <Text
+                        style={[
+                          styles.badgeTitle,
+                          !badge.unlocked && { color: COLORS.textSecondary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {badge.title}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.badgeStatus,
+                          { color: badge.unlocked ? COLORS.greenBright : COLORS.textMuted },
+                        ]}
+                      >
+                        {badge.unlocked ? '✓ Отключена' : `${progress} / ${threshold}`}
+                      </Text>
+                    </View>
+                    <Text style={styles.badgeDesc}>{badge.description}</Text>
+
+                    {!badge.unlocked && threshold > 0 && (
+                      <View style={styles.badgeTrack}>
+                        <View
+                          style={[
+                            styles.badgeFill,
+                            { width: `${pct}%`, backgroundColor: badge.color },
+                          ]}
+                        />
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
 
@@ -572,6 +644,29 @@ const styles = StyleSheet.create({
   badgesGrid: {
     gap: 10,
   },
+  nextBadgeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.goldSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    borderRadius: 14,
+    padding: 11,
+  },
+  nextBadgeText: { flex: 1, color: COLORS.textSecondary, fontSize: 11.5, lineHeight: 16 },
+  nextBadgeStrong: { color: COLORS.goldBright, fontWeight: '900' },
+  badgeCardLocked: {
+    opacity: 0.75,
+  },
+  badgeTrack: {
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: COLORS.bgCardElevated,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  badgeFill: { height: 5, borderRadius: 3 },
   badgeCard: {
     flexDirection: 'row',
     alignItems: 'center',

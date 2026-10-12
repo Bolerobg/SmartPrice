@@ -18,22 +18,28 @@ const BADGES = [
     description: 'Публикува първата си цена',
     color: '#06B6D4',
     sort: 10,
+    metric: 'posts',
+    threshold: 1,
   },
   {
     id: 'badge-receipt-master',
     title: 'Детектив с Бележка',
     icon: 'receipt',
-    description: 'Качени над 5 касови бележки',
+    description: 'Качени 5 касови бележки',
     color: '#10B981',
     sort: 20,
+    metric: 'receipts',
+    threshold: 5,
   },
   {
     id: 'badge-red-hunter',
     title: 'Разобличител на Капани',
     icon: 'warning',
-    description: 'Предупредил над 50 души за спекулативни цени',
+    description: 'Публикувал 5 червени флага срещу спекулативни цени',
     color: '#F43F5E',
     sort: 30,
+    metric: 'red_flags',
+    threshold: 5,
   },
   {
     id: 'badge-saver-1k',
@@ -42,6 +48,8 @@ const BADGES = [
     description: 'Твоите постове са спестили над 500 € на другите',
     color: '#8B5CF6',
     sort: 40,
+    metric: 'savings',
+    threshold: 500,
   },
   {
     id: 'badge-supporter',
@@ -50,7 +58,19 @@ const BADGES = [
     description: 'Подкрепи независимостта на SmartPrice с дарение',
     color: '#F59E0B',
     sort: 50,
+    metric: 'supporter',
+    threshold: 1,
   },
+
+  // ---- Стълбичката за проверки на цени (новата функция) ----
+  { id: 'badge-check-1',    title: 'Първи поглед',        icon: 'eye',        description: 'Провери първата си чужда цена на място', color: '#06B6D4', sort: 100, metric: 'price_checks',      threshold: 1 },
+  { id: 'badge-check-5',    title: 'Проверяващ',          icon: 'search',     description: 'Провери 5 чужди цени на място',          color: '#22D3EE', sort: 101, metric: 'price_checks',      threshold: 5 },
+  { id: 'badge-check-25',   title: 'Детектив на цени',    icon: 'binoculars', description: 'Провери 25 чужди цени на място',         color: '#8B5CF6', sort: 102, metric: 'price_checks',      threshold: 25 },
+  { id: 'badge-check-100',  title: 'Пазител на цените',   icon: 'shield',     description: 'Провери 100 чужди цени на място',        color: '#F59E0B', sort: 103, metric: 'price_checks',      threshold: 100 },
+  { id: 'badge-correct-1',  title: 'Поправи цена',        icon: 'create',     description: 'Поправи първата сгрешена цена',          color: '#FBBF24', sort: 110, metric: 'price_corrections', threshold: 1 },
+  { id: 'badge-correct-10', title: 'Коректор',            icon: 'build',      description: 'Поправи 10 сгрешени цени',               color: '#EF4444', sort: 111, metric: 'price_corrections', threshold: 10 },
+  { id: 'badge-points-100', title: 'Доверен',             icon: 'star',       description: 'Събра 100 точки доверие',                color: '#FBBF24', sort: 120, metric: 'reputation_points', threshold: 100 },
+  { id: 'badge-points-500', title: 'Стожер на общността', icon: 'ribbon',     description: 'Събра 500 точки доверие',                color: '#F59E0B', sort: 121, metric: 'reputation_points', threshold: 500 },
 ];
 
 const DEMO_USERS = [
@@ -203,14 +223,15 @@ const DEMO_POSTS: DemoPost[] = [
 async function seedBadges() {
   for (const b of BADGES) {
     await one(
-      `insert into badges (id, title, icon, description, color, sort_order)
-       values ($1,$2,$3,$4,$5,$6)
+      `insert into badges (id, title, icon, description, color, sort_order, metric, threshold)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
        on conflict (id) do update
          set title = excluded.title, icon = excluded.icon,
              description = excluded.description, color = excluded.color,
-             sort_order = excluded.sort_order
+             sort_order = excluded.sort_order,
+             metric = excluded.metric, threshold = excluded.threshold
        returning id`,
-      [b.id, b.title, b.icon, b.description, b.color, b.sort]
+      [b.id, b.title, b.icon, b.description, b.color, b.sort, b.metric, b.threshold]
     );
   }
 }
@@ -251,11 +272,10 @@ export async function seedDemoData(): Promise<void> {
          select $1, id from badges on conflict do nothing`,
         [id]
       );
-      await client.query(
-        `update profile_badges set unlocked_at = now()
-          where profile_id = $1 and badge_id in ('badge-first-post','badge-receipt-master')`,
-        [id]
-      );
+      // Значките се отключват сами според реалната активност (виж
+      // lib/badges.ts → syncBadges). Тук не маркираме нищо на ръка — иначе
+      // демо профил може да показва „отключена“ значка, която не е заслужил.
+
     }
 
     for (const p of DEMO_POSTS) {

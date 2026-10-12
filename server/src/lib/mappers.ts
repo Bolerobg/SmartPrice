@@ -265,7 +265,17 @@ export function mapProfile(p: {
   verified_receipts_count?: number;
   community_saved_bgn?: number;
 }, extras: {
-  badges: Array<{ id: string; title: string; icon: string; description: string; color: string; unlocked: boolean }>;
+  badges: Array<{
+    id: string;
+    title: string;
+    icon: string;
+    description: string;
+    color: string;
+    unlocked: boolean;
+    metric?: string | null;
+    threshold?: number;
+    progress?: number;
+  }>;
   donations: Array<{ id: string; amountBgn: number; tierName: string; isMonthly: boolean; createdAt: string; paymentIntentId: string }>;
 }) {
   return {

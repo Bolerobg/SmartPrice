@@ -157,6 +157,12 @@ export interface BadgeItem {
   description: string;
   unlocked: boolean;
   color: string;
+  /** Колко е напреднал потребителят по условието на значката. */
+  progress?: number;
+  /** При каква стойност се отключва. */
+  threshold?: number;
+  /** От какво зависи значката (за да знаем мерната единица). */
+  metric?: string | null;
 }
 
 export type LeaderboardSort = 'saved' | 'checkers' | 'points';
