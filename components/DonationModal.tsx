@@ -384,8 +384,9 @@ export const DonationModal: React.FC = () => {
                   3D Secure и „не пазим данните“ вършат тази работа. */}
               {paymentsEnabled && (
                 <View style={styles.trustCard}>
-                  <Text style={styles.trustTitle}>Приемаме карти</Text>
+                  <Text style={styles.trustTitle}>Можеш да платиш с</Text>
 
+                  {/* Карти */}
                   <View style={styles.brandRow}>
                     <View style={[styles.brandBadge, { backgroundColor: '#1A1F71' }]}>
                       <Text style={[styles.brandText, { fontStyle: 'italic' }]}>VISA</Text>
@@ -400,6 +401,25 @@ export const DonationModal: React.FC = () => {
                     <View style={[styles.brandBadge, { backgroundColor: '#0F4C9C' }]}>
                       <Text style={styles.brandText}>Maestro</Text>
                     </View>
+                  </View>
+
+                  {/* Мобилни портфейли — показват се само на устройството, което ги има */}
+                  <View style={[styles.brandRow, { marginTop: -4 }]}>
+                    <View style={[styles.brandBadge, styles.walletBadge, { backgroundColor: '#000000' }]}>
+                      <Ionicons name="logo-apple" size={15} color={COLORS.white} />
+                      <Text style={styles.brandText}>Pay</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.brandBadge,
+                        styles.walletBadge,
+                        { backgroundColor: COLORS.white },
+                      ]}
+                    >
+                      <Ionicons name="logo-google" size={14} color="#4285F4" />
+                      <Text style={[styles.brandText, { color: '#3C4043' }]}>Pay</Text>
+                    </View>
+                    <Text style={styles.walletHint}>на телефона</Text>
                   </View>
 
                   <View style={styles.trustRow}>
@@ -858,6 +878,14 @@ const styles = StyleSheet.create({
     minWidth: 62,
   },
   brandText: { color: COLORS.white, fontSize: 12, fontWeight: '900', letterSpacing: 0.3 },
+  walletBadge: { borderWidth: 1, borderColor: 'rgba(148,163,184,0.35)' },
+  walletHint: {
+    alignSelf: 'center',
+    color: COLORS.textMuted,
+    fontSize: 10.5,
+    fontWeight: '700',
+    fontStyle: 'italic',
+  },
   mcCircles: { flexDirection: 'row', alignItems: 'center' },
   mcCircle: { width: 13, height: 13, borderRadius: 7, opacity: 0.95 },
   trustRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginTop: 9 },
