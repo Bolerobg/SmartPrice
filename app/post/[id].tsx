@@ -222,6 +222,30 @@ export default function PostDetailScreen() {
           </View>
 
           <Text style={styles.title}>{post.title}</Text>
+
+          {/* ID на офертата — по него се търси в приложението */}
+          {post.code ? (
+            <View style={styles.codeBox}>
+              <Ionicons name="pricetag-outline" size={13} color={COLORS.accentCyan} />
+              <Text style={styles.codeLabel}>ID на офертата:</Text>
+              <Text style={styles.codeValue}>{post.code}</Text>
+              <Text style={styles.codeHint}>напиши го в търсачката, за да я намериш пак</Text>
+            </View>
+          ) : null}
+
+          {post.sellerType === 'private' ? (
+            <View style={styles.sellerBox}>
+              <View style={styles.sellerPill}>
+                <Ionicons name="person-outline" size={11} color={COLORS.black} />
+                <Text style={styles.sellerPillText}>ЧАСТНО ЛИЦЕ</Text>
+              </View>
+              {post.sellerNote ? <Text style={styles.sellerNote}>{post.sellerNote}</Text> : null}
+              {post.sellerContact ? (
+                <Text style={styles.sellerContact}>Контакт: {post.sellerContact}</Text>
+              ) : null}
+            </View>
+          ) : null}
+
           <Text style={styles.description}>{post.description}</Text>
 
           {/* Главна снимка + Обява vs Реалност */}
@@ -644,6 +668,44 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     marginTop: 2,
   },
+  codeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    backgroundColor: COLORS.bgCardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 11,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  codeLabel: { color: COLORS.textMuted, fontSize: 11.5, fontWeight: '700' },
+  codeValue: { color: COLORS.accentCyan, fontSize: 13, fontWeight: '900', letterSpacing: 0.6 },
+  codeHint: { color: COLORS.textMuted, fontSize: 10.5, fontStyle: 'italic' },
+  sellerBox: {
+    marginTop: 8,
+    backgroundColor: COLORS.bgCardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    borderRadius: 11,
+    padding: 10,
+    gap: 6,
+  },
+  sellerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.goldBright,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    alignSelf: 'flex-start',
+  },
+  sellerPillText: { color: COLORS.black, fontSize: 9, fontWeight: '900', letterSpacing: 0.4 },
+  sellerNote: { color: COLORS.textSecondary, fontSize: 12.5, lineHeight: 18 },
+  sellerContact: { color: COLORS.goldBright, fontSize: 12, fontWeight: '800' },
   title: {
     color: COLORS.textPrimary,
     fontSize: 19,

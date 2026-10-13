@@ -113,8 +113,9 @@ export default async function authRoutes(app: FastifyInstance) {
       // вместо да блокираме потребителя с „имейлът е зает“.
       const passwordHash = await hashPassword(input.password);
       await one(
-        `update profiles set password_hash = $2, name = $3, city = $4 where email = $1 returning id`,
-        [email, passwordHash, input.name, input.city ?? 'София']
+        `update profiles set password_hash = $2, name = $3, city = $4,
+                signup_ip = coalesce(signup_ip, $5) where email = $1 returning id`,
+        [email, passwordHash, input.name, input.city ?? 'София', req.ip ?? null]
       );
       const row = await one<{ id: string }>('select id from profiles where email = $1', [email]);
       userId = row!.id;
@@ -124,10 +125,10 @@ export default async function authRoutes(app: FastifyInstance) {
 
       userId = await tx(async (client) => {
         const res = await client.query<{ id: string }>(
-          `insert into profiles (email, password_hash, name, handle, city, email_verified_at)
-           values ($1, $2, $3, $4, $5, null)
+          `insert into profiles (email, password_hash, name, handle, city, email_verified_at, signup_ip)
+           values ($1, $2, $3, $4, $5, null, $6)
            returning id`,
-          [email, passwordHash, input.name, handle, input.city ?? 'София']
+          [email, passwordHash, input.name, handle, input.city ?? 'София', req.ip ?? null]
         );
         const id = res.rows[0]!.id;
         await client.query(
@@ -271,15 +272,55 @@ export default async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req) => {
     const input = loginSchema.parse(req.body);
     const email = input.email.toLowerCase();
+    const ip = req.ip;
 
-    const row = await one<{ id: string; password_hash: string; email_verified_at: string | null }>(
-      'select id, password_hash, email_verified_at from profiles where email = $1',
+    const row = await one<{
+      id: string;
+      password_hash: string;
+      email_verified_at: string | null;
+      suspended_at: string | null;
+      suspended_until: string | null;
+      suspended_reason: string | null;
+      deleted_at: string | null;
+    }>(
+      `select id, password_hash, email_verified_at, suspended_at, suspended_until, suspended_reason, deleted_at
+         from profiles where email = $1`,
       [email]
     );
 
+    const passwordOk = row ? await verifyPassword(input.password, row.password_hash) : false;
+
+    // Всеки опит се записва — от него се засичат подбиране на парола и атаки.
+    await one(
+      `insert into login_attempts (email, ip, ok, reason) values ($1,$2,$3,$4) returning id`,
+      [
+        email,
+        ip,
+        Boolean(row && passwordOk),
+        row ? (passwordOk ? null : 'wrong_password') : 'no_profile',
+      ]
+    ).catch(() => undefined);
+
     // Еднакво съобщение за грешен имейл и грешна парола (без изтичане на информация)
-    if (!row || !(await verifyPassword(input.password, row.password_hash))) {
+    if (!row || !passwordOk) {
       throw unauthorized('Грешен имейл или парола.');
+    }
+
+    if (row.deleted_at) {
+      throw new AppError(403, 'account_deleted', 'Този профил е изтрит. Направи си нов, ако искаш да ползваш SmartPrice.');
+    }
+
+    // Сприян профил: не влиза, докато трае спирането. Причината се показва.
+    if (row.suspended_at && (!row.suspended_until || new Date(row.suspended_until) > new Date())) {
+      const until = row.suspended_until
+        ? ` до ${new Date(row.suspended_until).toLocaleDateString('bg-BG')}`
+        : '';
+      throw new AppError(
+        403,
+        'account_suspended',
+        `Профилът ти е спрян временно${until}.${row.suspended_reason ? ` Причина: ${row.suspended_reason}` : ''}`,
+        { reason: row.suspended_reason ?? null, until: row.suspended_until ?? null }
+      );
     }
 
     // Паролата е вярна, но имейлът не е потвърден → казваме точно това,
@@ -292,6 +333,13 @@ export default async function authRoutes(app: FastifyInstance) {
         { email }
       );
     }
+
+    await one(
+      `update profiles
+          set last_login_at = now(), last_seen_at = now(), login_count = login_count + 1
+        where id = $1 returning id`,
+      [row.id]
+    ).catch(() => undefined);
 
     return sessionPayload(app, row.id, await loadFullProfile(row.id));
   });
@@ -307,8 +355,28 @@ export default async function authRoutes(app: FastifyInstance) {
       throw unauthorized('Сесията е изтекла. Влез отново.');
     }
 
-    const exists = await one('select 1 from profiles where id = $1', [userId]);
-    if (!exists) throw unauthorized('Профилът вече не съществува.');
+    // Спирането и изтриването важат и за вече издадени сесии.
+    const row = await one<{
+      suspended_at: string | null;
+      suspended_until: string | null;
+      suspended_reason: string | null;
+      deleted_at: string | null;
+    }>(
+      'select suspended_at, suspended_until, suspended_reason, deleted_at from profiles where id = $1',
+      [userId]
+    );
+    if (!row || row.deleted_at) throw unauthorized('Профилът вече не съществува.');
+    if (row.suspended_at && (!row.suspended_until || new Date(row.suspended_until) > new Date())) {
+      throw new AppError(
+        403,
+        'account_suspended',
+        `Профилът ти е спрян временно.${row.suspended_reason ? ` Причина: ${row.suspended_reason}` : ''}`
+      );
+    }
+
+    await one(`update profiles set last_seen_at = now() where id = $1 returning id`, [userId]).catch(
+      () => undefined
+    );
 
     return sessionPayload(app, userId, await loadFullProfile(userId));
   });

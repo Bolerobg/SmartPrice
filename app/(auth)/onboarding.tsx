@@ -401,6 +401,70 @@ const ShareDemo: React.FC = () => {
   );
 };
 
+/** 9б. Търсене по ID — натисни кода, за да видиш как намира офертата */
+const OfferIdDemo: React.FC = () => {
+  const [typed, setTyped] = useState('');
+  const code = 'SP-7K2M4Q';
+
+  const typeNext = () => {
+    if (typed.length >= code.length) {
+      setTyped('');
+      return;
+    }
+    setTyped(code.slice(0, typed.length + 1));
+  };
+
+  const found = typed.length === code.length;
+
+  return (
+    <View style={[demo.card, demo.cardCyan]}>
+      <TouchableOpacity
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          backgroundColor: COLORS.bgCardElevated,
+          borderRadius: 12,
+          paddingHorizontal: 11,
+          paddingVertical: 10,
+        }}
+        onPress={typeNext}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="search" size={15} color={COLORS.greenBright} />
+        <Text style={{ flex: 1, color: typed ? COLORS.textPrimary : COLORS.textMuted, fontSize: 13.5, fontWeight: '700', letterSpacing: 0.5 }}>
+          {typed || 'Търси... или напиши ID на оферта'}
+        </Text>
+        {typed.length > 0 ? (
+          <Text style={{ color: COLORS.textMuted, fontSize: 11 }}>{typed.length}/{code.length}</Text>
+        ) : null}
+      </TouchableOpacity>
+
+      <Text style={{ color: COLORS.textMuted, fontSize: 11, marginTop: 8, textAlign: 'center' }}>
+        {found ? 'Намерена!' : 'Натисни полето — кодът се пише буква по буква'}
+      </Text>
+
+      {found ? (
+        <View style={[demo.row, { marginTop: 10 }]}>
+          <Text style={demo.emoji}>🛒</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={demo.title}>Олио 1 л — 2.19 €</Text>
+            <Text style={demo.place}>📍 Кауфланд, София · ID {code}</Text>
+          </View>
+          <Ionicons name="checkmark-circle" size={18} color={COLORS.greenBright} />
+        </View>
+      ) : (
+        <View style={[demo.hintRow]}>
+          <Ionicons name="pricetag-outline" size={13} color={COLORS.accentCyan} />
+          <Text style={[demo.hint, { color: COLORS.accentCyan }]}>
+            Всеки ID е уникален и се вижда на обявата
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
 /** 9. Инструменти — натисни, за да видиш за какво служи всяко */
 const ToolsDemo: React.FC = () => {
   const [active, setActive] = useState<number | null>(null);
@@ -546,6 +610,16 @@ export default function OnboardingScreen() {
         body:
           'Всяка оферта има собствен линк. Изпращаш я в WhatsApp, Viber, Telegram, Facebook или по имейл — с едно натискане.\n\nПолучателят вижда снимката, цената и мястото, дори да няма профил. Така една находка стига до стотици хора.',
         interactive: <ShareDemo />,
+      },
+      {
+        key: 'offerid',
+        emoji: '🔖',
+        gradient: ['#083344', '#0B0F1A'],
+        eyebrow: 'ТЪРСИ ПО ID',
+        title: 'Всяка оферта има свой ID',
+        body:
+          'На всяка оферта пише уникален код — например SP-7K2M4Q. Ако някой ти го прати по телефона или го видиш в чат, напиши го в търсачката горе и офертата излиза веднага.\n\nТака находката се намира, дори линкът да се загуби. ID-то се вижда и когато споделяш оферта с приятел.',
+        interactive: <OfferIdDemo />,
       },
       {
         key: 'tools',

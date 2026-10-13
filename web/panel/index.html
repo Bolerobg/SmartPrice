@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>SmartPrice · Админ панел</title>
+<link rel="icon" href="/favicon.png">
+<link rel="stylesheet" href="/panel/panel.css">
+</head>
+<body>
+
+<!-- ============================ ВХОД ============================ -->
+<div id="login" class="login-wrap">
+  <form class="login-card" id="login-form" autocomplete="on">
+    <div class="brand">
+      <span class="brand-logo">🛒</span>
+      <div>
+        <div class="brand-name">SmartPrice</div>
+        <div class="brand-sub">Админ панел</div>
+      </div>
+    </div>
+
+    <h1>Влез в панела</h1>
+    <p class="muted">Само за администратори. Достъпът се проверява на сървъра.</p>
+
+    <label class="field">
+      <span>Имейл</span>
+      <input type="email" id="login-email" required autocomplete="username" placeholder="kolyo.hristov@gmail.com">
+    </label>
+
+    <label class="field">
+      <span>Парола</span>
+      <input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••">
+    </label>
+
+    <button class="btn btn-primary btn-block" type="submit" id="login-btn">Влез</button>
+    <div class="login-error" id="login-error" hidden></div>
+  </form>
+</div>
+
+<!-- ============================ ПАНЕЛ ============================ -->
+<div id="app" hidden>
+  <aside class="sidebar">
+    <div class="side-brand">
+      <span class="brand-logo">🛒</span>
+      <div>
+        <div class="brand-name">SmartPrice</div>
+        <div class="brand-sub">Админ панел</div>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item" data-page="overview"><span>📊</span> Преглед</button>
+      <button class="nav-item" data-page="users"><span>👥</span> Потребители</button>
+      <button class="nav-item" data-page="posts"><span>🏷️</span> Оферти</button>
+      <button class="nav-item" data-page="comments"><span>💬</span> Коментари</button>
+      <button class="nav-item" data-page="reports"><span>🚩</span> Сигнали</button>
+      <button class="nav-item" data-page="categories"><span>🗂️</span> Категории</button>
+      <button class="nav-item" data-page="referrals"><span>🔗</span> Покани</button>
+      <button class="nav-item" data-page="favorites"><span>⭐</span> Любими</button>
+      <button class="nav-item" data-page="security"><span>🛡️</span> Сигурност</button>
+      <button class="nav-item" data-page="emails"><span>✉️</span> Имейли</button>
+      <button class="nav-item" data-page="audit"><span>📜</span> Дневник</button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="who" id="who"></div>
+      <button class="btn btn-ghost btn-block" id="logout-btn">Изход</button>
+      <a class="side-link" href="https://smart.lookthis.online" target="_blank" rel="noopener">Отвори приложението ↗</a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="page-title">Преглед</h1>
+        <div class="muted" id="page-sub">Какво се случва в приложението в реално време</div>
+      </div>
+      <div class="topbar-actions">
+        <span class="stamp" id="stamp"></span>
+        <button class="btn btn-ghost" id="reload-btn">↻ Обнови</button>
+      </div>
+    </header>
+
+    <section id="page" class="page"></section>
+  </main>
+</div>
+
+<!-- ======================= ПРОЗОРЕЦ / ФОРМА ======================= -->
+<div class="modal-backdrop" id="modal" hidden>
+  <div class="modal" id="modal-box">
+    <div class="modal-head">
+      <h2 id="modal-title">Заглавие</h2>
+      <button class="icon-btn" id="modal-close" aria-label="Затвори">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-foot" id="modal-foot"></div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<script src="/panel/panel.js"></script>
+</body>
+</html>

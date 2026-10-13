@@ -49,6 +49,10 @@ export function buildShareText(post: PostItem): string {
     `💳 Платено: ${post.pricePaid.toFixed(2)} ${post.currency}`,
   ];
 
+  // Уникалният ID на офертата: човекът, който получи линка, може да я намери и
+  // като напише този код в търсачката на приложението.
+  if (post.code) lines.push(`🔖 ID на офертата: ${post.code} (търси по него в приложението)`);
+
   const postedAt = formatPostedAtLong(post.createdAt);
   if (postedAt) lines.push(`🗓 Офертата е сложена ${postedAt}`);
 

@@ -565,7 +565,15 @@ export const api = {
 
   post: (id: string) => rawRequest<{ post: PostItem }>(`/api/posts/${id}`),
 
+  /** Търсене по ID на офертата (напр. SP-7K2M4Q). Работи и без вход. */
+  postByCode: (code: string) =>
+    rawRequest<{ post: PostItem }>(`/api/posts/by-code/${encodeURIComponent(code.trim())}`),
+
   bookmarks: () => rawRequest<{ items: PostItem[]; total: number }>('/api/posts/bookmarks'),
+
+  /** Бележка и собствено място към любима оферта. */
+  setBookmarkNote: (postId: string, payload: { note?: string | null; lat?: number | null; lng?: number | null }) =>
+    rawRequest<{ ok: boolean }>(`/api/posts/${postId}/bookmark`, { method: 'PATCH', body: payload }),
 
   createPost: (payload: CreatePostPayload) =>
     rawRequest<{ post: PostItem; profile: UserProfile }>('/api/posts', {

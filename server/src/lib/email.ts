@@ -211,3 +211,175 @@ export async function sendPasswordResetEmail(params: {
       `smart.lookthis.online`,
   });
 }
+
+/* ------------------------------------------------------------------ */
+/*  Писма от админа: спиране на профил, изтриване, аларма            */
+/* ------------------------------------------------------------------ */
+
+/** Обикновена обвивка (заглавие + текст), без голям код. */
+function plainLayout(params: { heading: string; intro: string; bodyHtml: string; footnote: string }): string {
+  return `<!DOCTYPE html>
+<html lang="bg">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SmartPrice</title></head>
+<body style="margin:0;padding:0;background:#0B0F1A;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0B0F1A;padding:32px 16px;">
+  <tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#131A2B;border:1px solid #233049;border-radius:20px;overflow:hidden;">
+      <tr><td style="height:5px;background:linear-gradient(90deg,#6366F1 0%,#06B6D4 50%,#FBBF24 100%);"></td></tr>
+      <tr><td style="padding:28px 30px 6px 30px;font-size:20px;font-weight:800;color:#F8FAFC;">
+        🛒 SmartPrice
+      </td></tr>
+      <tr><td style="padding:8px 30px 0 30px;">
+        <h1 style="margin:0;font-size:21px;line-height:1.35;font-weight:800;color:#F8FAFC;">${params.heading}</h1>
+      </td></tr>
+      <tr><td style="padding:10px 30px 0 30px;">
+        <p style="margin:0;font-size:15px;line-height:1.65;color:#94A3B8;">${params.intro}</p>
+      </td></tr>
+      <tr><td style="padding:16px 30px 0 30px;">
+        <div style="font-size:14.5px;line-height:1.7;color:#CBD5E1;">${params.bodyHtml}</div>
+      </td></tr>
+      <tr><td style="padding:20px 30px 0 30px;">
+        <p style="margin:0;font-size:12.5px;line-height:1.65;color:#64748B;">${params.footnote}</p>
+      </td></tr>
+      <tr><td style="padding:22px 30px 28px 30px;">
+        <div style="height:1px;background:#233049;margin-bottom:14px;"></div>
+        <p style="margin:0;font-size:11.5px;line-height:1.7;color:#475569;">
+          SmartPrice — споделяне на реални цени ·
+          <a href="https://smart.lookthis.online" style="color:#64748B;text-decoration:none;">smart.lookthis.online</a><br>
+          Този имейл е изпратен автоматично, не отговаряй на него.
+        </p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+}
+
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Писмо до потребител, чийто профил е спрян временно. */
+export async function sendAccountSuspendedEmail(params: {
+  to: string;
+  name: string;
+  reason: string;
+  until?: string | null;
+}): Promise<SendResult> {
+  const untilText = params.until
+    ? `Профилът е спрян до <strong style="color:#F8FAFC;">${escapeHtml(params.until)}</strong>. След тази дата ще можеш да влезеш отново.`
+    : 'Профилът е спрян за неопределено време.';
+
+  const html = plainLayout({
+    heading: 'Профилът ти е спрян временно ⏸️',
+    intro: `Здравей, ${escapeHtml(params.name)}. Профилът ти в SmartPrice е спрян временно от администратор.`,
+    bodyHtml: `
+      <div style="background:#0B0F1A;border:1px solid #2A3A5C;border-radius:14px;padding:16px;">
+        <div style="font-size:11.5px;font-weight:800;letter-spacing:1.4px;color:#64748B;text-transform:uppercase;padding-bottom:8px;">
+          Причина
+        </div>
+        <div style="font-size:15px;color:#FBBF24;font-weight:700;">${escapeHtml(params.reason)}</div>
+      </div>
+      <p style="margin:14px 0 0 0;">${untilText}</p>
+      <p style="margin:12px 0 0 0;">Докато профилът е спрян, не можеш да влизаш и офертите ти не се виждат в приложението.</p>`,
+    footnote:
+      'Ако смяташ, че има грешка, отговори на този имейл или пиши на екипа на SmartPrice.',
+  });
+
+  return sendMail({
+    to: params.to,
+    subject: 'SmartPrice: профилът ти е спрян временно',
+    html,
+    text:
+      `Здравей, ${params.name}.\n\n` +
+      `Профилът ти в SmartPrice е спрян временно.\n` +
+      `Причина: ${params.reason}\n` +
+      (params.until ? `Срок: до ${params.until}\n` : 'Срок: неопределен\n') +
+      `\nДокато е спрян, не можеш да влизаш и офертите ти не се виждат.\n\n` +
+      `smart.lookthis.online`,
+  });
+}
+
+/** Писмо до потребител, чийто профил е изтрит. */
+export async function sendAccountDeletedEmail(params: {
+  to: string;
+  name: string;
+  reason: string;
+}): Promise<SendResult> {
+  const html = plainLayout({
+    heading: 'Профилът ти е изтрит',
+    intro: `Здравей, ${escapeHtml(params.name)}. Профилът ти в SmartPrice беше изтрит от администратор.`,
+    bodyHtml: `
+      <div style="background:#0B0F1A;border:1px solid #2A3A5C;border-radius:14px;padding:16px;">
+        <div style="font-size:11.5px;font-weight:800;letter-spacing:1.4px;color:#64748B;text-transform:uppercase;padding-bottom:8px;">
+          Причина
+        </div>
+        <div style="font-size:15px;color:#F87171;font-weight:700;">${escapeHtml(params.reason)}</div>
+      </div>
+      <p style="margin:14px 0 0 0;">Офертите и коментарите ти вече не се показват. Ако искаш да ползваш SmartPrice отново, можеш да си направиш нов профил.</p>`,
+    footnote: 'Това писмо е изпратено, защото профилът ти беше изтрит по решение на екипа.',
+  });
+
+  return sendMail({
+    to: params.to,
+    subject: 'SmartPrice: профилът ти е изтрит',
+    html,
+    text:
+      `Здравей, ${params.name}.\n\n` +
+      `Профилът ти в SmartPrice беше изтрит.\n` +
+      `Причина: ${params.reason}\n\n` +
+      `Офертите и коментарите ти вече не се показват.\n\n` +
+      `smart.lookthis.online`,
+  });
+}
+
+/** Писмо до админа при ненормална активност в приложението. */
+export async function sendAdminAlertEmail(params: {
+  to: string;
+  title: string;
+  severity: string;
+  kind: string;
+  details: Record<string, unknown>;
+}): Promise<SendResult> {
+  const color =
+    params.severity === 'critical' ? '#F87171' : params.severity === 'warning' ? '#FBBF24' : '#06B6D4';
+
+  const rows = Object.entries(params.details)
+    .map(
+      ([k, v]) =>
+        `<tr>
+           <td style="padding:6px 10px;font-size:13px;color:#64748B;white-space:nowrap;">${escapeHtml(k)}</td>
+           <td style="padding:6px 10px;font-size:13.5px;color:#F8FAFC;font-weight:600;">${escapeHtml(
+             typeof v === 'object' ? JSON.stringify(v) : String(v)
+           )}</td>
+         </tr>`
+    )
+    .join('');
+
+  const html = plainLayout({
+    heading: `⚠️ ${escapeHtml(params.title)}`,
+    intro: 'Следенето за ненормална активност в SmartPrice засече следното:',
+    bodyHtml: `
+      <div style="background:#0B0F1A;border:1px solid ${color};border-radius:14px;padding:14px;">
+        <div style="font-size:11.5px;font-weight:800;letter-spacing:1.4px;color:${color};text-transform:uppercase;padding-bottom:8px;">
+          ${escapeHtml(params.severity)} · ${escapeHtml(params.kind)}
+        </div>
+        <table role="presentation" cellpadding="0" cellspacing="0">${rows}</table>
+      </div>
+      <p style="margin:14px 0 0 0;">Отвори админ панела, за да видиш подробностите и да реагираш.</p>`,
+    footnote: 'Това писмо се праща най-много веднъж на час за един и същ вид събитие.',
+  });
+
+  return sendMail({
+    to: params.to,
+    subject: `[SmartPrice алерт] ${params.title}`,
+    html,
+    text:
+      `${params.title}\n\n` +
+      `Вид: ${params.kind} (${params.severity})\n` +
+      Object.entries(params.details)
+        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+        .join('\n') +
+      `\n\nОтвори админ панела за подробности.`,
+  });
+}

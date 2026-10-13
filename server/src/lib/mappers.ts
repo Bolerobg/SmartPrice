@@ -40,6 +40,7 @@ export interface ReceiptItemRow {
 
 export interface PostRow {
   id: string;
+  public_code: string;
   author_id: string;
   polarity: 'green' | 'red';
   category: string;
@@ -66,6 +67,9 @@ export interface PostRow {
   image_url: string;
   comparison_image_url: string | null;
   comparison_label: string | null;
+  seller_type: 'business' | 'private';
+  seller_note: string | null;
+  seller_contact: string | null;
   verified_valid_today_count: number;
   last_verified_at: Date | string | null;
   helped_count: number;
@@ -164,6 +168,7 @@ export function mapPost(params: {
 
   return {
     id: post.id,
+    code: post.public_code,
     polarity: post.polarity,
     category: post.category,
     customCategoryLabel: post.custom_category_label ?? undefined,
@@ -199,6 +204,10 @@ export function mapPost(params: {
     imageUri: post.image_url,
     comparisonImageUri: post.comparison_image_url ?? undefined,
     comparisonLabel: post.comparison_label ?? undefined,
+    // Частни продавачи: тип, коментар „къде и кога да го намериш“ и контакт
+    sellerType: post.seller_type ?? 'business',
+    sellerNote: post.seller_note ?? undefined,
+    sellerContact: post.seller_contact ?? undefined,
     receipt: mapReceipt(receipt, receiptItems),
     author: {
       id: post.author.id,

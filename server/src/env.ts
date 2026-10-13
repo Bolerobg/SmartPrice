@@ -64,6 +64,8 @@ const schema = z.object({
 
   // Кои имейли имат админ права (томболи). Разделени със запетая.
   ADMIN_EMAILS: z.string().default(''),
+  // Къде отиват алармите при ненормална активност в приложението.
+  ALERT_EMAIL: z.string().default('hristov.backup@gmail.com'),
   SEED_DEMO_DATA: z
     .string()
     .default('true')

@@ -9,6 +9,7 @@ export interface FeedFilters {
   category?: string;
   city?: string;
   q?: string;
+  sellerType?: 'business' | 'private';
   authorId?: string;
   bookmarkedBy?: string;
   sort?: SortMode;
@@ -47,6 +48,17 @@ function buildWhere(filters: FeedFilters): Where {
     clauses.push(`lower(p.city) = lower(${bind(filters.city)})`);
   }
   if (filters.authorId) clauses.push(`p.author_id = ${bind(filters.authorId)}`);
+  if (filters.sellerType) clauses.push(`p.seller_type = ${bind(filters.sellerType)}`);
+
+  // Търсене по ID (публичния код) — работи и с „SP-7K2M4“, и с „7k2m4“, и с
+  // малки букви. Кодът се сравнява без тиретата, за да не се дразни човекът.
+  if (filters.q && filters.q.trim().length > 0) {
+    const raw = filters.q.trim();
+    if (/^(sp)?[-\s]?[a-z0-9]{4,12}$/i.test(raw)) {
+      const code = bind(`%${raw.replace(/[^a-z0-9]/gi, '')}%`);
+      clauses.push(`upper(replace(p.public_code, '-', '')) like upper(${code})`);
+    }
+  }
 
   if (filters.q && filters.q.trim().length > 0) {
       // Разделяме заявката на думи и изискваме ВСЯКА дума да съвпадне в НЯКОЕ
@@ -76,17 +88,13 @@ function buildWhere(filters: FeedFilters): Where {
               or sp_fold(a.name) like ${p}
               or sp_fold(a.handle) like ${p}
               or p.price_paid::text like ${p}
+              or upper(replace(p.public_code, '-', '')) like upper(replace(${p}, '-', ''))
               or sp_fold(p.category) like ${p}
               -- Етикетите на категориите са в клиента, затова ги въвеждаме тук,
               -- за да намериш „кафе“ или „хотел“, без да знаеш вътрешния id.
-              or sp_fold(case p.category
-                    when 'restaurants'   then 'ресторанти заведения храна обяд вечеря'
-                    when 'hotels_airbnb' then 'хотели airbnb booking нощувка настаняване'
-                    when 'supermarket'   then 'магазини продукти супермаркет храна'
-                    when 'cafes_bars'    then 'кафенета барове сладкарници кафе бар десерт'
-                    when 'services_tech' then 'услуги техника авто ремонт сервиз'
-                    when 'other'         then 'други стоки обекти услуги'
-                    else '' end) like ${p}
+              -- Синонимите вече се редактират от админ панела (category_labels).
+              or sp_fold(sp_category_synonyms(p.category)) like ${p}
+              or sp_fold(coalesce(p.seller_note, '')) like ${p}
               -- Смислови синоними: „капан“ намира всички червени флагове.
               or (p.polarity = 'green'
                   and 'оферта находка евтино изгодно намаление промоция топ'

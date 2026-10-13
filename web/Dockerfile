@@ -28,5 +28,7 @@ RUN node web/fix-index-html.mjs /out/index.html
 FROM nginx:alpine AS runtime
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /out /usr/share/nginx/html
+# Отделният админ дашборд (собствена страница на /panel/) — не минава през Expo
+COPY web/panel /usr/share/nginx/html/panel
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
