@@ -236,6 +236,10 @@ async function render(page, force = false) {
     if (page === 'audit') return await renderAudit(box, force);
   } catch (e) {
     box.innerHTML = `<div class="card"><div class="hint warn">${esc(e.message)}</div></div>`;
+  } finally {
+    // Всяка страница се рисува наново — тук подменяме нативните <select> с
+    // нашите менюта. Така не зависим от наблюдатели и работи винаги.
+    enhanceSelects();
   }
 }
 
@@ -1671,6 +1675,8 @@ function openModal(title, bodyHtml, buttons = [], wide = false) {
     foot.appendChild(el);
   });
   $('#modal').hidden = false;
+  // В модалите също има полета с избор — подменяме и тях.
+  enhanceSelects();
 }
 
 function closeModal() {
@@ -1723,6 +1729,294 @@ $('#modal').addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#modal').hidden) closeModal();
 });
+
+/* ------------------------------------------- красиви падащи менюта (select) */
+
+/**
+ * Заменя нативните <select> с наш бутон + наш списък.
+ *
+ * Нативният елемент остава в страницата (скрит), защото целият код чете
+ * `$('#id').value` и слага `.onchange`. Нашият списък само променя стойността
+ * му и пуска събитие `change` — тоест логиката работи без промяна, но човек
+ * вижда тъмно меню в стила на панела, а не системния браузърен списък.
+ */
+function enhanceSelects() {
+  document.querySelectorAll('select:not([data-enhanced])').forEach((sel) => {
+    sel.dataset.enhanced = '1';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'sel';
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(sel);
+    sel.classList.add('sel-native');
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sel-btn';
+
+    const labelEl = document.createElement('span');
+    const caret = document.createElement('span');
+    caret.className = 'sel-caret';
+    caret.textContent = '▾';
+    btn.appendChild(labelEl);
+    btn.appendChild(caret);
+
+    const menu = document.createElement('div');
+    menu.className = 'sel-menu';
+    menu.hidden = true;
+
+    const syncLabel = () => {
+      const opt = sel.options[sel.selectedIndex];
+      labelEl.textContent = opt ? opt.textContent : '';
+      btn.disabled = sel.disabled;
+      Array.from(menu.children).forEach((item, i) => {
+        item.classList.toggle('on', i === sel.selectedIndex);
+      });
+    };
+
+    const buildItems = () => {
+      menu.innerHTML = '';
+      Array.from(sel.options).forEach((opt, i) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'sel-item';
+        item.textContent = opt.textContent;
+        item.onclick = (e) => {
+          e.stopPropagation();
+          sel.selectedIndex = i;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          syncLabel();
+          menu.hidden = true;
+        };
+        menu.appendChild(item);
+      });
+      syncLabel();
+    };
+
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const willOpen = menu.hidden;
+      document.querySelectorAll('.sel-menu').forEach((m) => (m.hidden = true));
+      if (willOpen) {
+        // Ако под бутона няма място (например в модал), менюто се отваря нагоре.
+        const rect = btn.getBoundingClientRect();
+        menu.classList.toggle('up', rect.bottom + 320 > window.innerHeight && rect.top > 320);
+      }
+      menu.hidden = !willOpen;
+    };
+
+    // Кодът слага стойност програмно (напр. филтрите) — да не изостава надписът.
+    const proto = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    Object.defineProperty(sel, 'value', {
+      configurable: true,
+      get() {
+        return proto.get.call(sel);
+      },
+      set(v) {
+        proto.set.call(sel, v);
+        syncLabel();
+      },
+    });
+
+    sel.addEventListener('change', syncLabel);
+
+    // Ако списъкът с опции се смени по-късно (рядко), презареждаме редовете.
+    const mo = new MutationObserver(() => buildItems());
+    mo.observe(sel, { childList: true });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    buildItems();
+  });
+
+  // Същият принцип и за полетата с дата и час (нативният календар също е
+  // браузърен попъп) — виж enhanceDateInputs по-долу.
+  enhanceDateInputs();
+}
+
+/* ------------------------------------------- красив избор на дата и час */
+
+const DT_MONTHS = [
+  'януари', 'февруари', 'март', 'април', 'май', 'юни',
+  'юли', 'август', 'септември', 'октомври', 'ноември', 'декември',
+];
+const DT_WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+
+const dtPad = (x) => String(x).padStart(2, '0');
+const dtText = (d) =>
+  `${dtPad(d.getDate())}.${dtPad(d.getMonth() + 1)}.${d.getFullYear()}, ${dtPad(d.getHours())}:${dtPad(d.getMinutes())}`;
+const dtValue = (d) =>
+  `${d.getFullYear()}-${dtPad(d.getMonth() + 1)}-${dtPad(d.getDate())}T${dtPad(d.getHours())}:${dtPad(d.getMinutes())}`;
+
+/**
+ * Заменя нативния `datetime-local` с наш календар в стила на панела.
+ * Нативният input остава скрит и пази стойността — кодът чете `$('#rf-ends').value`
+ * както преди.
+ */
+function enhanceDateInputs() {
+  document.querySelectorAll('input[type="datetime-local"]:not([data-enhanced])').forEach((inp) => {
+    inp.dataset.enhanced = '1';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'sel';
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    inp.classList.add('sel-native');
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sel-btn';
+    const labelEl = document.createElement('span');
+    const caret = document.createElement('span');
+    caret.className = 'sel-caret';
+    caret.textContent = '🗓';
+    btn.appendChild(labelEl);
+    btn.appendChild(caret);
+
+    const pop = document.createElement('div');
+    pop.className = 'sel-menu dt-pop';
+    pop.hidden = true;
+
+    let view = inp.value ? new Date(inp.value) : new Date();
+
+    const syncLabel = () => {
+      labelEl.textContent = inp.value ? dtText(new Date(inp.value)) : 'Избери дата и час';
+    };
+
+    const setValue = (d) => {
+      inp.value = dtValue(d);
+      syncLabel();
+    };
+
+    const renderPop = () => {
+      const y = view.getFullYear();
+      const m = view.getMonth();
+      const startIdx = (new Date(y, m, 1).getDay() + 6) % 7; // понеделник = 0
+      const daysInMonth = new Date(y, m + 1, 0).getDate();
+      const today = new Date();
+      const sel = inp.value ? new Date(inp.value) : null;
+
+      let cells = '';
+      for (let i = 0; i < startIdx; i += 1) cells += '<span class="dt-day off"></span>';
+      for (let d = 1; d <= daysInMonth; d += 1) {
+        const isSel = sel && sel.getFullYear() === y && sel.getMonth() === m && sel.getDate() === d;
+        const isToday =
+          today.getFullYear() === y && today.getMonth() === m && today.getDate() === d;
+        cells += `<button type="button" class="dt-day${isSel ? ' on' : ''}${
+          isToday ? ' today' : ''
+        }" data-day="${d}">${d}</button>`;
+      }
+
+      const hh = sel ? sel.getHours() : 20;
+      const mm = sel ? sel.getMinutes() : 0;
+
+      pop.innerHTML = `
+        <div class="dt-head">
+          <button type="button" class="dt-nav" data-nav="-1">‹</button>
+          <strong>${DT_MONTHS[m]} ${y}</strong>
+          <button type="button" class="dt-nav" data-nav="1">›</button>
+        </div>
+        <div class="dt-wd">${DT_WEEKDAYS.map((w) => `<span>${w}</span>`).join('')}</div>
+        <div class="dt-grid">${cells}</div>
+        <div class="dt-time">
+          <span class="dim">Час</span>
+          <button type="button" class="dt-step" data-h="-1">−</button>
+          <strong>${dtPad(hh)}</strong>
+          <button type="button" class="dt-step" data-h="1">+</button>
+          <span class="dim" style="margin-left:10px">Мин</span>
+          <button type="button" class="dt-step" data-m="-15">−</button>
+          <strong>${dtPad(mm)}</strong>
+          <button type="button" class="dt-step" data-m="15">+</button>
+        </div>
+        <div class="dt-foot">
+          <button type="button" class="btn btn-sm" data-quick="today">Днес 20:00</button>
+          <button type="button" class="btn btn-sm" data-quick="week">След 7 дни</button>
+          <button type="button" class="btn btn-sm btn-primary" data-quick="done">Готово</button>
+        </div>`;
+
+      pop.querySelectorAll('[data-nav]').forEach((b) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          view = new Date(y, m + Number(b.dataset.nav), 1);
+          renderPop();
+        };
+      });
+      pop.querySelectorAll('.dt-day[data-day]').forEach((b) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const base = sel ? new Date(sel) : new Date();
+          setValue(new Date(y, m, Number(b.dataset.day), base.getHours(), base.getMinutes()));
+          renderPop();
+        };
+      });
+      pop.querySelectorAll('[data-h]').forEach((b) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const d = sel ? new Date(sel) : new Date();
+          d.setHours(d.getHours() + Number(b.dataset.h));
+          setValue(d);
+          renderPop();
+        };
+      });
+      pop.querySelectorAll('[data-m]').forEach((b) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const d = sel ? new Date(sel) : new Date();
+          d.setMinutes(d.getMinutes() + Number(b.dataset.m));
+          setValue(d);
+          renderPop();
+        };
+      });
+      pop.querySelectorAll('[data-quick]').forEach((b) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const q = b.dataset.quick;
+          if (q === 'done') {
+            pop.hidden = true;
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+          }
+          const d = new Date();
+          if (q === 'week') d.setDate(d.getDate() + 7);
+          d.setHours(20, 0, 0, 0);
+          setValue(d);
+          renderPop();
+        };
+      });
+    };
+
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const willOpen = pop.hidden;
+      document.querySelectorAll('.sel-menu').forEach((m) => (m.hidden = true));
+      if (willOpen) {
+        if (inp.value) view = new Date(inp.value);
+        // Календарят е висок — ако под бутона няма място, отваряме го нагоре.
+        const rect = btn.getBoundingClientRect();
+        pop.classList.toggle('up', rect.bottom + 430 > window.innerHeight && rect.top > 430);
+        renderPop();
+        pop.hidden = false;
+      }
+    };
+
+    wrap.appendChild(btn);
+    wrap.appendChild(pop);
+    syncLabel();
+  });
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.sel-menu').forEach((m) => (m.hidden = true));
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.sel-menu').forEach((m) => (m.hidden = true));
+});
+
+new MutationObserver(() => {
+  setTimeout(enhanceSelects, 0);
+}).observe(document.body, { childList: true, subtree: true });
+
+enhanceSelects();
 
 /* --------------------------------------------------------------- старт */
 
