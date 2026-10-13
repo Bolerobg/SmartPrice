@@ -322,7 +322,10 @@ export default async function raffleRoutes(app: FastifyInstance) {
   app.get('/api/raffles/:id/promo', async (req) => {
     const userId = optionalUserId(req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    if (!userId) return { shouldShow: false, views: 0, maxViews: PROMO_MAX_VIEWS, anonymous: true };
+    // Гост (без вход): няма как да участва, значи не е „вече участващ“ — рекламата
+    // трябва да се показва. Броят показвания се държи локално в приложението,
+    // защото няма профил, към който да се запише.
+    if (!userId) return { shouldShow: true, views: 0, maxViews: PROMO_MAX_VIEWS, anonymous: true };
     return promoState(userId, id);
   });
 

@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS } from '@/constants/theme';
 import { ProductPairPuzzle } from '@/components/ProductPairPuzzle';
 import { api, ApiError, type PuzzleTile, type RaffleItem, type RaffleStanding } from '@/src/api/client';
+import { useAuth } from '@/src/auth/AuthContext';
 
 type Phase = 'idle' | 'loading' | 'countdown' | 'playing';
 
@@ -29,6 +30,7 @@ const fmt = (ms: number | null | undefined) => {
 export default function RaffleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const [raffle, setRaffle] = useState<RaffleItem | null>(null);
   const [standings, setStandings] = useState<RaffleStanding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -308,7 +310,24 @@ export default function RaffleDetailScreen() {
             {raffle.postsNeeded ? ` · още ${raffle.postsNeeded}` : ' · условието е покрито ✓'}
           </Text>
 
-          {entry ? (
+          {/* Гост: томболата се рекламира преди регистрация — тук обясняваме как
+              се участва и водим към вход, вместо да показваме неактивен бутон. */}
+          {!isAuthenticated ? (
+            <>
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => router.push('/(auth)/login' as never)}
+                activeOpacity={0.88}
+              >
+                <Ionicons name="log-in-outline" size={17} color={COLORS.black} />
+                <Text style={styles.primaryBtnText}>Влез и участвай безплатно</Text>
+              </TouchableOpacity>
+              <Text style={styles.waitText}>
+                Участието е безплатно. Нужен е само профил — за да пазим находките ти и да
+                измерим времето ти на пъзела.
+              </Text>
+            </>
+          ) : entry ? (
             <View style={styles.entryRow}>
               <Ionicons name="checkmark-circle" size={17} color={COLORS.greenBright} />
               <Text style={styles.entryText}>Ти участваш в тази томбола</Text>
@@ -327,7 +346,7 @@ export default function RaffleDetailScreen() {
             </TouchableOpacity>
           )}
 
-          {!entry && progress < raffle.conditionPosts ? (
+          {isAuthenticated && !entry && progress < raffle.conditionPosts ? (
             <TouchableOpacity
               style={styles.secondaryBtn}
               onPress={() => router.push('/(tabs)/add' as never)}

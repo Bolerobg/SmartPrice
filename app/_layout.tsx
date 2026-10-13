@@ -171,7 +171,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // Презентацията (/tour) се показва и на невлезли — точно това искаме:
       // човекът да я види ПРЕДИ да се регистрира.
       const isPublicTour = segments[0] === 'tour';
-      if (!inAuthGroup && !isPublicPost && !isPublicTour) {
+      // Томболата се рекламира ПРЕДИ регистрация: гостът трябва да може да
+      // отвори /raffle и /raffle/<id> и да види наградата. Иначе натискането на
+      // „Виж томболата“ само го връщаше на екрана за вход (нищо не се случваше).
+      const isPublicRaffle = segments[0] === 'raffle';
+      if (!inAuthGroup && !isPublicPost && !isPublicTour && !isPublicRaffle) {
         // Първото пускане води до обяснението, после до входа.
         router.replace(onboardingSeen ? '/(auth)/login' : '/(auth)/onboarding');
       }
