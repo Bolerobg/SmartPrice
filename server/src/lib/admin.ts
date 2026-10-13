@@ -64,6 +64,32 @@ export async function requireAdminPanel(req: FastifyRequest): Promise<AdminProfi
   return profile;
 }
 
+/**
+ * Админ проверка, която приема И двата вида токен: от мобилното приложение
+ * (typ 'access') и от дашборда (typ 'admin'). Така админските маршрути, които
+ * вече съществуват (напр. томболите), се ползват и от панела, без дублиране.
+ */
+export async function requireAdminAnyToken(req: FastifyRequest): Promise<AdminProfile> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) throw unauthorized('Липсва токен за достъп.');
+
+  let userId: string;
+  try {
+    const payload = req.server.jwt.verify<{ sub?: string; typ?: string }>(header.slice(7).trim());
+    if (!payload.sub || (payload.typ !== 'admin' && payload.typ !== 'access')) {
+      throw new Error('грешен тип токен');
+    }
+    userId = payload.sub;
+  } catch {
+    throw unauthorized('Токенът е невалиден или е изтекъл.');
+  }
+
+  const profile = await loadAdminById(userId);
+  if (!profile) throw unauthorized('Профилът не е намерен.');
+  if (!isAdminProfile(profile)) throw forbidden('Този профил няма админ права.');
+  return profile;
+}
+
 /** Записва всяко действие на админа — кой, какво, кога, откъде. */
 export async function audit(params: {
   admin: { id: string; email: string };

@@ -141,6 +141,7 @@ const PAGES = {
   overview: ['Преглед', 'Какво се случва в приложението в реално време'],
   users: ['Потребители', 'Търси, редактирай, спри или изтрий профил'],
   posts: ['Оферти', 'Всички оферти с ID, локация и модерация'],
+  raffles: ['Томболи', 'Създай томбола, сложи наградата със снимка и я разиграй'],
   comments: ['Коментари', 'Преглед и модерация на коментарите'],
   reports: ['Сигнали', 'Какво сигнализират потребителите'],
   categories: ['Категории', 'Етикети и думи за търсене'],
@@ -224,6 +225,7 @@ async function render(page, force = false) {
     if (page === 'overview') return await renderOverview(box, force);
     if (page === 'users') return await renderUsers(box, force);
     if (page === 'posts') return await renderPosts(box, force);
+    if (page === 'raffles') return await renderRaffles(box, force);
     if (page === 'comments') return await renderComments(box, force);
     if (page === 'reports') return await renderReports(box, force);
     if (page === 'categories') return await renderCategories(box, force);
@@ -921,6 +923,225 @@ function openPost(p) {
       toast('Офертата е изтрита завинаги');
       closeModal();
       render('posts', true);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+}
+
+/* ------------------------------------------------------------ томболи */
+
+/** Качва снимка от панела и връща публичния ѝ адрес. */
+async function uploadImage(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/api/admin/upload', {
+    method: 'POST',
+    headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+    body: form,
+  });
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { error: { message: text.slice(0, 200) } };
+  }
+  if (!res.ok) throw new Error(data?.error?.message || `Грешка ${res.status}`);
+  return data.url;
+}
+
+const RAFFLE_STATUS = {
+  draft: ['Чернова', 'pill-dim'],
+  active: ['Събира участници', 'pill-green'],
+  running: ['Нареждането е отворено', 'pill-cyan'],
+  finished: ['Приключила', 'pill-dim'],
+  cancelled: ['Анулирана', 'pill-red'],
+};
+
+async function renderRaffles(box) {
+  const data = await api('/raffles');
+  const items = data.items || [];
+
+  box.innerHTML = `
+    <div class="toolbar">
+      <button class="btn btn-primary" id="r-new">+ Нова томбола</button>
+      <span class="dim">Снимката на наградата се качва оттук — тя се вижда в приложението, точно над линка „Виж продукта“.</span>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Томбола</th><th>Награда</th><th>Снимка</th><th>Срок</th><th>Участници</th><th>Статус</th><th></th></tr></thead>
+      <tbody>
+      ${
+        items.length
+          ? items
+              .map((r) => {
+                const [label, cls] = RAFFLE_STATUS[r.status] || [r.status, 'pill-dim'];
+                const ends = r.endsAt ? new Date(r.endsAt) : null;
+                const days = ends ? Math.max(0, Math.ceil((ends.getTime() - Date.now()) / 86400000)) : null;
+                return `<tr>
+              <td><strong>${esc(r.title)}</strong><div class="dim">минимум ${num(r.minParticipants)} · условие ${num(r.conditionPosts)} находки</div></td>
+              <td>${esc(r.prize.title)}${r.prize.price ? `<div class="dim">${money(r.prize.price)}</div>` : ''}
+                  ${r.prize.url ? `<a href="${esc(r.prize.url)}" target="_blank" rel="noopener">линк ↗</a>` : '<span class="dim">без линк</span>'}</td>
+              <td>${r.prize.image ? `<img src="${esc(r.prize.image)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">` : '<span class="pill pill-gold">няма</span>'}</td>
+              <td class="dim nowrap">${r.endsAt ? dt(r.endsAt) : '—'}${days !== null ? `<div>${days} дни</div>` : ''}</td>
+              <td>${num(r.qualifiedCount)}${r.winnerId ? `<div class="pill pill-green">има победител</div>` : ''}</td>
+              <td><span class="pill ${cls}">${esc(label)}</span></td>
+              <td class="actions">
+                <button class="btn btn-sm" data-r-edit="${esc(r.id)}">Редакция</button>
+                ${
+                  r.status === 'active'
+                    ? `<button class="btn btn-sm btn-ok" data-r-run="${esc(r.id)}">Пусни нареждането</button>`
+                    : ''
+                }
+                ${
+                  r.status === 'running'
+                    ? `<button class="btn btn-sm btn-warn" data-r-draw="${esc(r.id)}">Разиграй</button>`
+                    : ''
+                }
+                ${r.status === 'draft' ? `<button class="btn btn-sm btn-ok" data-r-activate="${esc(r.id)}">Активирай</button>` : ''}
+              </td>
+            </tr>`;
+              })
+              .join('')
+          : '<tr><td colspan="7" class="empty">Още няма томболи</td></tr>'
+      }
+      </tbody></table></div>`;
+
+  const byId = (id) => items.find((x) => x.id === id);
+
+  $('#r-new').onclick = () => raffleForm(null);
+
+  document.querySelectorAll('[data-r-edit]').forEach((b) => {
+    b.onclick = () => raffleForm(byId(b.dataset.rEdit));
+  });
+  document.querySelectorAll('[data-r-activate]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api(`/raffles/${b.dataset.rActivate}/status`, { method: 'POST', body: { status: 'active' } });
+        toast('Томболата е активна');
+        render('raffles', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  });
+  document.querySelectorAll('[data-r-run]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api(`/raffles/${b.dataset.rRun}/status`, { method: 'POST', body: { status: 'running' } });
+        toast('Нареждането е отворено');
+        render('raffles', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  });
+  document.querySelectorAll('[data-r-draw]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('Да разиграя ли томболата сега? Печели най-бързият, който е покрил условието.')) return;
+      try {
+        const res = await api(`/raffles/${b.dataset.rDraw}/draw`, { method: 'POST' });
+        toast(res.winner ? 'Има победител' : res.message || 'Няма победител');
+        render('raffles', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  });
+}
+
+/** Форма за нова/редакция на томбола, с качване на снимка на наградата. */
+function raffleForm(r) {
+  const isNew = !r;
+  const ends = r?.endsAt ? new Date(r.endsAt) : null;
+  const endsLocal = ends
+    ? new Date(ends.getTime() - ends.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    : '';
+
+  const body = `
+    <div class="form-grid">
+      <label class="field full"><span>Заглавие на томболата</span><input id="rf-title" value="${esc(r?.title || '')}" placeholder="Томбола „Октомври“ — Air Fryer"></label>
+      <label class="field full"><span>Описание (какво се прави)</span><textarea id="rf-desc">${esc(r?.description || '')}</textarea></label>
+
+      <label class="field"><span>Награда (име на продукта)</span><input id="rf-prize" value="${esc(r?.prize?.title || '')}" placeholder="Air Fryer Philips XXL (7,2 л)"></label>
+      <label class="field"><span>Цена на наградата (€)</span><input id="rf-price" type="number" step="0.01" value="${r?.prize?.price ?? ''}"></label>
+
+      <label class="field full"><span>Линк към продукта („Виж продукта“)</span><input id="rf-url" value="${esc(r?.prize?.url || '')}" placeholder="https://..."></label>
+
+      <div class="field full">
+        <span>Снимка на наградата (показва се в приложението над линка)</span>
+        <div style="display:flex;gap:12px;align-items:center;margin-top:6px">
+          <img id="rf-preview" src="${esc(r?.prize?.image || '')}" alt=""
+               style="width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--line);${r?.prize?.image ? '' : 'display:none'}">
+          <div style="flex:1">
+            <input type="file" id="rf-file" accept="image/jpeg,image/png,image/webp">
+            <input id="rf-image" value="${esc(r?.prize?.image || '')}" placeholder="...или постави адрес на снимка" style="margin-top:8px">
+          </div>
+        </div>
+      </div>
+
+      <label class="field"><span>Условие: брой находки със снимка</span><input id="rf-cond" type="number" min="1" max="50" value="${r?.conditionPosts ?? 3}"></label>
+      <label class="field"><span>Минимум участници</span><input id="rf-min" type="number" min="1" value="${r?.minParticipants ?? 5}"></label>
+      <label class="field full"><span>Краен срок</span><input id="rf-ends" type="datetime-local" value="${endsLocal}"></label>
+    </div>
+    ${isNew ? '' : `<div class="hint" style="margin-top:12px">Статус: <strong>${esc(r.status)}</strong> · участници: ${num(r.qualifiedCount)}</div>`}`;
+
+  openModal(isNew ? 'Нова томбола' : 'Редакция на томбола', body, [
+    { id: 'rf-save', label: isNew ? 'Създай' : 'Запази', cls: 'btn-primary' },
+    { id: 'rf-cancel', label: 'Отказ', cls: 'btn-ghost' },
+  ], true);
+
+  $('#rf-cancel').onclick = closeModal;
+
+  $('#rf-file').onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      toast('Качвам снимката…', 'warn');
+      const url = await uploadImage(file);
+      $('#rf-image').value = url;
+      const prev = $('#rf-preview');
+      prev.src = url;
+      prev.style.display = '';
+      toast('Снимката е качена');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
+  $('#rf-image').oninput = (e) => {
+    const prev = $('#rf-preview');
+    if (e.target.value) {
+      prev.src = e.target.value;
+      prev.style.display = '';
+    } else {
+      prev.style.display = 'none';
+    }
+  };
+
+  $('#rf-save').onclick = async () => {
+    const payload = {
+      title: $('#rf-title').value.trim(),
+      description: $('#rf-desc').value.trim(),
+      prizeTitle: $('#rf-prize').value.trim(),
+      prizeUrl: $('#rf-url').value.trim() || undefined,
+      prizeImageUrl: $('#rf-image').value.trim() || undefined,
+      prizePrice: $('#rf-price').value ? Number($('#rf-price').value) : undefined,
+      conditionPosts: Number($('#rf-cond').value) || 3,
+      minParticipants: Number($('#rf-min').value) || 5,
+      endsAt: $('#rf-ends').value ? new Date($('#rf-ends').value).toISOString() : undefined,
+    };
+    try {
+      if (isNew) {
+        if (!payload.endsAt) throw new Error('Посочи краен срок.');
+        await api('/raffles', { method: 'POST', body: { ...payload, activate: true } });
+        toast('Томболата е създадена и активна');
+      } else {
+        await api(`/raffles/${r.id}`, { method: 'PATCH', body: payload });
+        toast('Томболата е обновена');
+      }
+      closeModal();
+      render('raffles', true);
     } catch (e) {
       toast(e.message, 'error');
     }
