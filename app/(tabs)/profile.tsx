@@ -16,7 +16,10 @@ import {
   detectHomeScreenPlatform,
   isAlreadyInstalled,
 } from '@/components/AddToHomeScreenModal';
+import { InviteCard } from '@/components/InviteCard';
+import { StoryCardModal } from '@/components/StoryCardModal';
 import { COLORS } from '@/constants/theme';
+import { storyCardUrl } from '@/src/api/client';
 import { formatPostedAt } from '@/src/lib/format';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
@@ -31,6 +34,7 @@ const BADGE_UNITS: Record<string, string> = {
   red_flags: 'червени флага',
   savings: '€',
   supporter: '',
+  referrals: 'покани',
 };
 
 function unitFor(badge: { metric?: string | null }): string {
@@ -45,6 +49,8 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'badges' | 'bookmarks' | 'donations'>(
     'badges'
   );
+  // Карта „Спестих X €“ за Stories (генерира я сървърът).
+  const [cardOpen, setCardOpen] = useState(false);
 
   // Значките: отключените отгоре, а от заключените — тази, която е най-близо.
   const sortedBadges = [...userProfile.badges].sort((a, b) => {
@@ -136,6 +142,22 @@ export default function ProfileScreen() {
             </View>
           </View>
         </View>
+
+        {/* Поканален цикъл: кодът, линкът и колко души са дошли по тях */}
+        <InviteCard profile={userProfile} onOpenCard={() => setCardOpen(true)} />
+
+        {userProfile.personalSavedBgn > 0 ? (
+          <TouchableOpacity
+            style={styles.storyCardBtn}
+            onPress={() => setCardOpen(true)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="image" size={17} color={COLORS.black} />
+            <Text style={styles.storyCardBtnText}>
+              Карта „Спестих {userProfile.personalSavedBgn.toFixed(2)} €“ за Stories
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
         {/* Панел за Stripe Монетизация и Периодично Напомняне */}
         <View
@@ -461,11 +483,38 @@ export default function ProfileScreen() {
           </View>
         )}
       </ScrollView>
+
+      <StoryCardModal
+        visible={cardOpen}
+        onClose={() => setCardOpen(false)}
+        cardUrl={storyCardUrl({
+          total: userProfile.personalSavedBgn,
+          name: userProfile.name,
+          code: userProfile.referralCode,
+          posts: userProfile.postsCount,
+        })}
+        message={
+          `${userProfile.name} е спестил ${userProfile.personalSavedBgn.toFixed(2)} € с SmartPrice — ` +
+          'реални цени от хора, без реклами. Влез по моя код:'
+        }
+        title={`Карта „Спестих ${userProfile.personalSavedBgn.toFixed(2)} €“`}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  storyCardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.greenBright,
+    borderRadius: 14,
+    paddingVertical: 13,
+    marginTop: 12,
+  },
+  storyCardBtnText: { color: COLORS.black, fontSize: 13.5, fontWeight: '900' },
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.bgPrimary,

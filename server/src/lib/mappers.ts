@@ -264,6 +264,11 @@ export function mapProfile(p: {
   posts_count?: number;
   verified_receipts_count?: number;
   community_saved_bgn?: number;
+  referral_code?: string | null;
+  referral_points?: number;
+  referrals_invited?: number;
+  referrals_rewarded?: number;
+  referrals_pending?: number;
 }, extras: {
   badges: Array<{
     id: string;
@@ -295,6 +300,12 @@ export function mapProfile(p: {
     postsCount: p.posts_count ?? 0,
     verifiedReceiptsCount: p.verified_receipts_count ?? 0,
     reputationPoints: p.reputation_points,
+    // --- Поканален цикъл ---------------------------------------------------
+    referralCode: p.referral_code ?? '',
+    referralPoints: p.referral_points ?? 0,
+    referralsInvited: p.referrals_invited ?? 0,
+    referralsRewarded: p.referrals_rewarded ?? 0,
+    referralsPending: p.referrals_pending ?? 0,
     badges: extras.badges,
     donations: extras.donations,
     lastDonationPromptAt: p.last_donation_prompt_at ? new Date(iso(p.last_donation_prompt_at)).getTime() : null,

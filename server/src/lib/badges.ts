@@ -14,6 +14,8 @@ export interface BadgeMetrics {
   redFlags: number;
   savings: number;
   isSupporter: boolean;
+  /** Колко покани са довели реален (потвърден) нов потребител. */
+  referrals: number;
 }
 
 /** Текущите стойности на всичко, от което зависи някоя значка. */
@@ -27,6 +29,7 @@ export async function badgeMetrics(userId: string): Promise<BadgeMetrics | null>
     red_flags: number;
     savings: number;
     is_supporter: boolean;
+    referrals: number;
   }>(
     `select
        p.reputation_points,
@@ -42,7 +45,9 @@ export async function badgeMetrics(userId: string): Promise<BadgeMetrics | null>
        (select count(*) from price_history ph
          where ph.reported_by = p.id and ph.status in ('confirmed','changed'))       as price_checks,
        (select count(*) from price_history ph
-         where ph.reported_by = p.id and ph.status = 'changed')                     as price_corrections
+         where ph.reported_by = p.id and ph.status = 'changed')                     as price_corrections,
+       (select count(*) from referrals r
+         where r.inviter_id = p.id and r.status = 'rewarded')                       as referrals
      from profiles p
     where p.id = $1`,
     [userId]
@@ -58,6 +63,7 @@ export async function badgeMetrics(userId: string): Promise<BadgeMetrics | null>
     receipts: Number(row.receipts) || 0,
     redFlags: Number(row.red_flags) || 0,
     savings: Number(row.savings) || 0,
+    referrals: Number(row.referrals) || 0,
     isSupporter: Boolean(row.is_supporter),
   };
 }
@@ -83,7 +89,9 @@ export async function syncBadges(userId: string): Promise<void> {
               (select count(*) from price_history ph
                 where ph.reported_by = p.id and ph.status in ('confirmed','changed'))       as price_checks,
               (select count(*) from price_history ph
-                where ph.reported_by = p.id and ph.status = 'changed')                     as price_corrections
+                where ph.reported_by = p.id and ph.status = 'changed')                     as price_corrections,
+              (select count(*) from referrals r
+                where r.inviter_id = p.id and r.status = 'rewarded')                       as referrals
          from profiles p
         where p.id = $1
      )
@@ -101,6 +109,7 @@ export async function syncBadges(userId: string): Promise<void> {
           (b.metric = 'price_checks'       and s.price_checks      >= b.threshold) or
           (b.metric = 'price_corrections'  and s.price_corrections >= b.threshold) or
           (b.metric = 'reputation_points'  and s.reputation_points >= b.threshold) or
+          (b.metric = 'referrals'          and s.referrals         >= b.threshold) or
           (b.metric = 'supporter'          and s.is_supporter)
         )`,
     [userId]
@@ -127,6 +136,8 @@ export function progressFor(
       return m.redFlags;
     case 'savings':
       return Math.round(m.savings);
+    case 'referrals':
+      return m.referrals;
     case 'supporter':
       return m.isSupporter ? 1 : 0;
     default:

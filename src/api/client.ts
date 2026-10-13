@@ -239,6 +239,10 @@ export interface AuthResponse {
 export interface RegisterResponse {
   requiresVerification: true;
   email: string;
+  /** Дали кодът за покана е приет (точките идват след потвърждаване на имейла). */
+  referralApplied?: boolean;
+  /** Името на човека, който го е поканил — за да го поздравим по име. */
+  referralInviterName?: string;
   /** Дали сървърът изобщо може да праща имейли (RESEND_API_KEY) */
   emailSent: boolean;
   message: string;
@@ -306,6 +310,36 @@ export interface OcrReceipt extends ReceiptData {
   model?: string;
 }
 
+export interface ReferralSummary {
+  code: string;
+  link: string;
+  /** Колко точки носи една успешна покана (за двамата). */
+  pointsPerInvite: number;
+  invited: number;
+  rewarded: number;
+  pending: number;
+  pointsEarned: number;
+  invitedUsers: Array<{
+    id: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    status: 'pending' | 'rewarded' | 'void';
+    points: number;
+    createdAt: string;
+    rewardedAt: string | null;
+  }>;
+  shareText: string;
+}
+
+export interface ReferralCheck {
+  valid: boolean;
+  inviterName?: string;
+  inviterHandle?: string;
+  inviterAvatar?: string;
+  link?: string;
+}
+
 export interface CreatePostPayload {
   polarity: PostPolarity;
   category: Exclude<CategoryId, 'all'>;
@@ -370,7 +404,16 @@ export const api = {
 
   features: () => rawRequest<FeatureFlags>('/api/health/features', { auth: false }),
 
-  register: (input: { email: string; password: string; name: string; city?: string }) =>
+  register: (input: {
+    email: string;
+    password: string;
+    name: string;
+    city?: string;
+    /** Код за покана от приятел (по избор). */
+    ref?: string;
+    /** Откъде е дошъл кодът — за статистика по канал. */
+    refChannel?: string;
+  }) =>
     rawRequest<RegisterResponse>('/api/auth/register', {
       method: 'POST',
       body: input,
@@ -561,4 +604,42 @@ export const api = {
     }>('/api/me/interaction', { method: 'POST', body: { reasonHint } }),
 
   snoozeNudge: () => rawRequest<{ ok: boolean; snoozedForMs: number }>('/api/me/snooze', { method: 'POST' }),
+
+  // ------------------------------------------------------------- Поканален цикъл
+  /** Моят код, линк, колко души съм поканил и колко точки носят поканите. */
+  referrals: () => rawRequest<ReferralSummary>('/api/referrals/me'),
+
+  /** Има ли такъв код и кой стои зад него (преди регистрация). */
+  checkReferralCode: (code: string) =>
+    rawRequest<ReferralCheck>(
+      `/api/referrals/check?code=${encodeURIComponent(code.trim())}`,
+      { auth: false }
+    ),
+
+  /** Залепване на код за вече създаден профил (до 7 дни след регистрация). */
+  claimReferral: (code: string) =>
+    rawRequest<{ ok: true; inviterName: string; points: number }>('/api/referrals/claim', {
+      method: 'POST',
+      body: { code },
+    }),
 };
+
+/**
+ * Адрес на генерираната карта „Спестих X €“ (PNG 1080×1920, готов за Stories).
+ * Сървърът я рисува — затова е един и същ файл навсякъде.
+ */
+export function storyCardUrl(params: {
+  postId?: string;
+  total?: number;
+  name?: string;
+  code?: string;
+  posts?: number;
+}): string {
+  const q = new URLSearchParams();
+  if (params.postId) q.set('post', params.postId);
+  if (params.total !== undefined) q.set('total', String(params.total));
+  if (params.name) q.set('name', params.name);
+  if (params.code) q.set('code', params.code);
+  if (params.posts !== undefined) q.set('posts', String(params.posts));
+  return `${API_URL}/api/referrals/card.png?${q.toString()}`;
+}

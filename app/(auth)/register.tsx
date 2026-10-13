@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,15 +11,17 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { CityPickerDropdown } from '@/components/CityPickerDropdown';
 import { COLORS } from '@/constants/theme';
-import { ApiError, API_URL } from '@/src/api/client';
+import { ApiError, API_URL, api } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
 
 export default function RegisterScreen() {
   const router = useRouter();
   const { register } = useAuth();
+  // Ако човекът е дошъл по линк с код за покана (?ref=ABC123), попълваме го сам.
+  const params = useLocalSearchParams<{ ref?: string }>();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -28,6 +30,39 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // --- Поканален цикъл: код от приятел ---
+  const [refCode, setRefCode] = useState(
+    typeof params.ref === 'string' ? params.ref.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : ''
+  );
+  const [inviterName, setInviterName] = useState<string | null>(null);
+  const [refState, setRefState] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
+
+  useEffect(() => {
+    const code = refCode.trim();
+    if (code.length < 4) {
+      setRefState('idle');
+      setInviterName(null);
+      return;
+    }
+    let alive = true;
+    setRefState('checking');
+    const timer = setTimeout(() => {
+      api
+        .checkReferralCode(code)
+        .then((res) => {
+          if (!alive) return;
+          setRefState(res.valid ? 'valid' : 'invalid');
+          setInviterName(res.valid ? (res.inviterName ?? null) : null);
+        })
+        .catch(() => {
+          if (alive) setRefState('invalid');
+        });
+    }, 450);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [refCode]);
 
   const passwordIssue =
     password.length === 0
@@ -50,11 +85,21 @@ export default function RegisterScreen() {
     setIsSubmitting(true);
     setError(null);
     try {
-      const result = await register({ email, password, name, city });
+      const result = await register({
+        email,
+        password,
+        name,
+        city,
+        ref: refCode.trim() || undefined,
+        refChannel: params.ref ? 'invite-link' : undefined,
+      });
       // Профилът още не е потвърден → завеждаме потребителя на екрана с кода.
       router.replace({
         pathname: '/(auth)/verify',
-        params: { email: result.email },
+        params: {
+          email: result.email,
+          bonus: result.referralApplied ? (result.referralInviterName ?? '') : undefined,
+        },
       });
     } catch (err) {
       setError(
@@ -157,6 +202,34 @@ export default function RegisterScreen() {
           label="Твоят град"
         />
 
+        {/* Код от приятел — по избор. И двамата получавате по 100 точки. */}
+        <Text style={styles.label}>Код от приятел (по избор)</Text>
+        <TextInput
+          style={[
+            styles.input,
+            refState === 'valid' && { borderColor: COLORS.greenBright },
+            refState === 'invalid' && { borderColor: COLORS.goldBright },
+          ]}
+          placeholder="напр. A1B2C3"
+          placeholderTextColor={COLORS.textMuted}
+          value={refCode}
+          onChangeText={(text) => setRefCode(text.replace(/[^A-Za-z0-9]/g, '').toUpperCase())}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={12}
+        />
+        {refState === 'checking' ? (
+          <Text style={styles.refHint}>Проверявам кода…</Text>
+        ) : refState === 'valid' && inviterName ? (
+          <Text style={styles.refOk}>
+            ✓ {inviterName} те кани. Щом потвърдиш имейла си, и двамата получавате по 100 точки.
+          </Text>
+        ) : refState === 'invalid' ? (
+          <Text style={styles.refBad}>Няма такъв код — можеш да продължиш и без него.</Text>
+        ) : (
+          <Text style={styles.refHint}>Имаш ли код от приятел? Въведи го и двамата печелите точки.</Text>
+        )}
+
         {error && (
           <View style={styles.errorBox}>
             <Ionicons name="alert-circle" size={17} color={COLORS.redBright} />
@@ -256,6 +329,9 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 14.5,
   },
+  refHint: { color: COLORS.textMuted, fontSize: 11.5, marginTop: 6, fontWeight: '700' },
+  refOk: { color: COLORS.greenBright, fontSize: 11.5, marginTop: 6, fontWeight: '800', lineHeight: 16 },
+  refBad: { color: COLORS.goldBright, fontSize: 11.5, marginTop: 6, fontWeight: '800', lineHeight: 16 },
   passwordRow: { flexDirection: 'row', alignItems: 'center' },
   passwordInput: { flex: 1, paddingRight: 44 },
   eyeBtn: { position: 'absolute', right: 13, padding: 2 },

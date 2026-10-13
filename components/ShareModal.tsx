@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
 import {
+  buildShareMessage,
   buildShareText,
   copyPostLink,
   hasSystemShare,
@@ -20,6 +21,9 @@ import {
   shareViaSystem,
   SHARE_TARGETS,
 } from '@/lib/share';
+import { storyCardUrl } from '@/src/api/client';
+import { InviteCard } from '@/components/InviteCard';
+import { StoryCardModal } from '@/components/StoryCardModal';
 import type { PostItem } from '@/types';
 
 interface Props {
@@ -37,12 +41,14 @@ interface Props {
 export const ShareModal: React.FC<Props> = ({ post, onClose }) => {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cardOpen, setCardOpen] = useState(false);
   const systemShare = hasSystemShare();
 
   useEffect(() => {
     if (post) {
       setCopied(false);
       setError(null);
+      setCardOpen(false);
     }
   }, [post]);
 
@@ -87,6 +93,13 @@ export const ShareModal: React.FC<Props> = ({ post, onClose }) => {
 
   if (!post) return null;
 
+  // Колко е спестил човекът спрямо обичайната цена — това е числото на картата.
+  const saved =
+    post.referencePrice && post.referencePrice > post.pricePaid
+      ? post.referencePrice - post.pricePaid
+      : 0;
+  const cardUrl = saved > 0 ? storyCardUrl({ postId: post.id }) : '';
+
   const isGreen = post.polarity === 'green';
   const accent = isGreen ? COLORS.greenBright : COLORS.redBright;
   const accentSoft = isGreen ? COLORS.greenSoftBg : COLORS.redSoftBg;
@@ -113,7 +126,7 @@ export const ShareModal: React.FC<Props> = ({ post, onClose }) => {
             📍 {post.placeName} · {post.city}
           </Text>
 
-          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 330 }}>
+          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
             {systemShare && (
               <TouchableOpacity style={styles.systemBtn} onPress={handleSystem} activeOpacity={0.88}>
                 <Ionicons name="share-outline" size={18} color={COLORS.black} />
@@ -157,10 +170,32 @@ export const ShareModal: React.FC<Props> = ({ post, onClose }) => {
               </View>
             </TouchableOpacity>
 
+            {cardUrl ? (
+              <TouchableOpacity
+                style={styles.cardRow}
+                onPress={() => setCardOpen(true)}
+                activeOpacity={0.85}
+              >
+                <View style={[styles.cardIcon, { backgroundColor: accentSoft, borderColor: accent }]}>
+                  <Ionicons name="image" size={20} color={accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>Карта „Спестих {saved.toFixed(2)} €“ за Stories</Text>
+                  <Text style={styles.cardSub}>
+                    Готова картинка 1080×1920 — с твоя код за покана и QR
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+
             <View style={styles.previewBox}>
               <Text style={styles.previewLabel}>Ето какво ще получат:</Text>
               <Text style={styles.previewText}>{buildShareText(post)}</Text>
             </View>
+
+            {/* Поканален цикъл: тук човекът вече е в „настроение за споделяне“ */}
+            <InviteCard compact />
 
             {error ? (
               <View style={styles.errorBox}>
@@ -175,6 +210,16 @@ export const ShareModal: React.FC<Props> = ({ post, onClose }) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      {cardUrl ? (
+        <StoryCardModal
+          visible={cardOpen}
+          onClose={() => setCardOpen(false)}
+          cardUrl={cardUrl}
+          message={buildShareMessage(post)}
+          title={`Карта „Спестих ${saved.toFixed(2)} €“`}
+        />
+      ) : null}
     </Modal>
   );
 };
@@ -294,6 +339,28 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   previewText: { color: COLORS.textSecondary, fontSize: 12.5, lineHeight: 18.5 },
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 12,
+  },
+  cardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  cardTitle: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '900' },
+  cardSub: { color: COLORS.textMuted, fontSize: 11, marginTop: 3, lineHeight: 15 },
   errorBox: {
     flexDirection: 'row',
     gap: 8,

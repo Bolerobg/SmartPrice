@@ -14,6 +14,7 @@ import {
 import { AppError, badRequest, conflict, unauthorized } from '../lib/errors.js';
 import { loadFullProfile } from '../lib/profile.js';
 import { consumeCode, issueCode } from '../lib/verification.js';
+import { attachReferral } from '../lib/referrals.js';
 
 const registerSchema = z.object({
   email: z.string().email('Невалиден имейл.').max(160),
@@ -22,6 +23,10 @@ const registerSchema = z.object({
   password: z.string().min(1, 'Паролата е задължителна.').max(200),
   name: z.string().trim().min(2, 'Името е задължително.').max(80),
   city: z.string().trim().min(2).max(80).optional(),
+  // Код за покана от приятел (по избор). Невалиден код НЕ чупи регистрацията.
+  ref: z.string().trim().max(32).optional(),
+  // Откъде е дошъл (whatsapp/viber/story-card…) — за да знаем кой канал работи.
+  refChannel: z.string().trim().max(32).optional(),
 });
 
 const loginSchema = z.object({
@@ -134,6 +139,14 @@ export default async function authRoutes(app: FastifyInstance) {
       });
     }
 
+    // Поканата се записва сега, но точките се дават чак при потвърден имейл
+    // (иначе един човек може да си направи 100 профила и да трупа точки).
+    const referral = await attachReferral({
+      inviteeId: userId,
+      codeRaw: input.ref,
+      channel: input.refChannel ?? 'link',
+    }).catch(() => ({ applied: false } as const));
+
     const { devCode } = await issueCode({
       email,
       purpose: 'email_verify',
@@ -143,6 +156,8 @@ export default async function authRoutes(app: FastifyInstance) {
     return reply.status(201).send({
       requiresVerification: true,
       email,
+      referralApplied: referral.applied,
+      referralInviterName: referral.applied ? referral.inviterName : undefined,
       emailSent: features.mail,
       message: features.mail
         ? 'Изпратихме 6-цифрен код на имейла ти. Въведи го, за да активираш профила.'
