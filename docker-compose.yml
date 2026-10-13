@@ -54,6 +54,8 @@ services:
       VERIFICATION_MAX_PER_HOUR: "${VERIFICATION_MAX_PER_HOUR:-5}"
       VERIFICATION_MAX_ATTEMPTS: "${VERIFICATION_MAX_ATTEMPTS:-5}"
       SEED_DEMO_DATA: "${SEED_DEMO_DATA:-true}"
+      # Кои имейли са администратори (създават и управляват томболи)
+      ADMIN_EMAILS: "${ADMIN_EMAILS:-kolyo.hristov@gmail.com}"
       # Къде живеят снимките: local (диск) или s3 (Cloudflare R2 / MinIO)
       STORAGE_DRIVER: "${STORAGE_DRIVER:-local}"
       S3_ENDPOINT: "${S3_ENDPOINT:-}"

@@ -12,6 +12,7 @@ import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { Avatar } from '@/components/Avatar';
 import { InviteCard } from '@/components/InviteCard';
+import { RaffleTeaser } from '@/components/RaffleTeaser';
 
 type BoardTab = 'saved' | 'checkers' | 'points';
 
@@ -92,6 +93,9 @@ export default function CommunityScreen() {
 
         {/* Поканата е до класацията нарочно: точките от покани влизат в нея. */}
         <InviteCard profile={userProfile} compact />
+
+        {/* Томболата: кой какво е спечелил и как да участваш */}
+        <RaffleTeaser compact />
 
         {/* Голяма карта: Спестени пари на общността */}
         <View style={styles.heroStatsCard}>

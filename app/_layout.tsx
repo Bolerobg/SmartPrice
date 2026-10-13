@@ -12,6 +12,7 @@ import { AddToHomeScreenModal } from '@/components/AddToHomeScreenModal';
 import { DonationModal } from '@/components/DonationModal';
 import { AlertHost } from '@/components/AlertHost';
 import { ShareModal } from '@/components/ShareModal';
+import { RafflePromoHost } from '@/components/RafflePromoModal';
 // Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
 // Импортът е само за страничния ефект и трябва да е преди първия Alert.alert.
 import '@/lib/alertHost';
@@ -200,6 +201,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           mode={addToHomeMode}
         />
         <ShareModal post={sharingPost} onClose={closeShare} />
+        {/* Реклама на томболата: макс. 3 пъти, с X, на различни влизания */}
+        <RafflePromoHost />
       </>
     );
   }
