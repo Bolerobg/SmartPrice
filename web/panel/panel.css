@@ -145,6 +145,14 @@ select { cursor: pointer; }
 .btn-primary:hover { filter: brightness(1.08); }
 .btn-danger { background: rgba(248, 113, 113, 0.14); border-color: rgba(248, 113, 113, 0.45); color: #FCA5A5; }
 .btn-danger:hover { background: rgba(248, 113, 113, 0.22); }
+/* Силен, „твърд“ червен бутон — за потвърждаване на опасни действия в модала */
+.btn-danger-solid {
+  background: linear-gradient(135deg, #DC2626, #B91C1C);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 800;
+}
+.btn-danger-solid:hover { filter: brightness(1.1); }
 .btn-warn { background: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.45); color: #FCD34D; }
 .btn-warn:hover { background: rgba(245, 158, 11, 0.22); }
 .btn-ok { background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.45); color: #86EFAC; }

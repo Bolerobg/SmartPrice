@@ -441,6 +441,45 @@ export default async function raffleRoutes(app: FastifyInstance) {
     return { ...result, raffle: mapRaffle(await loadRaffle(id)) };
   });
 
+  /**
+   * Изтриване на томбола ЗАВИНАГИ.
+   *
+   * Заедно с нея падат и участията, класацията, одиторските ѝ събития и броят
+   * показвания на рекламата (външни ключове с ON DELETE CASCADE). Затова
+   * връщаме какво е заминало, а панелът пита за потвърждение преди това.
+   */
+  app.delete('/api/admin/raffles/:id', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+
+    const raffle = await one<{ title: string; status: string }>(
+      'select title, status from raffles where id = $1',
+      [id]
+    );
+    if (!raffle) throw notFound('Томболата не е намерена.');
+
+    const counts = await one<{ entries: number; events: number; views: number }>(
+      `select
+         (select count(*) from raffle_entries where raffle_id = $1)::int      as entries,
+         (select count(*) from raffle_events where raffle_id = $1)::int       as events,
+         (select count(*) from raffle_promo_views where raffle_id = $1)::int  as views`,
+      [id]
+    );
+
+    await query('delete from raffles where id = $1', [id]);
+
+    return {
+      ok: true,
+      removed: {
+        title: raffle.title,
+        status: raffle.status,
+        entries: Number(counts?.entries ?? 0),
+        events: Number(counts?.events ?? 0),
+        promoViews: Number(counts?.views ?? 0),
+      },
+    };
+  });
+
   /** Кой какво е правил — за спорове и за статистика. */
   app.get('/api/admin/raffles/:id/events', async (req) => {
     await adminGuard(req);
