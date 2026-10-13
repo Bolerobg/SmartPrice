@@ -17,11 +17,11 @@ import {
   loadRaffle,
   logEvent,
   promoState,
-  requireAdmin,
   standings,
   winnersWall,
 } from '../lib/raffles.js';
 import { syncBadges } from '../lib/badges.js';
+import { requireAdminAnyToken } from '../lib/admin.js';
 
 /**
  * Томболи — HTTP слоят.
@@ -344,7 +344,9 @@ export default async function raffleRoutes(app: FastifyInstance) {
 
   /* ------------------------------------------------------------- админ */
 
-  const adminGuard = async (req: FastifyRequest) => requireAdmin(requireUserId(req));
+  // Приема и токен от приложението, и от админ панела (дашборда), за да се
+  // управляват томболите и от двете места без дублиране на логика.
+  const adminGuard = async (req: FastifyRequest) => requireAdminAnyToken(req);
 
   app.get('/api/admin/raffles', async (req) => {
     await adminGuard(req);

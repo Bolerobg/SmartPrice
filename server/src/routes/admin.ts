@@ -1,8 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { many, one, query } from '../db.js';
-import { badRequest, conflict, notFound, unauthorized } from '../lib/errors.js';
+import { env } from '../env.js';
+import { badRequest, conflict, notFound, tooLarge, unauthorized } from '../lib/errors.js';
 import { hashPassword, verifyPassword } from '../lib/auth.js';
+import { putImage, publicUrl, storageDriver } from '../lib/storage.js';
 import {
   audit,
   isAdminProfile,
@@ -983,6 +986,67 @@ export default async function adminRoutes(app: FastifyInstance) {
     await audit({ admin, action: 'email_send', targetType: 'profile', targetId: input.userId ?? null, details: { to: email, subject: input.subject }, ip: req.ip });
 
     return { ok: true, to: email, providerId: res.id };
+  });
+
+  /* ------------------------------------------------- качване на снимка */
+
+  /**
+   * Качване на снимка от панела (напр. снимка на наградата за томбола).
+   * Ползва същото хранилище като приложението (диск или S3), но с токена на
+   * дашборда. Връща публичния адрес, който се слага в полето за снимка.
+   */
+  app.post('/api/admin/upload', async (req, reply) => {
+    const admin = await requireAdminPanel(req);
+
+    const file = await req.file();
+    if (!file) throw badRequest('Не е изпратен файл.');
+
+    const allowed = new Map<string, string>([
+      ['image/jpeg', 'jpg'],
+      ['image/jpg', 'jpg'],
+      ['image/png', 'png'],
+      ['image/webp', 'webp'],
+    ]);
+    const extension = allowed.get(file.mimetype);
+    if (!extension) throw badRequest('Позволени формати: JPEG, PNG, WebP.');
+
+    const maxBytes = env.MAX_UPLOAD_MB * 1024 * 1024;
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let tooBig = false;
+
+    for await (const chunk of file.file) {
+      const buf = chunk as Buffer;
+      bytes += buf.length;
+      if (bytes > maxBytes) {
+        tooBig = true;
+        file.file.destroy();
+        break;
+      }
+      chunks.push(buf);
+    }
+    if (tooBig) throw tooLarge(`Снимката е твърде голяма (макс. ${env.MAX_UPLOAD_MB} MB).`);
+    if (bytes === 0) throw badRequest('Файлът е празен.');
+
+    const storedName = `${randomUUID()}.${extension}`;
+    await putImage(storedName, Buffer.concat(chunks), file.mimetype);
+    await one(
+      `insert into uploads (owner_id, stored_name, mime_type, byte_size, storage)
+       values ($1,$2,$3,$4,$5) returning id`,
+      [admin.id, storedName, file.mimetype, bytes, storageDriver]
+    );
+
+    const url = publicUrl(storedName);
+    await audit({
+      admin,
+      action: 'upload_image',
+      targetType: 'upload',
+      targetId: storedName,
+      details: { bytes, mime: file.mimetype, url },
+      ip: req.ip,
+    });
+
+    return reply.status(201).send({ url, byteSize: bytes, mimeType: file.mimetype });
   });
 }
 
