@@ -999,6 +999,7 @@ async function renderRaffles(box) {
                     : ''
                 }
                 ${r.status === 'draft' ? `<button class="btn btn-sm btn-ok" data-r-activate="${esc(r.id)}">Активирай</button>` : ''}
+                <button class="btn btn-sm btn-danger" data-r-del="${esc(r.id)}">Изтрий</button>
               </td>
             </tr>`;
               })
@@ -1048,6 +1049,26 @@ async function renderRaffles(box) {
       }
     };
   });
+
+  document.querySelectorAll('[data-r-del]').forEach((b) => {
+    b.onclick = async () => {
+      const r = byId(b.dataset.rDel);
+      const ok = confirm(
+        `Да изтрия ли „${r ? r.title : 'томболата'}“ ЗАВИНАГИ?\n\n` +
+          'Заедно с нея се махат и участията, класацията, историята и броят показвания на рекламата. ' +
+          'Това не може да се върне назад.'
+      );
+      if (!ok) return;
+      try {
+        const res = await api(`/raffles/${b.dataset.rDel}`, { method: 'DELETE' });
+        const rm = res.removed || {};
+        toast(`Изтрита: „${rm.title || ''}“ · махнати участия: ${rm.entries ?? 0}, събития: ${rm.events ?? 0}`);
+        render('raffles', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  });
 }
 
 /** Форма за нова/редакция на томбола, с качване на снимка на наградата. */
@@ -1088,10 +1109,31 @@ function raffleForm(r) {
 
   openModal(isNew ? 'Нова томбола' : 'Редакция на томбола', body, [
     { id: 'rf-save', label: isNew ? 'Създай' : 'Запази', cls: 'btn-primary' },
+    ...(isNew ? [] : [{ id: 'rf-delete', label: '🗑 Изтрий томболата', cls: 'btn-danger' }]),
     { id: 'rf-cancel', label: 'Отказ', cls: 'btn-ghost' },
   ], true);
 
   $('#rf-cancel').onclick = closeModal;
+
+  if ($('#rf-delete')) {
+    $('#rf-delete').onclick = async () => {
+      const ok = confirm(
+        `Да изтрия ли „${r.title}“ ЗАВИНАГИ?\n\n` +
+          'Заедно с нея се махат участията, класацията, историята и броят показвания на рекламата. ' +
+          'Това не може да се върне назад.'
+      );
+      if (!ok) return;
+      try {
+        const res = await api(`/raffles/${r.id}`, { method: 'DELETE' });
+        const rm = res.removed || {};
+        toast(`Изтрита: „${rm.title || ''}“ · махнати участия: ${rm.entries ?? 0}`);
+        closeModal();
+        render('raffles', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  }
 
   $('#rf-file').onchange = async (e) => {
     const file = e.target.files && e.target.files[0];
