@@ -916,16 +916,26 @@ function openPost(p) {
       toast(e.message, 'error');
     }
   };
-  $('#pp-hard').onclick = async () => {
-    if (!confirm(`Изтриване ЗАВИНАГИ на ${p.public_code}? Няма връщане назад.`)) return;
-    try {
-      await api(`/posts/${p.id}?hard=true`, { method: 'DELETE' });
-      toast('Офертата е изтрита завинаги');
-      closeModal();
-      render('posts', true);
-    } catch (e) {
-      toast(e.message, 'error');
-    }
+  $('#pp-hard').onclick = () => {
+    confirmAction({
+      title: 'Изтриване завинаги',
+      message: `Оферта <strong>${esc(p.public_code)}</strong> — „${esc(p.title)}“ ще бъде изтрита без връщане назад.`,
+      details: [
+        'Офертата, коментарите и реакциите към нея се махат от базата.',
+        'Ако искаш само да я скриеш от приложението, използвай „Премахни“ (статус „премахната“).',
+      ],
+      confirmLabel: 'Изтрий завинаги',
+      onConfirm: async () => {
+        try {
+          await api(`/posts/${p.id}?hard=true`, { method: 'DELETE' });
+          toast('Офертата е изтрита завинаги');
+          closeModal();
+          render('posts', true);
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      },
+    });
   };
 }
 
@@ -1038,35 +1048,56 @@ async function renderRaffles(box) {
     };
   });
   document.querySelectorAll('[data-r-draw]').forEach((b) => {
-    b.onclick = async () => {
-      if (!confirm('Да разиграя ли томболата сега? Печели най-бързият, който е покрил условието.')) return;
-      try {
-        const res = await api(`/raffles/${b.dataset.rDraw}/draw`, { method: 'POST' });
-        toast(res.winner ? 'Има победител' : res.message || 'Няма победител');
-        render('raffles', true);
-      } catch (e) {
-        toast(e.message, 'error');
-      }
+    b.onclick = () => {
+      const r = byId(b.dataset.rDraw);
+      confirmAction({
+        title: 'Разиграване на томболата',
+        message: `Да разиграя ли сега: <strong>${esc(r ? r.title : 'томболата')}</strong>?`,
+        details: [
+          'Печели най-бързият, който е покрил условието и е наредил пъзела.',
+          `Участници в момента: ${r ? num(r.qualifiedCount) : 0}.`,
+          'След разиграването томболата става „приключила“ и резултатът се вижда от всички.',
+        ],
+        confirmLabel: 'Разиграй',
+        danger: false,
+        onConfirm: async () => {
+          try {
+            const res = await api(`/raffles/${b.dataset.rDraw}/draw`, { method: 'POST' });
+            toast(res.winner ? 'Има победител' : res.message || 'Няма победител');
+            closeModal();
+            render('raffles', true);
+          } catch (e) {
+            toast(e.message, 'error');
+          }
+        },
+      });
     };
   });
 
   document.querySelectorAll('[data-r-del]').forEach((b) => {
-    b.onclick = async () => {
+    b.onclick = () => {
       const r = byId(b.dataset.rDel);
-      const ok = confirm(
-        `Да изтрия ли „${r ? r.title : 'томболата'}“ ЗАВИНАГИ?\n\n` +
-          'Заедно с нея се махат и участията, класацията, историята и броят показвания на рекламата. ' +
-          'Това не може да се върне назад.'
-      );
-      if (!ok) return;
-      try {
-        const res = await api(`/raffles/${b.dataset.rDel}`, { method: 'DELETE' });
-        const rm = res.removed || {};
-        toast(`Изтрита: „${rm.title || ''}“ · махнати участия: ${rm.entries ?? 0}, събития: ${rm.events ?? 0}`);
-        render('raffles', true);
-      } catch (e) {
-        toast(e.message, 'error');
-      }
+      confirmAction({
+        title: 'Изтриване на томбола',
+        message: `<strong>${esc(r ? r.title : '')}</strong> ще бъде изтрита <strong>завинаги</strong>.`,
+        details: [
+          `Участия, които се махат: ${r ? num(r.qualifiedCount) : 0}.`,
+          'Класацията, историята и броят показвания на рекламата също се махат.',
+          'Действието не може да се върне назад. Ако искаш само да я спреш, ползвай „Анулирай“ чрез статуса.',
+        ],
+        confirmLabel: 'Изтрий завинаги',
+        onConfirm: async () => {
+          try {
+            const res = await api(`/raffles/${b.dataset.rDel}`, { method: 'DELETE' });
+            const rm = res.removed || {};
+            toast(`Изтрита: „${rm.title || ''}“ · махнати участия: ${rm.entries ?? 0}, събития: ${rm.events ?? 0}`);
+            closeModal();
+            render('raffles', true);
+          } catch (e) {
+            toast(e.message, 'error');
+          }
+        },
+      });
     };
   });
 }
@@ -1116,22 +1147,28 @@ function raffleForm(r) {
   $('#rf-cancel').onclick = closeModal;
 
   if ($('#rf-delete')) {
-    $('#rf-delete').onclick = async () => {
-      const ok = confirm(
-        `Да изтрия ли „${r.title}“ ЗАВИНАГИ?\n\n` +
-          'Заедно с нея се махат участията, класацията, историята и броят показвания на рекламата. ' +
-          'Това не може да се върне назад.'
-      );
-      if (!ok) return;
-      try {
-        const res = await api(`/raffles/${r.id}`, { method: 'DELETE' });
-        const rm = res.removed || {};
-        toast(`Изтрита: „${rm.title || ''}“ · махнати участия: ${rm.entries ?? 0}`);
-        closeModal();
-        render('raffles', true);
-      } catch (e) {
-        toast(e.message, 'error');
-      }
+    $('#rf-delete').onclick = () => {
+      confirmAction({
+        title: 'Изтриване на томбола',
+        message: `<strong>${esc(r.title)}</strong> ще бъде изтрита <strong>завинаги</strong>.`,
+        details: [
+          `Участия, които се махат: ${num(r.qualifiedCount)}.`,
+          'Класацията, историята и броят показвания на рекламата също се махат.',
+          'Действието не може да се върне назад.',
+        ],
+        confirmLabel: 'Изтрий завинаги',
+        onConfirm: async () => {
+          try {
+            const res = await api(`/raffles/${r.id}`, { method: 'DELETE' });
+            const rm = res.removed || {};
+            toast(`Изтрита: „${rm.title || ''}“ · махнати участия: ${rm.entries ?? 0}`);
+            closeModal();
+            render('raffles', true);
+          } catch (e) {
+            toast(e.message, 'error');
+          }
+        },
+      });
     };
   }
 
@@ -1252,16 +1289,23 @@ async function renderComments(box, force) {
     document.querySelectorAll('[data-c-show]').forEach((b) => (b.onclick = () => setStatus(b.dataset.cShow, 'published')));
     document.querySelectorAll('[data-c-del]').forEach(
       (b) =>
-        (b.onclick = async () => {
-          if (!confirm('Изтриване на коментара завинаги?')) return;
-          try {
-            await api(`/comments/${b.dataset.cDel}`, { method: 'DELETE' });
-            toast('Коментарът е изтрит');
-            load();
-          } catch (e) {
-            toast(e.message, 'error');
-          }
-        })
+        (b.onclick = () =>
+          confirmAction({
+            title: 'Изтриване на коментар',
+            message: 'Коментарът ще бъде изтрит завинаги.',
+            details: ['Действието не може да се върне назад. Ако искаш само да го скриеш, ползвай „Скрий“.'],
+            confirmLabel: 'Изтрий',
+            onConfirm: async () => {
+              try {
+                await api(`/comments/${b.dataset.cDel}`, { method: 'DELETE' });
+                toast('Коментарът е изтрит');
+                closeModal();
+                load();
+              } catch (e) {
+                toast(e.message, 'error');
+              }
+            },
+          }))
     );
   };
 
@@ -1633,6 +1677,43 @@ function closeModal() {
   $('#modal').hidden = true;
   $('#modal-body').innerHTML = '';
   $('#modal-foot').innerHTML = '';
+}
+
+/**
+ * Потвърждение в стила на панела — вместо браузърния popup (confirm()).
+ * `danger: true` прави бутона червен и слага предупредителен блок.
+ */
+function confirmAction({ title, message, details = [], confirmLabel = 'Потвърди', danger = true, onConfirm }) {
+  const body = `
+    <div class="hint ${danger ? 'warn' : ''}">${message}</div>
+    ${
+      details.length
+        ? `<ul style="margin:14px 0 0 0;padding-left:20px;color:var(--muted);font-size:13.5px;line-height:1.75">
+             ${details.map((d) => `<li>${d}</li>`).join('')}
+           </ul>`
+        : ''
+    }`;
+
+  openModal(title, body, [
+    { id: 'cf-ok', label: confirmLabel, cls: danger ? 'btn-danger-solid' : 'btn-primary' },
+    { id: 'cf-cancel', label: 'Отказ', cls: 'btn-ghost' },
+  ]);
+
+  $('#cf-cancel').onclick = closeModal;
+  $('#cf-ok').onclick = async () => {
+    const btn = $('#cf-ok');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Изпълнявам…';
+    try {
+      await onConfirm();
+    } finally {
+      if (document.body.contains(btn)) {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    }
+  };
 }
 
 $('#modal-close').onclick = closeModal;
