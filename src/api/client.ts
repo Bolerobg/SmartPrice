@@ -571,6 +571,13 @@ export const api = {
 
   bookmarks: () => rawRequest<{ items: PostItem[]; total: number }>('/api/posts/bookmarks'),
 
+  /** Смяна на паролата, докато си влязъл (иска текущата парола). */
+  changePassword: (payload: { currentPassword: string; newPassword: string }) =>
+    rawRequest<{ ok: boolean; message: string }>('/api/auth/change-password', {
+      method: 'POST',
+      body: payload,
+    }),
+
   /** Бележка и собствено място към любима оферта. */
   setBookmarkNote: (postId: string, payload: { note?: string | null; lat?: number | null; lng?: number | null }) =>
     rawRequest<{ ok: boolean }>(`/api/posts/${postId}/bookmark`, { method: 'PATCH', body: payload }),

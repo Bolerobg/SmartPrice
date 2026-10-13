@@ -234,9 +234,16 @@ export default async function authRoutes(app: FastifyInstance) {
         const res = await issueCode({ email, purpose: 'password_reset', name: row.name });
         devCode = res.devCode;
       } catch (err) {
-        // Твърде много заявки — не казваме нищо различно, за да не издадем,
-        // че имейлът съществува. Просто не пращаме нов код.
-        if (!(err instanceof AppError && err.statusCode === 429)) throw err;
+        // ВАЖНО: отговаряме ЕДНАКВО, независимо дали имейлът съществува. Ако
+        // върнем грешка при невалиден/недоставим адрес, а при непознат профил —
+        // „успех“, човек може да проверява кой имейл има профил. Затова тук
+        // поглъщаме грешката (освен ограничението за твърде много заявки) и
+        // само я записваме в дневника.
+        if (err instanceof AppError && err.statusCode === 429) {
+          // Твърде много заявки — просто не пращаме нов код.
+        } else {
+          req.log.warn({ err, email }, 'forgot-password: имейлът не беше изпратен');
+        }
       }
     }
 
@@ -267,6 +274,48 @@ export default async function authRoutes(app: FastifyInstance) {
 
     // Смяната на паролата влиза директно — кодът вече е доказателство за самоличност.
     return sessionPayload(app, row.id, await loadFullProfile(row.id));
+  });
+
+  /**
+   * Смяна на паролата, докато си влязъл (от профила).
+   *
+   * Иска текущата парола — така някой с откраднат телефон/сесия не може да
+   * смени паролата и да заключи човека навън. Новата парола минава през
+   * същата проверка за сила като при регистрация.
+   */
+  app.post('/api/auth/change-password', async (req) => {
+    const userId = requireUserId(req);
+    const input = z
+      .object({
+        currentPassword: z.string().min(1, 'Въведи текущата парола.').max(200),
+        newPassword: z.string().min(1, 'Въведи новата парола.').max(200),
+      })
+      .parse(req.body);
+
+    assertPasswordStrength(input.newPassword);
+
+    const row = await one<{ password_hash: string | null }>(
+      'select password_hash from profiles where id = $1',
+      [userId]
+    );
+    if (!row) throw unauthorized('Профилът не е намерен.');
+
+    const ok = row.password_hash
+      ? await verifyPassword(input.currentPassword, row.password_hash)
+      : false;
+    if (!ok) throw unauthorized('Текущата парола не е вярна.');
+
+    if (input.currentPassword === input.newPassword) {
+      throw badRequest('Новата парола трябва да е различна от старата.');
+    }
+
+    const passwordHash = await hashPassword(input.newPassword);
+    await one(
+      `update profiles set password_hash = $2, updated_at = now() where id = $1 returning id`,
+      [userId, passwordHash]
+    );
+
+    return { ok: true, message: 'Паролата е сменена. Използвай новата при следващо влизане.' };
   });
 
   app.post('/api/auth/login', async (req) => {
