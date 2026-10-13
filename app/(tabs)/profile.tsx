@@ -260,6 +260,16 @@ export default function ProfileScreen() {
 
             <TouchableOpacity
               style={styles.testNudgeBtn}
+              onPress={() => router.push('/change-password' as never)}
+            >
+              <Ionicons name="key-outline" size={16} color={COLORS.goldBright} />
+              <Text style={[styles.testNudgeBtnText, { color: COLORS.goldBright }]}>
+                Смяна на паролата
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.testNudgeBtn}
               onPress={() =>
                 Alert.alert('Изход от профила', 'Сигурен ли си, че искаш да излезеш?', [
                   { text: 'Отказ', style: 'cancel' },
