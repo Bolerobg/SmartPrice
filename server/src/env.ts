@@ -62,6 +62,8 @@ const schema = z.object({
     .default('false')
     .transform((v) => v === 'true' || v === '1'),
 
+  // Кои имейли имат админ права (томболи). Разделени със запетая.
+  ADMIN_EMAILS: z.string().default(''),
   SEED_DEMO_DATA: z
     .string()
     .default('true')

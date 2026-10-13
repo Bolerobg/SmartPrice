@@ -146,6 +146,25 @@ export default function ProfileScreen() {
         {/* Поканален цикъл: кодът, линкът и колко души са дошли по тях */}
         <InviteCard profile={userProfile} onOpenCard={() => setCardOpen(true)} />
 
+        <View style={styles.raffleRow}>
+          <TouchableOpacity
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.goldBright }]}
+            onPress={() => router.push('/raffle' as never)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="gift" size={17} color={COLORS.black} />
+            <Text style={styles.storyCardBtnText}>Томболи</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.goldBorder }]}
+            onPress={() => router.push('/admin/raffles' as never)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="settings" size={16} color={COLORS.goldBright} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.goldBright }]}>Админ</Text>
+          </TouchableOpacity>
+        </View>
+
         {userProfile.personalSavedBgn > 0 ? (
           <TouchableOpacity
             style={styles.storyCardBtn}
@@ -504,6 +523,7 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  raffleRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   storyCardBtn: {
     flexDirection: 'row',
     alignItems: 'center',

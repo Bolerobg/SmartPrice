@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { CityPickerDropdown } from '@/components/CityPickerDropdown';
+import { RaffleTeaser } from '@/components/RaffleTeaser';
 import { COLORS } from '@/constants/theme';
 import { ApiError, API_URL, api } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
@@ -146,6 +147,9 @@ export default function RegisterScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
         </TouchableOpacity>
+
+        {/* Томболата като причина да се регистрираш още сега */}
+        <RaffleTeaser compact />
 
         <Text style={styles.label}>Име</Text>
         <TextInput

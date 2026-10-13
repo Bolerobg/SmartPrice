@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
+import { RaffleTeaser } from '@/components/RaffleTeaser';
 import { COLORS } from '@/constants/theme';
 import { ApiError, API_URL } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
@@ -109,6 +110,9 @@ export default function LoginScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
         </TouchableOpacity>
+
+        {/* Мотивация преди вход: какво може да се спечели */}
+        <RaffleTeaser compact />
 
         <Text style={styles.label}>Имейл</Text>
         <TextInput

@@ -310,6 +310,97 @@ export interface OcrReceipt extends ReceiptData {
   model?: string;
 }
 
+export interface PuzzleTile {
+  id: string;
+  imageUrl: string;
+  /** Хеш на продукта: две плочки с еднакъв pairId са двойка (името не се издава). */
+  pairId: string | null;
+  label: string;
+}
+
+export interface RafflePrize {
+  title: string;
+  url: string;
+  image: string;
+  price: number | null;
+  currency: string;
+}
+
+export interface RaffleEntryState {
+  qualified: boolean;
+  practiceUsed: number;
+  practiceLeft: number;
+  bestPracticeMs: number | null;
+  runTimeMs: number | null;
+  runStarted: boolean;
+  disqualified?: boolean;
+}
+
+export interface RaffleItem {
+  id: string;
+  title: string;
+  description: string;
+  prize: RafflePrize;
+  conditionPosts: number;
+  conditionImagesOnly: boolean;
+  countFromStart: boolean;
+  minParticipants: number;
+  startsAt: string | null;
+  endsAt: string;
+  status: 'draft' | 'active' | 'running' | 'finished' | 'cancelled';
+  cancelReason: string | null;
+  winnerId: string | null;
+  winningTimeMs: number | null;
+  qualifiedCount: number;
+  finishedAt: string | null;
+  secondsLeft: number;
+  myProgress?: number;
+  postsNeeded?: number;
+  practiceAttempts?: number;
+  myEntry?: RaffleEntryState | null;
+  entries?: number;
+}
+
+export interface RaffleStanding {
+  rank: number | null;
+  userId: string;
+  name: string;
+  handle: string;
+  avatar: string;
+  runTimeMs: number | null;
+  practiceUsed: number;
+  bestPracticeMs: number | null;
+  qualifiedAt: string | null;
+  runFinishedAt: string | null;
+  disqualified: boolean;
+}
+
+export interface RaffleWinner {
+  raffleId: string;
+  title: string;
+  prizeTitle: string;
+  prizeImage: string;
+  finishedAt: string | null;
+  winningTimeMs: number | null;
+  winner: { name: string; handle: string; avatar: string } | null;
+}
+
+export interface AdminRaffleInput {
+  title: string;
+  description?: string;
+  prizeTitle: string;
+  prizeUrl?: string;
+  prizeImageUrl?: string;
+  prizePrice?: number;
+  conditionPosts?: number;
+  conditionImagesOnly?: boolean;
+  minParticipants?: number;
+  countFromStart?: boolean;
+  startsAt?: string;
+  endsAt: string;
+  activate?: boolean;
+}
+
 export interface ReferralSummary {
   code: string;
   link: string;
@@ -614,6 +705,56 @@ export const api = {
     rawRequest<ReferralCheck>(
       `/api/referrals/check?code=${encodeURIComponent(code.trim())}`,
       { auth: false }
+    ),
+
+  // ------------------------------------------------------------- Томболи
+  raffles: () => rawRequest<{ items: RaffleItem[] }>('/api/raffles'),
+  raffle: (id: string) => rawRequest<{ raffle: RaffleItem; standings: RaffleStanding[] }>(`/api/raffles/${id}`),
+  /** Дъската на пъзела: practice = тренировъчна, official = само в рамките на официалното нареждане. */
+  rafflePuzzle: (id: string, mode: 'practice' | 'official') =>
+    rawRequest<{ tiles: PuzzleTile[]; pairs: string[]; minRunMs: number; maxRunMs: number }>(
+      `/api/raffles/${id}/puzzle?mode=${mode}`
+    ),
+  joinRaffle: (id: string) =>
+    rawRequest<{ ok: boolean; qualified: boolean; postsCount: number; practiceAttempts: number }>(
+      `/api/raffles/${id}/join`,
+      { method: 'POST' }
+    ),
+  practiceRaffle: (id: string, timeMs: number) =>
+    rawRequest<{ ok: boolean; practiceUsed: number; practiceLeft: number; bestPracticeMs: number | null }>(
+      `/api/raffles/${id}/practice`,
+      { method: 'POST', body: { timeMs } }
+    ),
+  startRaffleRun: (id: string) =>
+    rawRequest<{ ok: boolean; startedAt: string; minRunMs: number; maxRunMs: number }>(
+      `/api/raffles/${id}/run/start`,
+      { method: 'POST' }
+    ),
+  finishRaffleRun: (id: string) =>
+    rawRequest<{ ok: boolean; timeMs: number; place: number }>(`/api/raffles/${id}/run/finish`, {
+      method: 'POST',
+    }),
+  rafflePromo: (id: string) =>
+    rawRequest<{ shouldShow: boolean; views: number; maxViews: number; anonymous?: boolean; participating?: boolean }>(
+      `/api/raffles/${id}/promo`
+    ),
+  markRafflePromoViewed: (id: string) =>
+    rawRequest<{ shouldShow: boolean; views: number; maxViews: number }>(`/api/raffles/${id}/promo-view`, {
+      method: 'POST',
+      body: {},
+    }),
+  raffleWinners: () => rawRequest<{ items: RaffleWinner[] }>('/api/raffles/winners'),
+
+  // ------------------------------------------------------------- Админ (томболи)
+  adminRaffles: () => rawRequest<{ items: RaffleItem[] }>('/api/admin/raffles'),
+  adminCreateRaffle: (input: AdminRaffleInput) =>
+    rawRequest<{ raffle: RaffleItem }>('/api/admin/raffles', { method: 'POST', body: input }),
+  adminRaffleStatus: (id: string, status: 'draft' | 'active' | 'running' | 'cancelled') =>
+    rawRequest<{ raffle: RaffleItem }>(`/api/admin/raffles/${id}/status`, { method: 'POST', body: { status } }),
+  adminDrawRaffle: (id: string) =>
+    rawRequest<{ cancelled: boolean; winnerId?: string; timeMs?: number; raffle: RaffleItem }>(
+      `/api/admin/raffles/${id}/draw`,
+      { method: 'POST' }
     ),
 
   /** Залепване на код за вече създаден профил (до 7 дни след регистрация). */
