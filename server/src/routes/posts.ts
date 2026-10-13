@@ -68,6 +68,11 @@ const createSchema = z.object({
   imageUrl: z.string().min(1, 'Снимката е задължителна.').max(600),
   comparisonImageUrl: z.string().max(600).optional(),
   comparisonLabel: z.string().trim().max(120).optional(),
+  // Частни продавачи: човек, който продава на определено място (сергия, камион,
+  // пред блока). Типът е 'private', а sellerNote описва къде и кога да го намериш.
+  sellerType: z.enum(['business', 'private']).default('business'),
+  sellerNote: z.string().trim().max(1000).optional(),
+  sellerContact: z.string().trim().max(200).optional(),
   tags: z.array(z.string().trim().max(40)).max(20).default([]),
   receipt: receiptSchema.optional(),
 });
@@ -77,6 +82,7 @@ const listQuerySchema = z.object({
   category: z.string().max(40).optional(),
   city: z.string().max(80).optional(),
   q: z.string().max(200).optional(),
+  sellerType: z.enum(['business', 'private']).optional(),
   sort: z.enum(['newest', 'best_savings', 'lowest_price', 'highest_price', 'most_helped']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
@@ -119,6 +125,7 @@ export default async function postRoutes(app: FastifyInstance) {
       category: q.category,
       city: q.city,
       q: q.q,
+      sellerType: q.sellerType,
       sort: q.sort as SortMode | undefined,
       limit: q.limit,
       offset: q.offset,
@@ -127,13 +134,55 @@ export default async function postRoutes(app: FastifyInstance) {
     return { items, total, limit: q.limit, offset: q.offset, hasMore: q.offset + items.length < total };
   });
 
+  // Любими (отметки) — със GPS мястото на всяка оферта, за да се стигне до нея
   app.get('/api/posts/bookmarks', async (req) => {
     const userId = requireUserId(req);
     const items = await loadPosts(
       { bookmarkedBy: userId, limit: 100, offset: 0, sort: 'newest' },
       userId
     );
-    return { items, total: items.length };
+    const marks = await many<{
+      post_id: string;
+      note: string | null;
+      note_lat: number | null;
+      note_lng: number | null;
+      created_at: string;
+    }>('select post_id, note, note_lat, note_lng, created_at from post_bookmarks where user_id = $1', [userId]);
+
+    const byPost = new Map(marks.map((m) => [m.post_id, m]));
+    return {
+      items: items.map((post) => {
+        const mark = byPost.get(post.id);
+        return {
+          ...post,
+          favorite: {
+            savedAt: mark ? new Date(mark.created_at).toISOString() : null,
+            note: mark?.note ?? null,
+            // Ако човекът е отбелязал собствено място, то е с предимство пред
+            // мястото на офертата (напр. „тук я видях, но я продават ей там“).
+            noteLat: mark?.note_lat ?? null,
+            noteLng: mark?.note_lng ?? null,
+          },
+        };
+      }),
+      total: items.length,
+    };
+  });
+
+  /** Търсене по ID на офертата (публичния код). Работи без вход. */
+  app.get('/api/posts/by-code/:code', async (req) => {
+    const { code } = z.object({ code: z.string().trim().min(3).max(24) }).parse(req.params);
+    const userId = optionalUserId(req);
+    const normalized = code.replace(/[^a-z0-9]/gi, '').toUpperCase();
+    if (normalized.length < 3) throw badRequest('Кодът е твърде къс.');
+
+    const row = await one<{ id: string }>(
+      `select id from posts
+        where upper(replace(public_code, '-', '')) = $1 and status = 'published'`,
+      [normalized]
+    );
+    if (!row) throw notFound('Няма оферта с такъв ID. Провери кода и опитай пак.');
+    return { post: await loadOnePost(row.id, userId) };
   });
 
   app.get('/api/posts/:id', async (req) => {
@@ -173,10 +222,11 @@ export default async function postRoutes(app: FastifyInstance) {
            latitude, longitude, google_maps_url, location_auto_detected,
            price_paid, reference_price, currency, unit_quantity, unit_type,
            price_per_unit, is_shrinkflation, is_fake_promo, image_url,
-           comparison_image_url, comparison_label, tags
+           comparison_image_url, comparison_label, tags,
+           seller_type, seller_note, seller_contact
          ) values (
            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-           $21,$22,$23,$24,$25,$26,$27
+           $21,$22,$23,$24,$25,$26,$27,$28,$29,$30
          ) returning id`,
         [
           userId,
@@ -206,6 +256,9 @@ export default async function postRoutes(app: FastifyInstance) {
           input.comparisonImageUrl ?? null,
           input.comparisonLabel ?? null,
           tags,
+          input.sellerType,
+          input.sellerNote ?? null,
+          input.sellerContact ?? null,
         ]
       );
       const id = res.rows[0]!.id;
@@ -514,6 +567,34 @@ export default async function postRoutes(app: FastifyInstance) {
     });
 
     return { isBookmarked: marked };
+  });
+
+  /** Бележка и собствено място към любима оферта („тук я намерих“). */
+  app.patch('/api/posts/:id/bookmark', async (req) => {
+    const userId = requireUserId(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const input = z
+      .object({
+        note: z.string().trim().max(500).nullable().optional(),
+        lat: z.coerce.number().min(-90).max(90).nullable().optional(),
+        lng: z.coerce.number().min(-180).max(180).nullable().optional(),
+      })
+      .strict()
+      .parse(req.body);
+
+    const mark = await one<{ post_id: string }>(
+      'select post_id from post_bookmarks where post_id = $1 and user_id = $2',
+      [id, userId]
+    );
+    if (!mark) throw badRequest('Първо добави офертата в любими.');
+
+    await one(
+      `update post_bookmarks set note = $3, note_lat = $4, note_lng = $5
+        where post_id = $1 and user_id = $2 returning post_id`,
+      [id, userId, input.note ?? null, input.lat ?? null, input.lng ?? null]
+    );
+
+    return { ok: true };
   });
 
   // ---------------------------------------------------------------- Сигнал за проблемно съдържание

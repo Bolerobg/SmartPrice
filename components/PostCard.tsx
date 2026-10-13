@@ -323,9 +323,30 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
 
         {/* Заглавие и описание */}
         <Text style={styles.postTitle}>{post.title}</Text>
+
+        {/* Уникалният ID на офертата — по него може да се търси в приложението */}
+        <View style={styles.codeRow}>
+          <Ionicons name="pricetag-outline" size={12} color={COLORS.accentCyan} />
+          <Text style={styles.codeText}>ID: {post.code}</Text>
+          {post.sellerType === 'private' ? (
+            <View style={styles.sellerPill}>
+              <Ionicons name="person-outline" size={11} color={COLORS.black} />
+              <Text style={styles.sellerPillText}>ЧАСТНО ЛИЦЕ</Text>
+            </View>
+          ) : null}
+        </View>
+
         <Text style={styles.postDescription} numberOfLines={3}>
           {post.description}
         </Text>
+
+        {/* Частен продавач: къде и кога го намираш */}
+        {post.sellerNote ? (
+          <View style={styles.sellerNote}>
+            <Ionicons name="location-outline" size={14} color={COLORS.goldBright} />
+            <Text style={styles.sellerNoteText}>{post.sellerNote}</Text>
+          </View>
+        ) : null}
 
         {/* Снимка + Очакване vs Реалност + Бадж за Касова Бележка */}
         <View style={styles.imageContainer}>
@@ -697,6 +718,32 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
 };
 
 const styles = StyleSheet.create({
+  codeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 },
+  codeText: { color: COLORS.accentCyan, fontSize: 11.5, fontWeight: '800', letterSpacing: 0.4 },
+  sellerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.goldBright,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginLeft: 4,
+  },
+  sellerPillText: { color: COLORS.black, fontSize: 8.5, fontWeight: '900', letterSpacing: 0.4 },
+  sellerNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+    marginTop: 8,
+    backgroundColor: COLORS.bgCardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    borderRadius: 11,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  sellerNoteText: { flex: 1, color: COLORS.textSecondary, fontSize: 12, lineHeight: 17 },
   card: {
     backgroundColor: COLORS.bgCard,
     borderRadius: 20,

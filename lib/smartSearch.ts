@@ -24,12 +24,17 @@ export function matchesUniversalSearch(post: PostItem, rawQuery: string): boolea
   const searchableBlob = [
     post.title,
     post.description,
+    // ID на офертата — търси се и по „SP-7K2M4Q“, и по „7k2m4“ (без тирета)
+    post.code || '',
+    (post.code || '').replace(/-/g, ''),
     post.placeName,
     post.city,
     post.address || '',
     post.platformTag,
     post.customPlatformLabel || '',
     post.customCategoryLabel || '',
+    post.sellerNote || '',
+    post.sellerContact || '',
     categoryInfo?.label || '',
     categoryInfo?.shortLabel || '',
     String(post.pricePaid),
@@ -50,6 +55,11 @@ export function matchesUniversalSearch(post: PostItem, rawQuery: string): boolea
     .toLowerCase();
 
   const words = q.split(/\s+/).filter(Boolean);
+  // Ако човекът търси по код (напр. „SP-7K2M4“ или „7k2m4“), тиретата се махат.
+  const compactQuery = q.replace(/[^a-z0-9]/g, '');
+  const looksLikeCode = compactQuery.length >= 4 && /^(sp)?[a-z0-9]{3,12}$/.test(compactQuery);
+  if (looksLikeCode && searchableBlob.replace(/-/g, '').includes(compactQuery)) return true;
+
   return words.every((word) => searchableBlob.includes(word));
 }
 

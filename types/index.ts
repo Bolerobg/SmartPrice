@@ -99,6 +99,7 @@ export interface PriceAlertItem {
 
 export interface PostItem {
   id: string;
+  code: string; // Публичен ID на офертата (напр. SP-7K2M4Q) — по него се търси
   polarity: PostPolarity; // 'green' = Изгодно / Находка, 'red' = Червен флаг / Не ходи!
   category: Exclude<CategoryId, 'all'>;
   customCategoryLabel?: string; // Потребителско описание при избор на Категория „Други“
@@ -130,6 +131,17 @@ export interface PostItem {
   imageUri: string;
   comparisonImageUri?: string; // Втора снимка: "Обява в Booking/Меню vs Реалност"
   comparisonLabel?: string;
+  // Частни продавачи: човек, който продава на определено място
+  sellerType?: 'business' | 'private';
+  sellerNote?: string; // допълнителен коментар: къде и кога го намираш
+  sellerContact?: string;
+  /** Идва само от /api/posts/bookmarks — бележката към любима оферта */
+  favorite?: {
+    savedAt: string | null;
+    note: string | null;
+    noteLat: number | null;
+    noteLng: number | null;
+  };
   receipt?: ReceiptData;
   author: {
     id: string;

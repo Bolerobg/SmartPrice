@@ -13,7 +13,9 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { CityPickerDropdown } from '@/components/CityPickerDropdown';
+import { ActiveRaffleCard } from '@/components/ActiveRaffleCard';
 import { PostCard } from '@/components/PostCard';
 import { QuickPricePhotoModal } from '@/components/QuickPricePhotoModal';
 import { SmartPriceAssistantCard } from '@/components/SmartPriceAssistantCard';
@@ -66,6 +68,34 @@ export default function FeedScreen() {
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+  const router = useRouter();
+
+  // Ако написаното прилича на ID на оферта (SP-7K2M4Q или 7k2m4) — предлагаме
+  // да я отворим направо, вместо да търсим по думи.
+  const looksLikeOfferCode =
+    /^(sp)?[-\s]?[a-z0-9]{4,12}$/i.test(searchQuery.trim()) && /[0-9]/.test(searchQuery.trim());
+
+  const openByCode = async () => {
+    const code = searchQuery.trim();
+    if (!code) return;
+    setCodeBusy(true);
+    try {
+      const { post } = await api.postByCode(code);
+      setSearchQuery('');
+      router.push(`/post/${post.id}` as never);
+    } catch (err) {
+      Alert.alert(
+        'Няма такава оферта',
+        err instanceof Error && err.message
+          ? err.message
+          : `Не намерих оферта с ID ${code.toUpperCase()}. Провери кода и опитай пак.`
+      );
+    } finally {
+      setCodeBusy(false);
+    }
+  };
+
     // Търсенето пита сървъра (цялата база), а не само заредените 60 поста.
     const [debouncedQuery, setDebouncedQuery] = useState('');
     const [serverResults, setServerResults] = useState<PostItem[] | null>(null);
@@ -330,7 +360,7 @@ export default function FeedScreen() {
         <Ionicons name="search" size={18} color={COLORS.greenBright} />
         <TextInput
           style={styles.universalSearchInput}
-          placeholder="Търси продукт, заведение, град, цена, бележка..."
+          placeholder="Търси продукт, място, град, цена... или ID на оферта"
           placeholderTextColor={COLORS.textMuted}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -345,6 +375,31 @@ export default function FeedScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Търсене по ID на оферта: човекът вижда кода на обявата и го въвежда тук */}
+      {looksLikeOfferCode ? (
+        <TouchableOpacity
+          style={styles.codeJump}
+          activeOpacity={0.88}
+          disabled={codeBusy}
+          onPress={() => void openByCode()}
+        >
+          <Ionicons name="pricetag" size={15} color={COLORS.black} />
+          <Text style={styles.codeJumpText}>
+            {codeBusy ? 'Търся офертата...' : `Отвори оферта с ID ${searchQuery.trim().toUpperCase()}`}
+          </Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.codeHint}>
+          <Ionicons name="pricetag-outline" size={12} color={COLORS.accentCyan} />
+          <Text style={styles.codeHintText}>
+            Всяка оферта има ID (напр. SP-7K2M4Q). Напиши го тук, за да я намериш веднага.
+          </Text>
+        </View>
+      )}
+
+      {/* ТОМБОЛАТА: истинската активна томбола с реалните статистики */}
+      <ActiveRaffleCard onOpen={() => router.push('/raffle' as never)} />
 
       {/* Бързи тагове за умно търсене с 1 докосване */}
       <ScrollView
@@ -808,6 +863,26 @@ export default function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Търсене по ID на оферта
+  codeHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  codeHintText: { flex: 1, color: COLORS.textMuted, fontSize: 11.5, lineHeight: 16 },
+  codeJump: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+    backgroundColor: COLORS.goldBright,
+    borderRadius: 12,
+    paddingVertical: 11,
+  },
+  codeJumpText: { color: COLORS.black, fontSize: 13, fontWeight: '900' },
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.bgPrimary,

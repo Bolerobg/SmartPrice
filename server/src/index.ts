@@ -20,6 +20,8 @@ import communityRoutes from './routes/community.js';
 import ogRoutes from './routes/og.js';
 import raffleRoutes from './routes/raffles.js';
 import referralRoutes from './routes/referrals.js';
+import adminRoutes from './routes/admin.js';
+import { startSecurityMonitor } from './lib/security.js';
 import { seedDemoData } from './seed.js';
 
 export async function buildApp() {
@@ -168,6 +170,67 @@ export async function buildApp() {
   await app.register(referralRoutes);
   // Томболи: условие → пъзел за време → най-бързият печели
   await app.register(raffleRoutes);
+  // Админ панелът (отделен дашборд): статистики, CRUD, спиране на профили,
+  // аларми за ненормална активност
+  await app.register(adminRoutes);
+
+  /* ---------------------------------------------------------------------
+   *  Спрени/изтрити профили и активност.
+   *
+   *  Всяка ПИШЕЩА заявка с валиден токен минава през проверка: спрян профил
+   *  не може да пише, докато трае спирането (за вход има отделна проверка в
+   *  /api/auth/login и /api/auth/refresh). Заедно с това отбелязваме кога
+   *  човекът е бил за последно в приложението — това храни статистиката
+   *  „колко души влязоха днес“ в админ панела.
+   * ------------------------------------------------------------------- */
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) return;
+
+    let userId: string;
+    try {
+      const payload = req.server.jwt.verify<{ sub?: string; typ?: string }>(header.slice(7).trim());
+      if (payload.typ !== 'access' || !payload.sub) return;
+      userId = payload.sub;
+    } catch {
+      return; // невалиден токен → маршрутът сам ще върне 401
+    }
+
+    const row = await one<{
+      suspended_at: string | null;
+      suspended_until: string | null;
+      suspended_reason: string | null;
+      deleted_at: string | null;
+    }>('select suspended_at, suspended_until, suspended_reason, deleted_at from profiles where id = $1', [
+      userId,
+    ]);
+
+    if (!row || row.deleted_at) {
+      return reply.status(403).send({
+        error: { code: 'account_deleted', message: 'Този профил е изтрит.' },
+      });
+    }
+    if (row.suspended_at && (!row.suspended_until || new Date(row.suspended_until) > new Date())) {
+      return reply.status(403).send({
+        error: {
+          code: 'account_suspended',
+          message: `Профилът ти е спрян временно.${
+            row.suspended_reason ? ` Причина: ${row.suspended_reason}` : ''
+          }`,
+          details: { reason: row.suspended_reason ?? null, until: row.suspended_until ?? null },
+        },
+      });
+    }
+
+    // Лека отметка за активност — пише се най-много веднъж на 5 минути на човек.
+    void one(
+      `update profiles set last_seen_at = now()
+        where id = $1 and (last_seen_at is null or last_seen_at < now() - interval '5 minutes')
+        returning id`,
+      [userId]
+    ).catch(() => undefined);
+  });
 
   return app;
 }
@@ -186,6 +249,15 @@ async function main() {
       features.payments ? 'да' : 'НЕ'
     }`
   );
+
+  // Следене за ненормална активност — проверява на всеки 5 минути и праща
+  // имейл на ALERT_EMAIL, ако намери нещо (напр. подбиране на пароли).
+  if (isProd) {
+    startSecurityMonitor(5 * 60 * 1000);
+    app.log.info(`Следене за ненормална активност: включено → ${env.ALERT_EMAIL}`);
+  } else {
+    startSecurityMonitor(10 * 60 * 1000);
+  }
 
   const shutdown = async (signal: string) => {
     app.log.info(`Получен ${signal} — затварям...`);

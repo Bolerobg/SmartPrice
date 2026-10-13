@@ -156,6 +156,17 @@ export default function ProfileScreen() {
             <Text style={styles.storyCardBtnText}>Томболи</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.greenBorder }]}
+            onPress={() => router.push('/favorites' as never)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="bookmark" size={16} color={COLORS.greenBright} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.greenBright }]}>Любими</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.raffleRow}>
+          <TouchableOpacity
             style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.goldBorder }]}
             onPress={() => router.push('/admin/raffles' as never)}
             activeOpacity={0.88}
