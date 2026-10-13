@@ -28,7 +28,7 @@ function formatClock(totalSeconds: number): string {
 
 export default function VerifyScreen() {
   const router = useRouter();
-  const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
+  const { email: emailParam, bonus } = useLocalSearchParams<{ email?: string; bonus?: string }>();
   const email = (emailParam ?? '').trim().toLowerCase();
 
   const { verifyEmail, resendCode } = useAuth();
@@ -141,6 +141,15 @@ export default function VerifyScreen() {
         </View>
 
         <Text style={styles.title}>Провери имейла си</Text>
+        {bonus ? (
+          <View style={styles.bonusBox}>
+            <Ionicons name="gift" size={16} color={COLORS.greenBright} />
+            <Text style={styles.bonusText}>
+              {bonus} те покани. Щом потвърдиш имейла си, ДВАМАта получавате по 100 точки доверие.
+            </Text>
+          </View>
+        ) : null}
+
         <Text style={styles.subtitle}>
           Изпратихме 6-цифрен код на{'\n'}
           <Text style={styles.emailText}>{email || 'твоя имейл'}</Text>
@@ -294,6 +303,19 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   emailText: { color: COLORS.accentCyan, fontWeight: '800' },
+  bonusBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    backgroundColor: COLORS.greenSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.greenBorder,
+    borderRadius: 13,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    marginBottom: 14,
+  },
+  bonusText: { flex: 1, color: COLORS.greenBright, fontSize: 12, fontWeight: '800', lineHeight: 17 },
   codeRow: {
     flexDirection: 'row',
     gap: 7,

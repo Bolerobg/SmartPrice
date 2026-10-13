@@ -215,6 +215,16 @@ export interface UserProfile {
   postsCount: number;
   verifiedReceiptsCount: number;
   reputationPoints: number;
+  /** Личен код за покана (напр. A1B2C3). */
+  referralCode: string;
+  /** Колко точки са дошли ИМЕННО от покани. */
+  referralPoints: number;
+  /** Колко души са дошли по моя код. */
+  referralsInvited: number;
+  /** Колко от тях са потвърдили имейла (реално наградени). */
+  referralsRewarded: number;
+  /** Чакащи потвърждение. */
+  referralsPending: number;
   badges: BadgeItem[];
   donations: DonationRecord[];
   lastDonationPromptAt: number | null;

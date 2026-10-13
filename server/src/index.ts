@@ -18,6 +18,7 @@ import mediaRoutes from './routes/media.js';
 import donationRoutes from './routes/donations.js';
 import communityRoutes from './routes/community.js';
 import ogRoutes from './routes/og.js';
+import referralRoutes from './routes/referrals.js';
 import { seedDemoData } from './seed.js';
 
 export async function buildApp() {
@@ -162,6 +163,8 @@ export async function buildApp() {
   await app.register(communityRoutes);
   // Преглед на споделени оферти (само за ботовете на WhatsApp/Facebook/…)
   await app.register(ogRoutes);
+  // Поканален цикъл: код, покани и карта „Спестих X €“
+  await app.register(referralRoutes);
 
   return app;
 }

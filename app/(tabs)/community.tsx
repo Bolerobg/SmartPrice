@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { Avatar } from '@/components/Avatar';
+import { InviteCard } from '@/components/InviteCard';
 
 type BoardTab = 'saved' | 'checkers' | 'points';
 
@@ -88,6 +89,9 @@ export default function CommunityScreen() {
         <Text style={styles.screenSub}>
           Заедно правим цените прозрачни и разобличаваме некоректните търговци
         </Text>
+
+        {/* Поканата е до класацията нарочно: точките от покани влизат в нея. */}
+        <InviteCard profile={userProfile} compact />
 
         {/* Голяма карта: Спестени пари на общността */}
         <View style={styles.heroStatsCard}>

@@ -32,6 +32,9 @@ interface AuthContextValue {
     password: string;
     name: string;
     city?: string;
+    /** Код за покана от приятел (по избор) — носи точки и на двамата. */
+    ref?: string;
+    refChannel?: string;
   }) => Promise<RegisterResponse>;
   /** Потвърждава имейла с кода и влиза директно. */
   verifyEmail: (email: string, code: string) => Promise<void>;
@@ -115,12 +118,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const register = useCallback(
-    async (input: { email: string; password: string; name: string; city?: string }) => {
+    async (input: {
+      email: string;
+      password: string;
+      name: string;
+      city?: string;
+      /** Код за покана от приятел (по избор). */
+      ref?: string;
+      refChannel?: string;
+    }) => {
       setError(null);
       const result = await api.register({
         ...input,
         email: input.email.trim().toLowerCase(),
         name: input.name.trim(),
+        ref: input.ref?.trim() || undefined,
       });
       // Тук НЕ влизаме — профилът още не е потвърден.
       return result;

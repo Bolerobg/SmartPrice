@@ -24,7 +24,12 @@ export async function loadFullProfile(userId: string) {
             (select count(*) from posts po join receipts r on r.post_id = po.id
               where po.author_id = p.id and r.verified_by_ai)                    as verified_receipts_count,
             (select coalesce(sum(po.community_saved_bgn), 0) from posts po
-              where po.author_id = p.id and po.status = 'published')             as community_saved_bgn
+              where po.author_id = p.id and po.status = 'published')             as community_saved_bgn,
+            (select count(*) from referrals r where r.inviter_id = p.id)          as referrals_invited,
+            (select count(*) from referrals r
+              where r.inviter_id = p.id and r.status = 'rewarded')               as referrals_rewarded,
+            (select count(*) from referrals r
+              where r.inviter_id = p.id and r.status = 'pending')                as referrals_pending
        from profiles p
       where p.id = $1`,
     [userId]

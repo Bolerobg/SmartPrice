@@ -166,6 +166,25 @@ export async function shareViaSystem(post: PostItem): Promise<void> {
   await nav.share({ title: buildShareTitle(post), text: buildShareText(post), url: postUrl(post.id) });
 }
 
+/**
+ * Отваря конкретно приложение с произволен линк + текст.
+ * Ползва се и за покани (там няма пост, но каналите са същите).
+ */
+export async function openShareTargetRaw(
+  target: ShareTarget,
+  url: string,
+  text: string
+): Promise<void> {
+  const targetUrl = target.build(url, text);
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  const can = await Linking.canOpenURL(targetUrl).catch(() => false);
+  if (!can) throw new Error(`${target.label} не е инсталиран на устройството.`);
+  await Linking.openURL(targetUrl);
+}
+
 /** Отваря конкретно приложение с готовото съобщение. */
 export async function openShareTarget(target: ShareTarget, post: PostItem): Promise<void> {
   const url = target.build(postUrl(post.id), buildShareText(post));
@@ -176,6 +195,107 @@ export async function openShareTarget(target: ShareTarget, post: PostItem): Prom
   const can = await Linking.canOpenURL(url).catch(() => false);
   if (!can) throw new Error(`${target.label} не е инсталиран на устройството.`);
   await Linking.openURL(url);
+}
+
+/**
+ * Готовият текст за покана на приятел (код + линк + какво печелят двамата).
+ * „Двойни точки“ трябва да е ЯСНО казано — иначе поканата изглежда като реклама.
+ */
+export function buildInviteMessage(link: string, points = 100): string {
+  return [
+    'Провери цената, преди да платиш 🛒',
+    'SmartPrice е безплатно приложение, в което хора качват реални цени и касови бележки —',
+    'без реклами и без платени ревюта.',
+    '',
+    `Влез по моя код и ДВАМАТА получаваме по ${points} точки доверие (двойно):`,
+    link,
+  ].join('\n');
+}
+
+/**
+ * Споделя САМАТА КАРТИНКА (PNG „Спестих X €“) — за Stories, Viber, WhatsApp.
+ *
+ * На web: сваля я като файл (и през системния share, ако браузърът поддържа
+ * файлове — мобилен Safari/Chrome го правят, така качването в Stories е 2 клика).
+ * На native: отваря системния диалог с линка към картата, откъдето се запазва.
+ */
+export async function shareStoryCard(
+  cardUrl: string,
+  message: string
+): Promise<'shared' | 'downloaded' | 'opened'> {
+  if (Platform.OS !== 'web') {
+    await Share.share({ message, url: cardUrl, title: 'Моята карта от SmartPrice' });
+    return 'opened';
+  }
+
+  // 1) Мобилен браузър: истинско споделяне на ФАЙЛА (най-краткият път към Stories).
+  try {
+    const response = await fetch(cardUrl);
+    if (response.ok) {
+      const blob = await response.blob();
+      const file = new File([blob], 'smartprice-karta.png', { type: 'image/png' });
+      const nav = navigator as Navigator & {
+        canShare?: (data: { files?: File[] }) => boolean;
+        share?: (data: { files?: File[]; text?: string; title?: string }) => Promise<void>;
+      };
+      if (nav.share && nav.canShare?.({ files: [file] })) {
+        await nav.share({ files: [file], text: message, title: 'Моята карта от SmartPrice' });
+        return 'shared';
+      }
+
+      // 2) Иначе — сваляме я (после се качва в Stories от галерията).
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = 'smartprice-karta.png';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+      return 'downloaded';
+    }
+  } catch {
+    // пада към долния вариант
+  }
+
+  // 3) Последен вариант: отваряме картата в нов раздел (дълго натискане = запази).
+  if (typeof window !== 'undefined') window.open(cardUrl, '_blank', 'noopener,noreferrer');
+  return 'opened';
+}
+
+/** Копира произволен линк (ползва се и за покани). */
+export async function copyText(link: string): Promise<boolean> {
+  if (Platform.OS !== 'web') return false;
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      if (typeof window !== 'undefined' && typeof window.focus === 'function') window.focus();
+      await navigator.clipboard.writeText(link);
+      return true;
+    }
+  } catch {
+    // пада към резервния вариант
+  }
+  if (typeof document !== 'undefined') {
+    try {
+      const area = document.createElement('textarea');
+      area.value = link;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.top = '0';
+      area.style.left = '0';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.focus();
+      area.select();
+      area.setSelectionRange(0, link.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(area);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 /** Копира линка. Връща true при успех. */
