@@ -391,6 +391,35 @@ export interface RaffleStanding {
   disqualified: boolean;
 }
 
+/** Пълните резултати от томбола — виждат ги ВСИЧКИ, не само участниците. */
+export interface RaffleResults {
+  final: boolean;
+  winner: { userId: string; name: string; handle: string; avatar: string; timeMs: number | null } | null;
+  stats: {
+    participants: number;
+    finished: number;
+    disqualified: number;
+    fastestMs: number | null;
+    averageMs: number | null;
+    slowestMs: number | null;
+    practiceUsedTotal: number;
+  };
+  rows: {
+    rank: number | null;
+    userId: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    runTimeMs: number | null;
+    practiceUsed: number;
+    bestPracticeMs: number | null;
+    joinedAt: string;
+    runFinishedAt: string | null;
+    disqualified: boolean;
+  }[];
+  timeline: { kind: string; label: string; at: string; user: string | null; timeMs: number | null }[];
+}
+
 export interface RaffleWinner {
   raffleId: string;
   title: string;
@@ -742,7 +771,10 @@ export const api = {
 
   // ------------------------------------------------------------- Томболи
   raffles: () => rawRequest<{ items: RaffleItem[] }>('/api/raffles'),
-  raffle: (id: string) => rawRequest<{ raffle: RaffleItem; standings: RaffleStanding[] }>(`/api/raffles/${id}`),
+  raffle: (id: string) =>
+    rawRequest<{ raffle: RaffleItem; standings: RaffleStanding[]; results: RaffleResults }>(
+      `/api/raffles/${id}`
+    ),
   /** Дъската на пъзела: practice = тренировъчна, official = само в рамките на официалното нареждане. */
   rafflePuzzle: (id: string, mode: 'practice' | 'official') =>
     rawRequest<{ tiles: PuzzleTile[]; pairs: string[]; minRunMs: number; maxRunMs: number }>(

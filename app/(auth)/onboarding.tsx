@@ -544,6 +544,9 @@ const RaffleDemo: React.FC = () => {
   const [wrong, setWrong] = useState<number[]>([]);
   const [ms, setMs] = useState(0);
   const [running, setRunning] = useState(false);
+  // „Покажи ми двойките“ — истинска демонстрация: двойките светват за миг,
+  // за да се види точно какво се търси (и защо помненето на дъската е проблем).
+  const [peek, setPeek] = useState(false);
 
   // Хронометърът върви само след първото докосване — както в истинската игра.
   useEffect(() => {
@@ -589,11 +592,17 @@ const RaffleDemo: React.FC = () => {
     setWrong([]);
     setMs(0);
     setRunning(false);
+    setPeek(false);
+  };
+
+  const showPairs = () => {
+    setPeek(true);
+    setTimeout(() => setPeek(false), 1600);
   };
 
   const tileStyle = (index: number) => {
     const pair = RAFFLE_BOARD[index]!.pair;
-    if (pair && found.includes(pair)) return demo.tileFound;
+    if (pair && (found.includes(pair) || peek)) return demo.tileFound;
     if (wrong.includes(index)) return demo.tileWrong;
     if (selected === index) return demo.tilePick;
     return null;
@@ -658,9 +667,16 @@ const RaffleDemo: React.FC = () => {
         <Ionicons name="time-outline" size={13} color={COLORS.textMuted} />
         <Text style={[demo.hint, { flex: 1, color: COLORS.textMuted, fontWeight: '700' }]}>
           Ако томболата има обявен час, всички играят едновременно — затова никой не може да научи
-          дъската с втори профил.
+          дъската с втори профил. След края всеки вижда кой за колко време се е справил.
         </Text>
       </View>
+
+      <TouchableOpacity style={demo.actionBtn} onPress={showPairs} activeOpacity={0.85}>
+        <Ionicons name="eye-outline" size={14} color={COLORS.accentCyan} />
+        <Text style={[demo.hint, { color: COLORS.accentCyan }]}>
+          {peek ? 'Това са двете двойки — запомни ги' : 'Покажи ми двойките'}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 };

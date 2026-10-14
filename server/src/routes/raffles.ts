@@ -19,6 +19,7 @@ import {
   logEvent,
   officialWindow,
   promoState,
+  raffleResults,
   scanRaffleForFraud,
   standings,
   winnersWall,
@@ -180,6 +181,10 @@ export default async function raffleRoutes(app: FastifyInstance) {
         postsNeeded: Math.max(0, raffle.condition_posts - progress),
       }),
       standings: await standings(id, 30),
+      // Пълната прозрачност: всеки (и който не е участвал) вижда кой за колко
+      // време се е справил, статистиките и одитния дневник — за да няма
+      // усещане за измама. Без имейли, телефони и IP-та.
+      results: await raffleResults(raffle),
     };
   });
 

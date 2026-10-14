@@ -534,6 +534,160 @@ export async function standings(raffleId: string, limit = 50) {
   }));
 }
 
+/* ------------------------------------------------- прозрачни резултати */
+
+/**
+ * Пълните резултати от една томбола — за ВСИЧКИ, не само за участниците.
+ *
+ * Защо: ако човек загуби и не вижда нищо, той си мисли, че е измамен. Затова
+ * след края се показва всичко: кой за колко време се е справил, кога е играл,
+ * колко тренировки е използвал, колко души са отстранени и защо, и целият
+ * одитен дневник на томболата.
+ *
+ * ВАЖНО (поверителност): НЕ излизат имейли, телефони и IP-та. Отстранените
+ * участници НЕ се посочват поименно — показва се само броят. Причина: човек,
+ * отстранен по погрешка, не бива да бъде заклеймяван публично. Причината се
+ * вижда само в админ панела.
+ */
+export interface RaffleResults {
+  final: boolean;
+  winner: { userId: string; name: string; handle: string; avatar: string; timeMs: number | null } | null;
+  stats: {
+    participants: number;
+    finished: number;
+    disqualified: number;
+    fastestMs: number | null;
+    averageMs: number | null;
+    slowestMs: number | null;
+    practiceUsedTotal: number;
+  };
+  rows: {
+    rank: number | null;
+    userId: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    runTimeMs: number | null;
+    practiceUsed: number;
+    bestPracticeMs: number | null;
+    joinedAt: string;
+    runFinishedAt: string | null;
+    disqualified: boolean;
+  }[];
+  /** Одитен дневник: какво се е случило и кога, без вътрешните подробности. */
+  timeline: { kind: string; label: string; at: string; user: string | null; timeMs: number | null }[];
+}
+
+const EVENT_LABEL: Record<string, string> = {
+  created: 'Томболата е създадена',
+  status: 'Промяна на статуса',
+  joined: 'Включи се в томболата',
+  run_started: 'Стартира официалното нареждане',
+  run_finished: 'Завърши официалното нареждане',
+  run_too_fast: 'Опит с невъзможно време — не се брои',
+  disqualified_by_admin: 'Отстранен след проверка за злоупотреба',
+  requalified_by_admin: 'Върнат обратно след проверка',
+  cancelled: 'Томболата е анулирана',
+  drawn: 'Разиграна — има победител',
+};
+
+export async function raffleResults(raffle: RaffleRow): Promise<RaffleResults> {
+  const rows = await many<{
+    user_id: string;
+    name: string;
+    handle: string;
+    avatar_url: string | null;
+    run_time_ms: number | null;
+    practice_used: number;
+    best_practice_ms: number | null;
+    qualified_at: Date;
+    run_finished_at: Date | null;
+    disqualified: boolean;
+  }>(
+    `select e.user_id, p.name, p.handle, p.avatar_url,
+            e.run_time_ms, e.practice_used, e.best_practice_ms,
+            e.qualified_at, e.run_finished_at, e.disqualified
+       from raffle_entries e
+       join profiles p on p.id = e.user_id
+      where e.raffle_id = $1
+      order by (e.run_time_ms is null), e.run_time_ms asc, e.qualified_at asc`,
+    [raffle.id]
+  );
+
+  const valid = rows.filter((r) => !r.disqualified && r.run_time_ms != null);
+  const times = valid.map((r) => Number(r.run_time_ms)).sort((a, b) => a - b);
+  const avg = times.length ? Math.round(times.reduce((s, t) => s + t, 0) / times.length) : null;
+
+  let rank = 0;
+  const mapped = rows.map((r) => {
+    const counted = !r.disqualified && r.run_time_ms != null;
+    if (counted) rank += 1;
+    return {
+      rank: counted ? rank : null,
+      userId: r.user_id,
+      name: r.name,
+      handle: r.handle,
+      avatar: r.avatar_url ?? '',
+      runTimeMs: r.run_time_ms,
+      practiceUsed: r.practice_used,
+      bestPracticeMs: r.best_practice_ms,
+      joinedAt: iso(r.qualified_at)!,
+      runFinishedAt: iso(r.run_finished_at),
+      disqualified: r.disqualified,
+    };
+  });
+
+  const winnerRow = raffle.winner_id ? mapped.find((m) => m.userId === raffle.winner_id) ?? null : null;
+
+  // Одитът се показва само след края — преди това би издал кой още не е играл.
+  const final = ['finished', 'cancelled'].includes(effectiveStatus(raffle));
+  const timeline: RaffleResults['timeline'] = [];
+  if (final) {
+    const events = await many<{ kind: string; created_at: Date; name: string | null; detail: Record<string, unknown> }>(
+      `select v.kind, v.created_at, p.name, v.detail
+         from raffle_events v
+         left join profiles p on p.id = v.user_id
+        where v.raffle_id = $1
+        order by v.created_at asc
+        limit 500`,
+      [raffle.id]
+    );
+    for (const e of events) {
+      const label = EVENT_LABEL[e.kind] ?? null;
+      if (!label) continue;
+      const detailMs =
+        e.kind === 'run_finished' || e.kind === 'run_too_fast'
+          ? Number((e.detail as { timeMs?: number })?.timeMs ?? 0) || null
+          : null;
+      timeline.push({ kind: e.kind, label, at: iso(e.created_at)!, user: e.name ?? null, timeMs: detailMs });
+    }
+  }
+
+  return {
+    final,
+    winner: winnerRow
+      ? {
+          userId: winnerRow.userId,
+          name: winnerRow.name,
+          handle: winnerRow.handle,
+          avatar: winnerRow.avatar,
+          timeMs: winnerRow.runTimeMs,
+        }
+      : null,
+    stats: {
+      participants: rows.length,
+      finished: valid.length,
+      disqualified: rows.filter((r) => r.disqualified).length,
+      fastestMs: times[0] ?? null,
+      averageMs: avg,
+      slowestMs: times.length ? times[times.length - 1]! : null,
+      practiceUsedTotal: rows.reduce((s, r) => s + (r.practice_used ?? 0), 0),
+    },
+    rows: mapped,
+    timeline,
+  };
+}
+
 /** Стена на печелившите: кой, кога, каква награда (за мотивация на всички). */
 export async function winnersWall(limit = 20) {
   const rows = await many<{

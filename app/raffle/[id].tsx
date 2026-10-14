@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS } from '@/constants/theme';
 import { ProductPairPuzzle } from '@/components/ProductPairPuzzle';
-import { api, ApiError, type PuzzleTile, type RaffleItem, type RaffleStanding } from '@/src/api/client';
+import { api, ApiError, type PuzzleTile, type RaffleItem, type RaffleResults, type RaffleStanding } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
 
 type Phase = 'idle' | 'loading' | 'countdown' | 'playing';
@@ -44,6 +44,26 @@ const clockTime = (iso: string | null) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+/** „8.42 с“ — за класацията е по-четимо от „0:08.4“. */
+const secs = (ms: number | null | undefined) => (ms == null ? '—' : `${(ms / 1000).toFixed(2)} с`);
+
+/** „14.10 15:32“ — кога точно се е случило. */
+const when = (iso: string | null | undefined) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/** Малка плочка със статистика (участници, средно време, отстранени…). */
+const Stat: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
+  <View style={styles.resStatBox}>
+    <Text style={styles.resStatVal}>{value}</Text>
+    <Text style={styles.resStatLbl}>{label}</Text>
+  </View>
+);
+
 /** Томбола: условия → тренировки → официално нареждане → класация. */
 export default function RaffleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -51,6 +71,9 @@ export default function RaffleDetailScreen() {
   const { isAuthenticated } = useAuth();
   const [raffle, setRaffle] = useState<RaffleItem | null>(null);
   const [standings, setStandings] = useState<RaffleStanding[]>([]);
+  // Пълните резултати (за всички) + дали е отворен одитният дневник.
+  const [results, setResults] = useState<RaffleResults | null>(null);
+  const [showAudit, setShowAudit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -80,6 +103,7 @@ export default function RaffleDetailScreen() {
       const data = await api.raffle(id);
       setRaffle(data.raffle);
       setStandings(data.standings || []);
+      setResults(data.results ?? null);
     } catch (err) {
       setNote(err instanceof ApiError ? err.message : 'Томболата не се зареди.');
     } finally {
@@ -501,38 +525,138 @@ export default function RaffleDetailScreen() {
           </View>
         ) : null}
 
-        {/* Класация */}
-        <View style={styles.block}>
-          <Text style={styles.blockTitle}>Класация ({standings.length})</Text>
-          {standings.length === 0 ? (
-            <Text style={styles.blockText}>Още никой не участва — бъди първи.</Text>
-          ) : (
-            standings.map((row) => (
-              <View key={row.userId} style={styles.standingRow}>
-                <View style={[styles.rankPill, row.rank === 1 && { backgroundColor: COLORS.goldBright }]}>
-                  <Text style={[styles.rankText, row.rank === 1 && { color: COLORS.black }]}>
+        {/* 🏆 Прозрачни резултати. Виждат ги ВСИЧКИ — и който не е участвал.
+            Идеята: загубилият да види, че не е измамен — кой за колко време се
+            е справил, кога, колко тренировки е ползвал и какво е ставало. */}
+        {results && results.final ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>🏆 Резултати</Text>
+
+            {results.winner ? (
+              <View style={styles.winnerBox}>
+                <Ionicons name="trophy" size={21} color={COLORS.goldBright} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.winnerName} numberOfLines={1}>
+                    {results.winner.name}
+                  </Text>
+                  <Text style={styles.winnerMeta}>
+                    спечели с {secs(results.winner.timeMs)}
+                    {results.winner.handle ? ` · ${results.winner.handle}` : ''}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.blockText}>
+                Тази томбола остана без победител — виж статистиката и дневника по-долу.
+              </Text>
+            )}
+
+            <View style={styles.statsGrid}>
+              <Stat label="участници" value={results.stats.participants} />
+              <Stat label="завършили" value={results.stats.finished} />
+              <Stat label="най-бързо" value={secs(results.stats.fastestMs)} />
+              <Stat label="средно време" value={secs(results.stats.averageMs)} />
+              <Stat label="най-бавно" value={secs(results.stats.slowestMs)} />
+              <Stat label="отстранени" value={results.stats.disqualified} />
+            </View>
+
+            <Text style={styles.tableHead}>Кой за колко време се справи</Text>
+            {results.rows.length === 0 ? (
+              <Text style={styles.blockText}>Нямаше участници.</Text>
+            ) : (
+              results.rows.map((row) => (
+                <View key={row.userId} style={styles.resRow}>
+                  <Text style={[styles.resRank, row.rank === 1 && { color: COLORS.goldBright }]}>
                     {row.rank ?? '—'}
                   </Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.standingName} numberOfLines={1}>
-                    {row.name}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.resName} numberOfLines={1}>
+                      {row.name}
+                    </Text>
+                    <Text style={styles.resWhen}>
+                      {row.disqualified
+                        ? 'отстранен след проверка — не се брои'
+                        : row.runTimeMs != null
+                          ? `игра ${when(row.runFinishedAt)} · тренировки ${row.practiceUsed}`
+                          : 'не изигра официалното нареждане'}
+                    </Text>
+                  </View>
+                  <Text style={[styles.resTime, row.disqualified && { color: COLORS.textMuted }]}>
+                    {row.disqualified ? '—' : secs(row.runTimeMs)}
                   </Text>
-                  <Text style={styles.standingMeta}>
-                    {row.disqualified
-                      ? 'дисквалифициран'
-                      : row.runTimeMs != null
-                        ? `време ${fmt(row.runTimeMs)}`
-                        : row.practiceUsed > 0
-                          ? `тренира ${row.practiceUsed}x · още не е наредил`
-                          : 'участва'}
-                  </Text>
                 </View>
-                {row.rank === 1 ? <Ionicons name="trophy" size={16} color={COLORS.goldBright} /> : null}
-              </View>
-            ))
-          )}
-        </View>
+              ))
+            )}
+
+            <Text style={styles.honesty}>
+              Защо това е честно: времето се мери на сървъра, не на телефона; дъската е една и съща за всички;
+              официалното нареждане се брои веднъж; тренировките не влизат в класацията. Отстранените участници
+              се проверяват от организатора — броят им е посочен горе, но не ги посочваме поименно.
+            </Text>
+
+            {results.timeline.length > 0 ? (
+              <TouchableOpacity
+                style={styles.auditToggle}
+                onPress={() => setShowAudit((v) => !v)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name={showAudit ? 'chevron-up' : 'chevron-down'} size={15} color={COLORS.accentCyan} />
+                <Text style={styles.auditToggleText}>
+                  {showAudit ? 'Скрий дневника на томболата' : `Виж дневника на томболата (${results.timeline.length})`}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {showAudit
+              ? results.timeline.map((event, index) => (
+                  <View key={`${event.kind}-${index}`} style={styles.auditRow}>
+                    <Text style={styles.auditTime}>{when(event.at)}</Text>
+                    <Text style={styles.auditText}>
+                      {event.user ? `${event.user} — ` : ''}
+                      {event.label}
+                      {event.timeMs != null ? ` (${secs(event.timeMs)})` : ''}
+                    </Text>
+                  </View>
+                ))
+              : null}
+          </View>
+        ) : null}
+
+        {/* Класация — само докато томболата тече. След края „Резултати“ горе
+            показва същото, но по-подробно (с часове, тренировки, одит). */}
+        {!(results && results.final) ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Класация ({standings.length})</Text>
+            {standings.length === 0 ? (
+              <Text style={styles.blockText}>Още никой не участва — бъди първи.</Text>
+            ) : (
+              standings.map((row) => (
+                <View key={row.userId} style={styles.standingRow}>
+                  <View style={[styles.rankPill, row.rank === 1 && { backgroundColor: COLORS.goldBright }]}>
+                    <Text style={[styles.rankText, row.rank === 1 && { color: COLORS.black }]}>
+                      {row.rank ?? '—'}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.standingName} numberOfLines={1}>
+                      {row.name}
+                    </Text>
+                    <Text style={styles.standingMeta}>
+                      {row.disqualified
+                        ? 'дисквалифициран'
+                        : row.runTimeMs != null
+                          ? `време ${fmt(row.runTimeMs)}`
+                          : row.practiceUsed > 0
+                            ? `тренира ${row.practiceUsed}x · още не е наредил`
+                            : 'участва'}
+                    </Text>
+                  </View>
+                  {row.rank === 1 ? <Ionicons name="trophy" size={16} color={COLORS.goldBright} /> : null}
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -642,6 +766,51 @@ const styles = StyleSheet.create({
   errorText: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '800', textAlign: 'center' },
   linkText: { color: COLORS.accentCyan, fontSize: 13, fontWeight: '800' },
   standingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7 },
+  /* 🏆 Прозрачни резултати */
+  winnerBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 10,
+  },
+  winnerName: { color: COLORS.textPrimary, fontSize: 15.5, fontWeight: '900' },
+  winnerMeta: { color: COLORS.goldBright, fontSize: 12, fontWeight: '800', marginTop: 2 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  resStatBox: {
+    width: '31%',
+    backgroundColor: COLORS.bgCard,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  resStatVal: { color: COLORS.textPrimary, fontSize: 14.5, fontWeight: '900' },
+  resStatLbl: { color: COLORS.textMuted, fontSize: 10, marginTop: 2, textAlign: 'center' },
+  tableHead: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '800', marginTop: 16, marginBottom: 2 },
+  resRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  resRank: { width: 24, color: COLORS.textMuted, fontSize: 12.5, fontWeight: '900' },
+  resName: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '700' },
+  resWhen: { color: COLORS.textMuted, fontSize: 10.5, marginTop: 2 },
+  resTime: { color: COLORS.greenBright, fontSize: 13, fontWeight: '900' },
+  honesty: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: 14 },
+  auditToggle: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12, paddingVertical: 6 },
+  auditToggleText: { color: COLORS.accentCyan, fontSize: 12, fontWeight: '800' },
+  auditRow: { flexDirection: 'row', gap: 8, paddingVertical: 5 },
+  auditTime: { color: COLORS.textMuted, fontSize: 10.5, width: 72 },
+  auditText: { flex: 1, color: COLORS.textSecondary, fontSize: 11.5, lineHeight: 16 },
   rankPill: {
     width: 26,
     height: 26,
