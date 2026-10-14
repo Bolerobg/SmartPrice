@@ -142,6 +142,7 @@ const PAGES = {
   users: ['Потребители', 'Търси, редактирай, спри или изтрий профил'],
   posts: ['Оферти', 'Всички оферти с ID, локация и модерация'],
   raffles: ['Томболи', 'Създай томбола, сложи наградата със снимка и я разиграй'],
+  demo: ['Демо играч', 'Тестов играч, който печели — за демонстрация и проби'],
   comments: ['Коментари', 'Преглед и модерация на коментарите'],
   reports: ['Сигнали', 'Какво сигнализират потребителите'],
   categories: ['Категории', 'Етикети и думи за търсене'],
@@ -226,6 +227,7 @@ async function render(page, force = false) {
     if (page === 'users') return await renderUsers(box, force);
     if (page === 'posts') return await renderPosts(box, force);
     if (page === 'raffles') return await renderRaffles(box, force);
+    if (page === 'demo') return await renderDemo(box, force);
     if (page === 'comments') return await renderComments(box, force);
     if (page === 'reports') return await renderReports(box, force);
     if (page === 'categories') return await renderCategories(box, force);
@@ -973,6 +975,118 @@ const RAFFLE_STATUS = {
   cancelled: ['Анулирана', 'pill-red'],
 };
 
+/**
+ * 🎭 Демо играч — тестов профил, който може да се включи в томбола.
+ *
+ * Защо отделна страница: това е ЕДИНСТВЕНОТО място, с което може да се нагласи
+ * томбола. Затова е изкарано настрани, с ясно предупреждение, и демо участието
+ * се вижда като демо — и в публичните резултати, и в одитния дневник.
+ */
+async function renderDemo(box) {
+  const data = await api('/demo');
+  const player = data.player;
+  const raffles = data.raffles || [];
+
+  box.innerHTML = `
+    <div class="card" style="border-color:rgba(245,158,11,.55)">
+      <strong>⚠️ Това е тестов играч, не реален човек</strong>
+      <div class="dim" style="margin-top:8px;line-height:1.6">
+        Като го включиш в томбола, при <strong>разиграването</strong> той получава случайно време, което
+        изпреварва най-доброто реално с 0,3–1,5 секунди — тоест печели той. Времето никога не слиза под
+        прага за „невъзможно бързо“, затова изглежда правдоподобно.
+        <br><br>
+        Участието му се вижда като <strong>демо</strong> — в публичните резултати (значка до името) и в
+        одитния дневник на томболата. Профилът няма валидна парола, значи с него не може да се влезе.
+        <br><br>
+        <strong>Използвай го за проби и демонстрации.</strong> Ако го включиш в реална томбола, за да не
+        дадеш наградата на реален човек, подвеждаш потребителите си — а нагласена промоционална игра може
+        да се третира като нелоялна търговска практика в България и ЕС.
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="toolbar">
+        <strong>Демо играчът</strong>
+        ${
+          player
+            ? `<span class="dim">${esc(player.name)} · ${esc(player.handle)} · създаден ${dt(player.createdAt)}</span>`
+            : '<span class="dim">още не е създаден</span>'
+        }
+        ${!player ? '<button class="btn btn-primary" id="d-create">Създай демо играча</button>' : ''}
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:14px"><table>
+      <thead><tr><th>Томбола</th><th>Статус</th><th>Демо играч</th><th></th></tr></thead>
+      <tbody>
+      ${
+        raffles.length
+          ? raffles
+              .map((r) => {
+                const [label, cls] = RAFFLE_STATUS[r.status] || [r.status, 'pill-dim'];
+                return `<tr>
+              <td><strong>${esc(r.title)}</strong></td>
+              <td><span class="pill ${cls}">${esc(label)}</span></td>
+              <td>${
+                r.demoEnabled
+                  ? '<span class="pill pill-gold">ВКЛЮЧЕН — ще спечели</span>'
+                  : '<span class="dim">изключен</span>'
+              }</td>
+              <td class="actions">${
+                r.status === 'finished'
+                  ? '<span class="dim">разиграна</span>'
+                  : `<button class="btn btn-sm ${r.demoEnabled ? 'btn-danger' : 'btn-ok'}"
+                       data-d-toggle="${esc(r.id)}" data-d-on="${r.demoEnabled ? '0' : '1'}">
+                       ${r.demoEnabled ? 'Изключи' : 'Включи'}
+                     </button>`
+              }</td>
+            </tr>`;
+              })
+              .join('')
+          : '<tr><td colspan="4" class="empty">Още няма томболи</td></tr>'
+      }
+      </tbody></table></div>
+    <div class="dim" style="margin-top:10px">
+      Включването важи само за избраната томбола. Изключи го преди истинска томбола — иначе наградата
+      отива при тестовия играч.
+    </div>`;
+
+  const createBtn = $('#d-create');
+  if (createBtn) {
+    createBtn.onclick = async () => {
+      try {
+        await api('/demo/player', { method: 'POST' });
+        toast('Демо играчът е създаден');
+        render('demo', true);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  }
+
+  document.querySelectorAll('[data-d-toggle]').forEach((btn) => {
+    btn.onclick = async () => {
+      const turnOn = btn.dataset.dOn === '1';
+      btn.disabled = true;
+      try {
+        await api(`/raffles/${btn.dataset.dToggle}/demo`, {
+          method: 'POST',
+          body: { enabled: turnOn },
+        });
+        toast(
+          turnOn
+            ? 'Демо играчът е включен — при разиграването ще спечели той'
+            : 'Демо играчът е изключен'
+        );
+        render('demo', true);
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, 'error');
+      }
+    };
+  });
+}
+
 async function renderRaffles(box) {
   const data = await api('/raffles');
   const items = data.items || [];
@@ -994,7 +1108,7 @@ async function renderRaffles(box) {
                 const ends = r.endsAt ? new Date(r.endsAt) : null;
                 const days = ends ? Math.max(0, Math.ceil((ends.getTime() - Date.now()) / 86400000)) : null;
                 return `<tr>
-              <td><strong>${esc(r.title)}</strong><div class="dim">минимум ${num(r.minParticipants)} · условие ${num(r.conditionPosts)} находки</div></td>
+              <td><strong>${esc(r.title)}</strong>${r.demoEnabled ? ' <span class="pill pill-gold">🎭 демо играч</span>' : ''}<div class="dim">минимум ${num(r.minParticipants)} · условие ${num(r.conditionPosts)} находки</div></td>
               <td>${esc(r.prize.title)}${r.prize.price ? `<div class="dim">${money(r.prize.price)}</div>` : ''}
                   ${r.prize.url ? `<a href="${esc(r.prize.url)}" target="_blank" rel="noopener">линк ↗</a>` : '<span class="dim">без линк</span>'}</td>
               <td>${r.prize.image ? `<img src="${esc(r.prize.image)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">` : '<span class="pill pill-gold">няма</span>'}</td>

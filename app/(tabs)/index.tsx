@@ -71,10 +71,9 @@ export default function FeedScreen() {
   const [codeBusy, setCodeBusy] = useState(false);
   const router = useRouter();
 
-  // Ако написаното прилича на ID на оферта (SP-7K2M4Q или 7k2m4) — предлагаме
-  // да я отворим направо, вместо да търсим по думи.
-  const looksLikeOfferCode =
-    /^(sp)?[-\s]?[a-z0-9]{4,12}$/i.test(searchQuery.trim()) && /[0-9]/.test(searchQuery.trim());
+  // ID-то на офертата е САМО ЧИСЛА (напр. 48219357). Ако написаното изглежда
+  // като такъв номер — предлагаме да я отворим направо, вместо да търсим по думи.
+  const looksLikeOfferCode = /^\d{6,12}$/.test(searchQuery.trim());
 
   const openByCode = async () => {
     const code = searchQuery.trim();
@@ -393,7 +392,7 @@ export default function FeedScreen() {
         <View style={styles.codeHint}>
           <Ionicons name="pricetag-outline" size={12} color={COLORS.accentCyan} />
           <Text style={styles.codeHintText}>
-            Всяка оферта има ID (напр. SP-7K2M4Q). Напиши го тук, за да я намериш веднага.
+            Всяка оферта има ID (само числа, напр. 48219357). Напиши го тук, за да я намериш веднага.
           </Text>
         </View>
       )}

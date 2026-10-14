@@ -542,6 +542,7 @@ export default function RaffleDetailScreen() {
                   <Text style={styles.winnerMeta}>
                     спечели с {secs(results.winner.timeMs)}
                     {results.winner.handle ? ` · ${results.winner.handle}` : ''}
+                    {results.winner.isDemo ? ' · 🎭 демо (тест)' : ''}
                   </Text>
                 </View>
               </View>
@@ -572,6 +573,7 @@ export default function RaffleDetailScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.resName} numberOfLines={1}>
                       {row.name}
+                      {row.isDemo ? ' · 🎭 демо' : ''}
                     </Text>
                     <Text style={styles.resWhen}>
                       {row.disqualified

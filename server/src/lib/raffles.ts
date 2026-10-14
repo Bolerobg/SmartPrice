@@ -551,7 +551,15 @@ export async function standings(raffleId: string, limit = 50) {
  */
 export interface RaffleResults {
   final: boolean;
-  winner: { userId: string; name: string; handle: string; avatar: string; timeMs: number | null } | null;
+  winner: {
+    userId: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    timeMs: number | null;
+    /** Демо (тестов) играч — не е реален човек. */
+    isDemo: boolean;
+  } | null;
   stats: {
     participants: number;
     finished: number;
@@ -573,6 +581,8 @@ export interface RaffleResults {
     joinedAt: string;
     runFinishedAt: string | null;
     disqualified: boolean;
+    /** Демо (тестов) играч — не е реален човек. */
+    isDemo: boolean;
   }[];
   /** Одитен дневник: какво се е случило и кога, без вътрешните подробности. */
   timeline: { kind: string; label: string; at: string; user: string | null; timeMs: number | null }[];
@@ -587,6 +597,9 @@ const EVENT_LABEL: Record<string, string> = {
   run_too_fast: 'Опит с невъзможно време — не се брои',
   disqualified_by_admin: 'Отстранен след проверка за злоупотреба',
   requalified_by_admin: 'Върнат обратно след проверка',
+  demo_enabled: 'Включен демо играч (тест)',
+  demo_disabled: 'Изключен демо играч',
+  demo_played: 'Демо играчът изигра нареждането — тестово участие',
   cancelled: 'Томболата е анулирана',
   drawn: 'Разиграна — има победител',
 };
@@ -603,10 +616,11 @@ export async function raffleResults(raffle: RaffleRow): Promise<RaffleResults> {
     qualified_at: Date;
     run_finished_at: Date | null;
     disqualified: boolean;
+    is_demo: boolean;
   }>(
     `select e.user_id, p.name, p.handle, p.avatar_url,
             e.run_time_ms, e.practice_used, e.best_practice_ms,
-            e.qualified_at, e.run_finished_at, e.disqualified
+            e.qualified_at, e.run_finished_at, e.disqualified, e.is_demo
        from raffle_entries e
        join profiles p on p.id = e.user_id
       where e.raffle_id = $1
@@ -634,6 +648,7 @@ export async function raffleResults(raffle: RaffleRow): Promise<RaffleResults> {
       joinedAt: iso(r.qualified_at)!,
       runFinishedAt: iso(r.run_finished_at),
       disqualified: r.disqualified,
+      isDemo: r.is_demo,
     };
   });
 
@@ -672,6 +687,7 @@ export async function raffleResults(raffle: RaffleRow): Promise<RaffleResults> {
           handle: winnerRow.handle,
           avatar: winnerRow.avatar,
           timeMs: winnerRow.runTimeMs,
+          isDemo: winnerRow.isDemo,
         }
       : null,
     stats: {
@@ -686,6 +702,143 @@ export async function raffleResults(raffle: RaffleRow): Promise<RaffleResults> {
     rows: mapped,
     timeline,
   };
+}
+
+/* ------------------------------------------------- демо (тестов) играч */
+
+export const DEMO_PLAYER_EMAIL = 'demo.player@smartprice.local';
+const DEMO_PLAYER_NAME = 'Демо Играч';
+
+/**
+ * Профилът на ДЕМО играча — тестов участник, който админът може да включи в
+ * томбола, за да види как изглежда победа (или за проби преди пускане).
+ *
+ * ВАЖНО: профилът е маркиран `is_demo`, значи не е реален човек и това се
+ * вижда — в панела, в публичните резултати (значка „демо“) и в одитния
+ * дневник. Така играчите не биват подвеждани, че печели истински човек.
+ * Паролата е невалидна нарочно — с този профил НЕ може да се влезе.
+ */
+export async function getOrCreateDemoPlayer(): Promise<{ id: string; name: string; handle: string }> {
+  const existing = await one<{ id: string; name: string; handle: string; is_demo: boolean }>(
+    'select id, name, handle, is_demo from profiles where is_demo or email = $1 order by created_at limit 1',
+    [DEMO_PLAYER_EMAIL]
+  );
+  if (existing) {
+    if (!existing.is_demo) {
+      await query('update profiles set is_demo = true where id = $1', [existing.id]);
+    }
+    return { id: existing.id, name: existing.name, handle: existing.handle };
+  }
+
+  // Паролата е нарочно невалидна (не е bcrypt хеш) — вход с този профил не работи.
+  const passwordHash = `demo-disabled-${crypto.randomBytes(24).toString('hex')}`;
+
+  let handle = '@demo';
+  for (let i = 0; i < 30; i += 1) {
+    const candidate = i === 0 ? handle : `@demo${i + 1}`;
+    const taken = await one('select 1 from profiles where handle = $1', [candidate]);
+    if (!taken) {
+      handle = candidate;
+      break;
+    }
+  }
+
+  const row = await one<{ id: string }>(
+    `insert into profiles (email, email_key, password_hash, name, handle, city, email_verified_at, is_demo)
+     values ($1,$2,$3,$4,$5,'София', now(), true)
+     returning id`,
+    [DEMO_PLAYER_EMAIL, DEMO_PLAYER_EMAIL, passwordHash, DEMO_PLAYER_NAME, handle]
+  );
+  const id = row!.id;
+  await query(
+    `insert into profile_badges (profile_id, badge_id)
+     select $1, id from badges on conflict do nothing`,
+    [id]
+  );
+  return { id, name: DEMO_PLAYER_NAME, handle };
+}
+
+export interface DemoState {
+  raffleId: string;
+  enabled: boolean;
+  player: { id: string; name: string; handle: string } | null;
+}
+
+/** Включен ли е демо играчът в тази томбола? */
+export async function loadRaffleDemo(raffleId: string): Promise<DemoState> {
+  const row = await one<{ user_id: string; name: string; handle: string }>(
+    `select e.user_id, p.name, p.handle
+       from raffle_entries e
+       join profiles p on p.id = e.user_id
+      where e.raffle_id = $1 and e.is_demo
+      limit 1`,
+    [raffleId]
+  );
+  if (!row) return { raffleId, enabled: false, player: null };
+  return {
+    raffleId,
+    enabled: true,
+    player: { id: row.user_id, name: row.name, handle: row.handle },
+  };
+}
+
+/** Включва/изключва демо играча за дадена томбола. */
+export async function setRaffleDemo(raffle: RaffleRow, enabled: boolean): Promise<DemoState> {
+  if (!enabled) {
+    await query('delete from raffle_entries where raffle_id = $1 and is_demo', [raffle.id]);
+    await logEvent(raffle.id, null, 'demo_disabled');
+    return loadRaffleDemo(raffle.id);
+  }
+
+  const player = await getOrCreateDemoPlayer();
+  await query(
+    `insert into raffle_entries (raffle_id, user_id, posts_count, qualified_at, is_demo)
+     values ($1,$2,$3, now(), true)
+     on conflict (raffle_id, user_id) do update set is_demo = true`,
+    [raffle.id, player.id, raffle.condition_posts]
+  );
+  await logEvent(raffle.id, player.id, 'demo_enabled', { name: player.name });
+  return loadRaffleDemo(raffle.id);
+}
+
+/**
+ * Дава на демо играча време, което изпреварва най-доброто РЕАЛНО време.
+ *
+ * Защо точно така: времето трябва да изглежда възможно и близко до
+ * постижимото — ако е 0.4 секунди или под прага MIN_RUN_MS, всеки вижда, че
+ * е нагласено. Затова изпреварва с 0.3–1.5 с и никога не слиза под прага.
+ */
+export async function playDemoEntry(raffleId: string): Promise<number | null> {
+  const demo = await one<{ user_id: string }>(
+    'select user_id from raffle_entries where raffle_id = $1 and is_demo limit 1',
+    [raffleId]
+  );
+  if (!demo) return null;
+
+  const bestReal = await one<{ t: number | null }>(
+    `select min(run_time_ms) as t from raffle_entries
+      where raffle_id = $1 and not disqualified and not is_demo and run_time_ms is not null`,
+    [raffleId]
+  );
+  const best = Number(bestReal?.t ?? 0);
+
+  const target =
+    best > 0
+      ? Math.max(MIN_RUN_MS, best - (300 + Math.floor(Math.random() * 1200)))
+      : MIN_RUN_MS + 2500 + Math.floor(Math.random() * 4000);
+
+  await query(
+    `update raffle_entries
+        set run_time_ms = $3,
+            run_started_at = coalesce(run_started_at, now()),
+            run_finished_at = now(),
+            official_attempts = 1,
+            disqualified = false
+      where raffle_id = $1 and user_id = $2 and is_demo`,
+    [raffleId, demo.user_id, target]
+  );
+  await logEvent(raffleId, demo.user_id, 'demo_played', { timeMs: target });
+  return target;
 }
 
 /** Стена на печелившите: кой, кога, каква награда (за мотивация на всички). */
@@ -725,6 +878,11 @@ export async function winnersWall(limit = 20) {
 export async function drawWinner(raffleId: string) {
   const raffle = await loadRaffle(raffleId);
   if (raffle.status === 'finished') throw badRequest('Тази томбола вече е разиграна.');
+
+  // Ако админът е включил демо играч, той „изиграва“ нареждането ТУК — точно
+  // преди тегленето и след като всички реални времена са известни. Така
+  // изпреварва реалния лидер, без да слиза под прага за невъзможно време.
+  await playDemoEntry(raffleId);
 
   const countRow = await one<{ n: number }>(
     `select count(*) as n from raffle_entries

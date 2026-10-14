@@ -394,7 +394,15 @@ export interface RaffleStanding {
 /** Пълните резултати от томбола — виждат ги ВСИЧКИ, не само участниците. */
 export interface RaffleResults {
   final: boolean;
-  winner: { userId: string; name: string; handle: string; avatar: string; timeMs: number | null } | null;
+  winner: {
+    userId: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    timeMs: number | null;
+    /** Демо (тестов) играч — не е реален човек. */
+    isDemo?: boolean;
+  } | null;
   stats: {
     participants: number;
     finished: number;
@@ -416,6 +424,8 @@ export interface RaffleResults {
     joinedAt: string;
     runFinishedAt: string | null;
     disqualified: boolean;
+    /** Демо (тестов) играч — не е реален човек. */
+    isDemo?: boolean;
   }[];
   timeline: { kind: string; label: string; at: string; user: string | null; timeMs: number | null }[];
 }
@@ -612,7 +622,7 @@ export const api = {
 
   post: (id: string) => rawRequest<{ post: PostItem }>(`/api/posts/${id}`),
 
-  /** Търсене по ID на офертата (напр. SP-7K2M4Q). Работи и без вход. */
+  /** Търсене по ID на офертата (числов код, напр. 48219357). Работи и без вход. */
   postByCode: (code: string) =>
     rawRequest<{ post: PostItem }>(`/api/posts/by-code/${encodeURIComponent(code.trim())}`),
 

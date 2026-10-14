@@ -19,8 +19,11 @@ import {
   logEvent,
   officialWindow,
   promoState,
+  getOrCreateDemoPlayer,
+  loadRaffleDemo,
   raffleResults,
   scanRaffleForFraud,
+  setRaffleDemo,
   standings,
   winnersWall,
 } from '../lib/raffles.js';
@@ -411,8 +414,18 @@ export default async function raffleRoutes(app: FastifyInstance) {
     const rows = await many<Awaited<ReturnType<typeof loadRaffle>>>('select * from raffles order by created_at desc');
     const items = [];
     for (const r of rows) {
-      const entries = await many<{ n: number }>('select count(*) as n from raffle_entries where raffle_id = $1', [r.id]);
-      items.push(mapRaffle(r, { entries: Number(entries[0]?.n ?? 0) }));
+      const counts = await one<{ n: number; demo: number }>(
+        `select count(*)::int as n,
+                count(*) filter (where is_demo)::int as demo
+           from raffle_entries where raffle_id = $1`,
+        [r.id]
+      );
+      items.push(
+        mapRaffle(r, {
+          entries: Number(counts?.n ?? 0),
+          demoEnabled: Number(counts?.demo ?? 0) > 0,
+        })
+      );
     }
     return { items };
   });
@@ -586,6 +599,61 @@ export default async function raffleRoutes(app: FastifyInstance) {
         disqualified: items.filter((i) => i.disqualified).length,
       },
     };
+  });
+
+  /* --------------------------------------------------- демо (тестов) играч */
+
+  /**
+   * Демо играчът: тестов профил, който админът може да включи в томбола, за да
+   * види как изглежда победа, преди да я пусне на живо.
+   *
+   * ЗАЩО Е ОТДЕЛНА СТРАНИЦА: това е единственото място, където човек може да
+   * „нагласи“ томбола. Затова е изкарано настрани, с ясно предупреждение в
+   * панела, и демо участието се вижда като демо — в резултатите и в дневника.
+   */
+  app.get('/api/admin/demo', async (req) => {
+    await adminGuard(req);
+    const player = await one<{ id: string; name: string; handle: string; created_at: Date }>(
+      'select id, name, handle, created_at from profiles where is_demo order by created_at limit 1'
+    );
+    const raffles = await many<{ id: string; title: string; status: string; demo: number }>(
+      `select r.id, r.title, r.status,
+              count(e.user_id) filter (where e.is_demo)::int as demo
+         from raffles r
+         left join raffle_entries e on e.raffle_id = r.id
+        group by r.id, r.title, r.status, r.ends_at
+        order by r.ends_at desc
+        limit 50`
+    );
+    return {
+      player: player ? { ...player, createdAt: iso(player.created_at) } : null,
+      raffles: raffles.map((r) => ({
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        demoEnabled: Number(r.demo) > 0,
+      })),
+    };
+  });
+
+  /** Създава демо играча, ако още го няма (или го маркира като демо). */
+  app.post('/api/admin/demo/player', async (req) => {
+    await adminGuard(req);
+    const player = await getOrCreateDemoPlayer();
+    return { player };
+  });
+
+  /** Включва/изключва демо играча за конкретна томбола. */
+  app.post('/api/admin/raffles/:id/demo', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+    const raffle = await loadRaffle(id);
+    if (raffle.status === 'finished') {
+      throw badRequest('Томболата е разиграна — демо играч вече не може да се включва.');
+    }
+    const state = await setRaffleDemo(raffle, enabled);
+    return { demo: state };
   });
 
   /** Дисквалификация на участник (или връщане обратно) — само админ. */
