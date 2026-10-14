@@ -122,6 +122,7 @@ $('#logout-btn').addEventListener('click', () => logout());
 async function showApp() {
   $('#login').hidden = true;
   $('#app').hidden = false;
+  refreshDemoBanner();
   if (!state.admin) {
     try {
       const me = await api('/me');
@@ -976,43 +977,104 @@ const RAFFLE_STATUS = {
 };
 
 /**
+ * Червена лента най-горе, докато сайтът е в ДЕМО РЕЖИМ.
+ *
+ * Защо: в демо режим демо играч може да печели томболи и в приложението да
+ * изглежда като истински победител. Ако човек забрави да го изключи преди
+ * пускане, реални хора ще виждат измислен победител. Лентата е защитата
+ * срещу точно това „забравих“.
+ */
+async function refreshDemoBanner() {
+  try {
+    const data = await api('/demo');
+    const existing = document.getElementById('demo-mode-bar');
+    if (data.demoMode) {
+      if (existing) return;
+      const bar = document.createElement('div');
+      bar.id = 'demo-mode-bar';
+      bar.style.cssText =
+        'background:#7f1d1d;color:#fff;padding:11px 16px;font-weight:800;font-size:13px;' +
+        'border:1px solid rgba(255,255,255,.25);border-radius:12px;margin:0 0 14px;line-height:1.5';
+      bar.innerHTML =
+        '⚠️ <strong>ДЕМО РЕЖИМ Е ВКЛЮЧЕН</strong> — сайтът не е на живо. Демо играч може да печели ' +
+        'томболи и да изглежда като истински участник. <strong>Изключи го преди пускане</strong>, ' +
+        'иначе реалните хора виждат измислен победител.';
+      const page = document.getElementById('page');
+      const host = page && page.parentElement ? page.parentElement : document.body;
+      if (page) host.insertBefore(bar, page);
+      else host.appendChild(bar);
+    } else if (existing) {
+      existing.remove();
+    }
+  } catch {
+    /* няма права или няма връзка — без лента */
+  }
+}
+
+/**
  * 🎭 Демо играч — тестов профил, който може да се включи в томбола.
  *
  * Защо отделна страница: това е ЕДИНСТВЕНОТО място, с което може да се нагласи
- * томбола. Затова е изкарано настрани, с ясно предупреждение, и демо участието
- * се вижда като демо — и в публичните резултати, и в одитния дневник.
+ * томбола. Затова е изкарано настрани, с ясно предупреждение, и демо играчът
+ * може да участва САМО в демо режим.
  */
 async function renderDemo(box) {
   const data = await api('/demo');
   const player = data.player;
+  const demoMode = Boolean(data.demoMode);
   const raffles = data.raffles || [];
 
   box.innerHTML = `
-    <div class="card" style="border-color:rgba(245,158,11,.55)">
-      <strong>⚠️ Това е тестов играч, не реален човек</strong>
-      <div class="dim" style="margin-top:8px;line-height:1.6">
-        Като го включиш в томбола, при <strong>разиграването</strong> той получава случайно време, което
-        изпреварва най-доброто реално с 0,3–1,5 секунди — тоест печели той. Времето никога не слиза под
-        прага за „невъзможно бързо“, затова изглежда правдоподобно.
-        <br><br>
-        Участието му се вижда като <strong>демо</strong> — в публичните резултати (значка до името) и в
-        одитния дневник на томболата. Профилът няма валидна парола, значи с него не може да се влезе.
-        <br><br>
-        <strong>Използвай го за проби и демонстрации.</strong> Ако го включиш в реална томбола, за да не
-        дадеш наградата на реален човек, подвеждаш потребителите си — а нагласена промоционална игра може
-        да се третира като нелоялна търговска практика в България и ЕС.
+    <div class="card" style="border-color:${demoMode ? 'rgba(239,68,68,.7)' : 'rgba(245,158,11,.55)'}">
+      <div class="toolbar" style="justify-content:space-between;align-items:flex-start">
+        <div>
+          <strong>${demoMode ? '🔴 ДЕМО РЕЖИМ Е ВКЛЮЧЕН' : '⚪ Демо режим е изключен'}</strong>
+          <div class="dim" style="margin-top:4px">
+            ${
+              demoMode
+                ? 'Сайтът се третира като тестов. Демо играчът може да участва и в приложението изглежда като обикновен участник.'
+                : 'Сайтът е на живо. Демо играч НЕ може да участва — реалните хора не бива да виждат измислен победител.'
+            }
+          </div>
+        </div>
+        <button class="btn ${demoMode ? 'btn-danger' : 'btn-ok'}" id="d-mode">
+          ${demoMode ? 'Изключи демо режима' : 'Включи демо режима'}
+        </button>
       </div>
     </div>
 
     <div class="card" style="margin-top:14px">
-      <div class="toolbar">
-        <strong>Демо играчът</strong>
-        ${
-          player
-            ? `<span class="dim">${esc(player.name)} · ${esc(player.handle)} · създаден ${dt(player.createdAt)}</span>`
-            : '<span class="dim">още не е създаден</span>'
-        }
-        ${!player ? '<button class="btn btn-primary" id="d-create">Създай демо играча</button>' : ''}
+      <strong>Какво прави демо играчът</strong>
+      <div class="dim" style="margin-top:8px;line-height:1.6">
+        Като го включиш в томбола, при <strong>разиграването</strong> той получава случайно време, което
+        изпреварва най-доброто реално с 0,3–1,5 секунди — тоест печели. Времето никога не слиза под прага
+        за „невъзможно бързо“, затова изглежда правдоподобно.
+        <br><br>
+        Профилът няма валидна парола — с него не може да се влезе. Участието му остава записано като демо
+        в базата и в дневника на томболата, дори когато в приложението не пише „демо“.
+        <br><br>
+        <strong>Демо режимът е за проби и снимки, преди сайтът да е на живо.</strong> Ако го оставиш
+        включен на живо, показваш на хората победител, който не съществува.
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <strong>Профилът на демо играча</strong>
+      <div class="dim" style="margin-top:4px">Направи го да изглежда като реален човек — така пробата изглежда точно като истинска победа.</div>
+      <div class="form-grid" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+        <label class="field" style="flex:1;min-width:180px"><span>Име</span>
+          <input id="d-name" value="${esc(player ? player.name : '')}" placeholder="напр. Мария Иванова">
+        </label>
+        <label class="field" style="flex:1;min-width:160px"><span>Град</span>
+          <input id="d-city" value="${esc(player ? player.city : '')}" placeholder="напр. Пловдив">
+        </label>
+        <label class="field" style="flex:1;min-width:220px"><span>Снимка (URL)</span>
+          <input id="d-avatar" value="${esc(player && player.avatarUrl ? player.avatarUrl : '')}" placeholder="https://…">
+        </label>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-primary" id="d-save-profile">Запази профила</button>
+        ${player ? `<span class="dim" style="margin-left:10px">${esc(player.handle)} · създаден ${dt(player.createdAt)}</span>` : '<span class="dim" style="margin-left:10px">още не е създаден</span>'}
       </div>
     </div>
 
@@ -1036,7 +1098,8 @@ async function renderDemo(box) {
                 r.status === 'finished'
                   ? '<span class="dim">разиграна</span>'
                   : `<button class="btn btn-sm ${r.demoEnabled ? 'btn-danger' : 'btn-ok'}"
-                       data-d-toggle="${esc(r.id)}" data-d-on="${r.demoEnabled ? '0' : '1'}">
+                       data-d-toggle="${esc(r.id)}" data-d-on="${r.demoEnabled ? '0' : '1'}"
+                       ${!demoMode && !r.demoEnabled ? 'disabled title="Включи демо режима най-горе"' : ''}>
                        ${r.demoEnabled ? 'Изключи' : 'Включи'}
                      </button>`
               }</td>
@@ -1051,14 +1114,39 @@ async function renderDemo(box) {
       отива при тестовия играч.
     </div>`;
 
-  const createBtn = $('#d-create');
-  if (createBtn) {
-    createBtn.onclick = async () => {
+  const modeBtn = $('#d-mode');
+  if (modeBtn) {
+    modeBtn.onclick = async () => {
+      modeBtn.disabled = true;
       try {
-        await api('/demo/player', { method: 'POST' });
-        toast('Демо играчът е създаден');
+        await api('/demo/mode', { method: 'POST', body: { enabled: !demoMode } });
+        toast(demoMode ? 'Демо режимът е изключен — сайтът е на живо' : 'Демо режимът е включен');
+        render('demo', true);
+        refreshDemoBanner();
+      } catch (err) {
+        modeBtn.disabled = false;
+        toast(err.message, 'error');
+      }
+    };
+  }
+
+  const saveBtn = $('#d-save-profile');
+  if (saveBtn) {
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true;
+      try {
+        await api('/demo/profile', {
+          method: 'POST',
+          body: {
+            name: $('#d-name').value.trim() || undefined,
+            city: $('#d-city').value.trim() || undefined,
+            avatarUrl: $('#d-avatar').value.trim() || null,
+          },
+        });
+        toast('Профилът на демо играча е запазен');
         render('demo', true);
       } catch (err) {
+        saveBtn.disabled = false;
         toast(err.message, 'error');
       }
     };

@@ -394,6 +394,8 @@ export interface RaffleStanding {
 /** Пълните резултати от томбола — виждат ги ВСИЧКИ, не само участниците. */
 export interface RaffleResults {
   final: boolean;
+  /** Сайтът в демо режим ли е. При демо режим участниците не се маркират като демо. */
+  demoMode?: boolean;
   winner: {
     userId: string;
     name: string;

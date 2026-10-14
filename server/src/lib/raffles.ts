@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { env } from '../env.js';
+import { isDemoMode } from './settings.js';
 import { many, one, query } from '../db.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 
@@ -551,6 +552,8 @@ export async function standings(raffleId: string, limit = 50) {
  */
 export interface RaffleResults {
   final: boolean;
+  /** Сайтът в демо режим ли е. Когато НЕ е, демо участниците се показват като демо. */
+  demoMode: boolean;
   winner: {
     userId: string;
     name: string;
@@ -605,6 +608,7 @@ const EVENT_LABEL: Record<string, string> = {
 };
 
 export async function raffleResults(raffle: RaffleRow): Promise<RaffleResults> {
+  const demoMode = await isDemoMode();
   const rows = await many<{
     user_id: string;
     name: string;
@@ -680,6 +684,7 @@ export async function raffleResults(raffle: RaffleRow): Promise<RaffleResults> {
 
   return {
     final,
+    demoMode,
     winner: winnerRow
       ? {
           userId: winnerRow.userId,
@@ -758,14 +763,56 @@ export async function getOrCreateDemoPlayer(): Promise<{ id: string; name: strin
   return { id, name: DEMO_PLAYER_NAME, handle };
 }
 
+/**
+ * Прави демо играча да изглежда като истински човек — име, град, снимка.
+ *
+ * Защо е позволено: в ДЕМО РЕЖИМ трябва да се види точно как ще изглежда
+ * победа на реален участник (за проби и за снимки). Профилът пак остава
+ * маркиран is_demo в базата и в админ дневника — не се губи следата.
+ */
+export async function updateDemoProfile(input: {
+  name?: string;
+  city?: string;
+  avatarUrl?: string | null;
+}): Promise<{ id: string; name: string; handle: string; city: string; avatarUrl: string | null }> {
+  const player = await getOrCreateDemoPlayer();
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  const push = (sql: string, value: unknown) => {
+    values.push(value);
+    sets.push(`${sql} = $${values.length}`);
+  };
+  if (input.name?.trim()) push('name', input.name.trim());
+  if (input.city?.trim()) push('city', input.city.trim());
+  if (input.avatarUrl !== undefined) push('avatar_url', input.avatarUrl || null);
+  if (sets.length) {
+    values.push(player.id);
+    await query(`update profiles set ${sets.join(', ')} where id = $${values.length}`, values);
+  }
+  const row = await one<{ id: string; name: string; handle: string; city: string; avatar_url: string | null }>(
+    'select id, name, handle, city, avatar_url from profiles where id = $1',
+    [player.id]
+  );
+  return {
+    id: row!.id,
+    name: row!.name,
+    handle: row!.handle,
+    city: row!.city,
+    avatarUrl: row!.avatar_url,
+  };
+}
+
 export interface DemoState {
   raffleId: string;
   enabled: boolean;
   player: { id: string; name: string; handle: string } | null;
+  /** Сайтът в демо режим ли е (само тогава демо играч може да участва). */
+  demoMode: boolean;
 }
 
 /** Включен ли е демо играчът в тази томбола? */
 export async function loadRaffleDemo(raffleId: string): Promise<DemoState> {
+  const demoMode = await isDemoMode();
   const row = await one<{ user_id: string; name: string; handle: string }>(
     `select e.user_id, p.name, p.handle
        from raffle_entries e
@@ -774,11 +821,12 @@ export async function loadRaffleDemo(raffleId: string): Promise<DemoState> {
       limit 1`,
     [raffleId]
   );
-  if (!row) return { raffleId, enabled: false, player: null };
+  if (!row) return { raffleId, enabled: false, player: null, demoMode };
   return {
     raffleId,
     enabled: true,
     player: { id: row.user_id, name: row.name, handle: row.handle },
+    demoMode,
   };
 }
 
@@ -788,6 +836,16 @@ export async function setRaffleDemo(raffle: RaffleRow, enabled: boolean): Promis
     await query('delete from raffle_entries where raffle_id = $1 and is_demo', [raffle.id]);
     await logEvent(raffle.id, null, 'demo_disabled');
     return loadRaffleDemo(raffle.id);
+  }
+
+  // ЗАЩИТА: демо играч може да участва САМО докато сайтът е в демо режим.
+  // В реален режим реалните хора не бива да виждат измислен победител —
+  // това е подвеждане (и в БГ/ЕС може да е нелоялна търговска практика).
+  if (!(await isDemoMode())) {
+    throw badRequest(
+      'Демо играч може да се включи само в ДЕМО РЕЖИМ. Включи демо режима от „🎭 Демо играч“ — ' +
+        'той е за проби и демонстрации, докато сайтът не е на живо.'
+    );
   }
 
   const player = await getOrCreateDemoPlayer();
@@ -809,6 +867,10 @@ export async function setRaffleDemo(raffle: RaffleRow, enabled: boolean): Promis
  * е нагласено. Затова изпреварва с 0.3–1.5 с и никога не слиза под прага.
  */
 export async function playDemoEntry(raffleId: string): Promise<number | null> {
+  // Втора проверка (освен при включването) — ако режимът е изключен след
+  // включването на играча, той не играе и не печели.
+  if (!(await isDemoMode())) return null;
+
   const demo = await one<{ user_id: string }>(
     'select user_id from raffle_entries where raffle_id = $1 and is_demo limit 1',
     [raffleId]

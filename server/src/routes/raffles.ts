@@ -25,8 +25,10 @@ import {
   scanRaffleForFraud,
   setRaffleDemo,
   standings,
+  updateDemoProfile,
   winnersWall,
 } from '../lib/raffles.js';
+import { isDemoMode, setDemoMode } from '../lib/settings.js';
 import { syncBadges } from '../lib/badges.js';
 import { requireAdminAnyToken } from '../lib/admin.js';
 
@@ -613,8 +615,17 @@ export default async function raffleRoutes(app: FastifyInstance) {
    */
   app.get('/api/admin/demo', async (req) => {
     await adminGuard(req);
-    const player = await one<{ id: string; name: string; handle: string; created_at: Date }>(
-      'select id, name, handle, created_at from profiles where is_demo order by created_at limit 1'
+    const demoMode = await isDemoMode();
+    const player = await one<{
+      id: string;
+      name: string;
+      handle: string;
+      city: string;
+      avatar_url: string | null;
+      created_at: Date;
+    }>(
+      `select id, name, handle, city, avatar_url, created_at
+         from profiles where is_demo order by created_at limit 1`
     );
     const raffles = await many<{ id: string; title: string; status: string; demo: number }>(
       `select r.id, r.title, r.status,
@@ -626,7 +637,17 @@ export default async function raffleRoutes(app: FastifyInstance) {
         limit 50`
     );
     return {
-      player: player ? { ...player, createdAt: iso(player.created_at) } : null,
+      demoMode,
+      player: player
+        ? {
+            id: player.id,
+            name: player.name,
+            handle: player.handle,
+            city: player.city,
+            avatarUrl: player.avatar_url,
+            createdAt: iso(player.created_at),
+          }
+        : null,
       raffles: raffles.map((r) => ({
         id: r.id,
         title: r.title,
@@ -634,6 +655,34 @@ export default async function raffleRoutes(app: FastifyInstance) {
         demoEnabled: Number(r.demo) > 0,
       })),
     };
+  });
+
+  /**
+   * Демо режим: сайтът се ползва за проби/демонстрации, не е на живо.
+   *
+   * Демо играч може да участва САМО когато този режим е включен, защото само
+   * тогава е ясно, че резултатите не са истински. В реален режим реалните
+   * хора не бива да виждат измислен победител.
+   */
+  app.post('/api/admin/demo/mode', async (req) => {
+    await adminGuard(req);
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+    await setDemoMode(enabled);
+    return { demoMode: enabled };
+  });
+
+  /** Профилът на демо играча: име, град, снимка — за да изглежда като реален човек. */
+  app.post('/api/admin/demo/profile', async (req) => {
+    await adminGuard(req);
+    const input = z
+      .object({
+        name: z.string().trim().min(2).max(60).optional(),
+        city: z.string().trim().min(2).max(60).optional(),
+        avatarUrl: z.string().trim().max(500).nullable().optional(),
+      })
+      .parse(req.body ?? {});
+    const player = await updateDemoProfile(input);
+    return { player };
   });
 
   /** Създава демо играча, ако още го няма (или го маркира като демо). */
