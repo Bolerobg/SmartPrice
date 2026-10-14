@@ -980,7 +980,8 @@ async function renderRaffles(box) {
   box.innerHTML = `
     <div class="toolbar">
       <button class="btn btn-primary" id="r-new">+ Нова томбола</button>
-      <span class="dim">Снимката на наградата се качва оттук — тя се вижда в приложението, точно над линка „Виж продукта“.</span>
+      <span class="dim">Снимката на наградата се качва оттук — тя се вижда в приложението, точно над линка „Виж продукта“.
+        <br>🛡️ Настройките <strong>„Защита срещу фалшиви акаунти“</strong> (различни дни, стаж на профила, ⏱ синхронен старт) са <strong>във формата на томболата</strong> — натисни „+ Нова томбола“ или „Редакция“ и скрол надолу.</span>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>Томбола</th><th>Награда</th><th>Снимка</th><th>Срок</th><th>Участници</th><th>Статус</th><th></th></tr></thead>
