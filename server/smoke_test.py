@@ -99,7 +99,13 @@ def main() -> int:
     status, reg = call(
         "POST",
         "/api/auth/register",
-        {"email": email, "password": password, "name": name, "city": city},
+        {
+            "email": email,
+            "password": password,
+            "name": name,
+            "city": city,
+            "phone": "088" + str(random.randint(1000000, 9999999)),
+        },
     )
     check("регистрация → 201", status == 201, f"HTTP {status} {reg if status != 201 else ''}")
     check("иска потвърждение на имейла", reg.get("requiresVerification") is True)
@@ -132,15 +138,37 @@ def main() -> int:
     check("има начални значки", len(profile.get("badges", [])) >= 4, str(len(profile.get("badges", []))))
 
     section("3. Защита на входа")
-    status, _ = call("POST", "/api/auth/register", {"email": email, "password": password, "name": name})
+    status, _ = call(
+        "POST",
+        "/api/auth/register",
+        {
+            "email": email,
+            "password": password,
+            "name": name,
+            "phone": "089" + str(random.randint(1000000, 9999999)),
+        },
+    )
     check("дубликат на имейл → 409", status == 409, f"HTTP {status}")
     status, _ = call("POST", "/api/auth/login", {"email": email, "password": "greshna123"})
     check("грешна парола → 401", status == 401, f"HTTP {status}")
     status, _ = call("GET", "/api/auth/me")
     check("без токен → 401", status == 401, f"HTTP {status}")
-    status, _ = call("POST", "/api/auth/register", {"email": "bad", "password": "123", "name": "x"})
+    status, _ = call(
+        "POST",
+        "/api/auth/register",
+        {"email": "bad", "password": "123", "name": "x", "phone": "0881234567"},
+    )
     check("невалидни данни → 422", status == 422, f"HTTP {status}")
-    status, _ = call("POST", "/api/auth/register", {"email": f"weak{random.randint(1,999)}@t.bg", "password": "kratka", "name": "Тест Тестов"})
+    status, _ = call(
+        "POST",
+        "/api/auth/register",
+        {
+            "email": f"weak{random.randint(1,999)}@t.bg",
+            "password": "kratka",
+            "name": "Тест Тестов",
+            "phone": "087" + str(random.randint(1000000, 9999999)),
+        },
+    )
     check("слаба парола → 400", status == 400, f"HTTP {status}")
 
     section("4. Вход и профил")
@@ -340,7 +368,12 @@ def main() -> int:
     other_email = f"other.{random.randint(1000, 9999)}@smartprice.test"
     status, other_reg = call(
         "POST", "/api/auth/register",
-        {"email": other_email, "password": password, "name": "Друг Тестов"},
+        {
+            "email": other_email,
+            "password": password,
+            "name": "Друг Тестов",
+            "phone": "086" + str(random.randint(1000000, 9999999)),
+        },
     )
     other_dev_code = other_reg.get("devCode")
     if other_dev_code:

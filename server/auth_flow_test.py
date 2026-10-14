@@ -69,7 +69,13 @@ def main():
     status, reg = call(
         "POST",
         "/api/auth/register",
-        {"email": email, "password": password, "name": "Флоу Тестов", "city": "Пловдив"},
+        {
+            "email": email,
+            "password": password,
+            "name": "Флоу Тестов",
+            "city": "Пловдив",
+            "phone": "088" + str(random.randint(1000000, 9999999)),
+        },
     )
     check("регистрация → 201", status == 201, f"HTTP {status} {reg if status != 201 else ''}")
     if status != 201:
@@ -172,12 +178,30 @@ def main():
     check("казва, че вече е потвърден", resend.get("alreadyVerified") is True, str(resend))
 
     section("11. Слаба парола се отхвърля")
-    status, _ = call("POST", "/api/auth/register", {"email": f"weak.{random.randint(1, 99999)}@smartprice.test", "password": "kratka", "name": "Слаб Тестов"})
+    status, _ = call(
+        "POST",
+        "/api/auth/register",
+        {
+            "email": f"weak.{random.randint(1, 99999)}@smartprice.test",
+            "password": "kratka",
+            "name": "Слаб Тестов",
+            "phone": "087" + str(random.randint(1000000, 9999999)),
+        },
+    )
     check("къса парола → 400", status == 400, f"HTTP {status}")
 
     section("12. Ограничение за честота на кодовете")
     fresh = f"rate.{random.randint(100000, 999999)}@smartprice.test"
-    call("POST", "/api/auth/register", {"email": fresh, "password": password, "name": "Рейт Тестов"})
+    call(
+        "POST",
+        "/api/auth/register",
+        {
+            "email": fresh,
+            "password": password,
+            "name": "Рейт Тестов",
+            "phone": "089" + str(random.randint(1000000, 9999999)),
+        },
+    )
     codes_sent, got_429 = 0, False
     for _ in range(8):
         status, res = call("POST", "/api/auth/resend-code", {"email": fresh, "purpose": "email_verify"})

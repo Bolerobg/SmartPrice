@@ -32,6 +32,8 @@ interface AuthContextValue {
     password: string;
     name: string;
     city?: string;
+    /** Телефонен номер — задължителен. Един номер = един акаунт. */
+    phone: string;
     /** Код за покана от приятел (по избор) — носи точки и на двамата. */
     ref?: string;
     refChannel?: string;
@@ -123,6 +125,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password: string;
       name: string;
       city?: string;
+      /** Телефонен номер — задължителен. Един номер = един акаунт. */
+      phone: string;
       /** Код за покана от приятел (по избор). */
       ref?: string;
       refChannel?: string;

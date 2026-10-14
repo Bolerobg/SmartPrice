@@ -142,6 +142,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
     const rows = await many<Record<string, unknown>>(
       `select pr.id, pr.email, pr.name, pr.handle, pr.city, pr.role, pr.avatar_url,
+              pr.phone, pr.signup_ip,
               pr.is_supporter, pr.reputation_points, pr.personal_saved_bgn::float as saved,
               pr.created_at, pr.last_seen_at, pr.last_login_at, pr.login_count,
               pr.email_verified_at, pr.suspended_at, pr.suspended_until, pr.suspended_reason,

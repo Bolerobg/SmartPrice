@@ -37,7 +37,7 @@ const T = {
   postsPerHour: 12, // оферти от един профил за час
   commentsPerHour: 30, // коментари от един профил за час
   reportsPerDay: 5, // отворени сигнала за 24 ч
-  signupsPerIp: 4, // нови профила от един IP за 24 ч
+  signupsPerIp: 2, // нови профила от един IP за 24 ч (предупреждение — CGNAT!)
   reactionsPerHour: 300, // реакции от един профил за час
   hiddenRatioMin: 5, // минимално оферти, за да се смята съотношение
 };

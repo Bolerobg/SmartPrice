@@ -15,6 +15,7 @@ import { AppError, badRequest, conflict, unauthorized } from '../lib/errors.js';
 import { loadFullProfile } from '../lib/profile.js';
 import { consumeCode, issueCode } from '../lib/verification.js';
 import { attachReferral } from '../lib/referrals.js';
+import { normalizePhone } from '../lib/phone.js';
 
 const registerSchema = z.object({
   email: z.string().email('Невалиден имейл.').max(160),
@@ -23,6 +24,13 @@ const registerSchema = z.object({
   password: z.string().min(1, 'Паролата е задължителна.').max(200),
   name: z.string().trim().min(2, 'Името е задължително.').max(80),
   city: z.string().trim().min(2).max(80).optional(),
+  // Телефонният номер е ЗАДЪЛЖИТЕЛЕН и уникален — това е правилото
+  // „един човек = един акаунт“ (вж. migrations/014_phone_unique.sql).
+  phone: z
+    .string({ required_error: 'Телефонният номер е задължителен.' })
+    .trim()
+    .min(1, 'Телефонният номер е задължителен.')
+    .max(24),
   // Код за покана от приятел (по избор). Невалиден код НЕ чупи регистрацията.
   ref: z.string().trim().max(32).optional(),
   // Откъде е дошъл (whatsapp/viber/story-card…) — за да знаем кой канал работи.
@@ -97,6 +105,26 @@ export default async function authRoutes(app: FastifyInstance) {
     assertPasswordStrength(input.password);
 
     const email = input.email.toLowerCase();
+
+    // --- Един човек = един акаунт: телефонът е ключът -------------------
+    const phone = normalizePhone(input.phone);
+    if (!phone) {
+      throw badRequest('Въведи валиден телефонен номер (напр. 088 123 4567).');
+    }
+
+    const phoneOwner = await one<{ email: string }>(
+      'select email from profiles where phone = $1',
+      [phone]
+    );
+    // Ако номерът е на ДРУГ имейл — втори профил не се създава. Ако е на
+    // същия имейл (недовършена регистрация), позволяваме да продължи.
+    if (phoneOwner && String(phoneOwner.email).toLowerCase() !== email) {
+      throw conflict(
+        'Вече има профил с този телефонен номер. Един човек — един профил. ' +
+          'Ако това си ти, влез или си смени паролата.'
+      );
+    }
+
     const existing = await one<{ email_verified_at: string | null }>(
       'select email_verified_at from profiles where email = $1',
       [email]
@@ -108,36 +136,51 @@ export default async function authRoutes(app: FastifyInstance) {
 
     let userId: string;
 
-    if (existing) {
-      // Има недовършена регистрация — обновяваме данните и пращаме нов код,
-      // вместо да блокираме потребителя с „имейлът е зает“.
-      const passwordHash = await hashPassword(input.password);
-      await one(
-        `update profiles set password_hash = $2, name = $3, city = $4,
-                signup_ip = coalesce(signup_ip, $5) where email = $1 returning id`,
-        [email, passwordHash, input.name, input.city ?? 'София', req.ip ?? null]
-      );
-      const row = await one<{ id: string }>('select id from profiles where email = $1', [email]);
-      userId = row!.id;
-    } else {
-      const handle = await uniqueHandle(input.name || email.split('@')[0] || 'user');
-      const passwordHash = await hashPassword(input.password);
+    try {
+      if (existing) {
+        // Има недовършена регистрация — обновяваме данните и пращаме нов код,
+        // вместо да блокираме потребителя с „имейлът е зает“.
+        const passwordHash = await hashPassword(input.password);
+        await one(
+          `update profiles set password_hash = $2, name = $3, city = $4,
+                  signup_ip = coalesce(signup_ip, $5), phone = $6
+            where email = $1 returning id`,
+          [email, passwordHash, input.name, input.city ?? 'София', req.ip ?? null, phone]
+        );
+        const row = await one<{ id: string }>('select id from profiles where email = $1', [email]);
+        userId = row!.id;
+      } else {
+        const handle = await uniqueHandle(input.name || email.split('@')[0] || 'user');
+        const passwordHash = await hashPassword(input.password);
 
-      userId = await tx(async (client) => {
-        const res = await client.query<{ id: string }>(
-          `insert into profiles (email, password_hash, name, handle, city, email_verified_at, signup_ip)
-           values ($1, $2, $3, $4, $5, null, $6)
-           returning id`,
-          [email, passwordHash, input.name, handle, input.city ?? 'София', req.ip ?? null]
+        userId = await tx(async (client) => {
+          const res = await client.query<{ id: string }>(
+            `insert into profiles (email, password_hash, name, handle, city, email_verified_at, signup_ip, phone)
+             values ($1, $2, $3, $4, $5, null, $6, $7)
+             returning id`,
+            [email, passwordHash, input.name, handle, input.city ?? 'София', req.ip ?? null, phone]
+          );
+          const id = res.rows[0]!.id;
+          await client.query(
+            `insert into profile_badges (profile_id, badge_id)
+             select $1, id from badges on conflict do nothing`,
+            [id]
+          );
+          return id;
+        });
+      }
+    } catch (err) {
+      // Надпревара: между проверката и записа някой е взел номера. Уникалният
+      // индекс е истинската защита — тук само превеждаме грешката на човешки.
+      const code = (err as { code?: string }).code;
+      const constraint = String((err as { constraint?: string }).constraint ?? '');
+      if (code === '23505' && constraint.includes('phone')) {
+        throw conflict(
+          'Вече има профил с този телефонен номер. Един човек — един профил. ' +
+            'Ако това си ти, влез или си смени паролата.'
         );
-        const id = res.rows[0]!.id;
-        await client.query(
-          `insert into profile_badges (profile_id, badge_id)
-           select $1, id from badges on conflict do nothing`,
-          [id]
-        );
-        return id;
-      });
+      }
+      throw err;
     }
 
     // Поканата се записва сега, но точките се дават чак при потвърден имейл

@@ -18,6 +18,21 @@ import { COLORS } from '@/constants/theme';
 import { ApiError, API_URL, api } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
 
+/**
+ * Проверка на български телефонен номер — същата логика като на сървъра
+ * (server/src/lib/phone.ts), за да не пращаме форма, която ще бъде отказана.
+ */
+function isValidPhone(raw: string): boolean {
+  let d = raw.replace(/[^0-9]/g, '');
+  if (!d) return false;
+  if (d.startsWith('00')) d = d.slice(2);
+  if (!d.startsWith('359')) {
+    if (d.startsWith('0')) d = `359${d.slice(1)}`;
+    else if (d.length === 9) d = `359${d}`;
+  }
+  return /^359\d{8,9}$/.test(d);
+}
+
 export default function RegisterScreen() {
   const router = useRouter();
   const { register } = useAuth();
@@ -26,6 +41,7 @@ export default function RegisterScreen() {
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [city, setCity] = useState('София');
   const [showPassword, setShowPassword] = useState(false);
@@ -77,6 +93,7 @@ export default function RegisterScreen() {
   const canSubmit =
     name.trim().length >= 2 &&
     email.includes('@') &&
+    isValidPhone(phone) &&
     password.length >= 8 &&
     !passwordIssue &&
     !isSubmitting;
@@ -91,6 +108,7 @@ export default function RegisterScreen() {
         password,
         name,
         city,
+        phone: phone.trim(),
         ref: refCode.trim() || undefined,
         refChannel: params.ref ? 'invite-link' : undefined,
       });
@@ -172,6 +190,23 @@ export default function RegisterScreen() {
           autoCapitalize="none"
           autoCorrect={false}
         />
+
+        <Text style={styles.label}>Телефон</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="088 123 4567"
+          placeholderTextColor={COLORS.textMuted}
+          value={phone}
+          onChangeText={setPhone}
+          keyboardType="phone-pad"
+          autoComplete="tel"
+          maxLength={20}
+        />
+        <Text style={styles.refHint}>
+          {phone.length > 0 && !isValidPhone(phone)
+            ? 'Въведи валиден български номер, напр. 088 123 4567'
+            : 'Един телефонен номер = един профил. Пазим го само срещу фалшиви акаунти.'}
+        </Text>
 
         <Text style={styles.label}>Парола</Text>
         <View style={styles.passwordRow}>

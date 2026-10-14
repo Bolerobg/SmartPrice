@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
 import urllib.error
 import urllib.request
@@ -75,7 +76,14 @@ def register_and_login(
         base,
         "POST",
         "/api/auth/register",
-        {"email": email, "password": password, "name": name, "city": city},
+        {
+            "email": email,
+            "password": password,
+            "name": name,
+            "city": city,
+            # Телефонът е задължителен и уникален (един човек = един акаунт).
+            "phone": "088" + str(random.randint(1000000, 9999999)),
+        },
     )
     if status != 201:
         return status, reg, None

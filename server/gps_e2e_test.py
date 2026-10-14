@@ -32,6 +32,7 @@ ok &= check("здравето е 200", s == 200)
 
 s, r = call("POST", "/api/auth/register", {
     "email": f"gps{rnd}@example.com", "password": "Test12345!", "displayName": f"GPS Тест {rnd}",
+    "phone": "088" + str(rnd % 10000000).zfill(7),
 })
 print(f"\n1. Регистрация -> {s}")
 token = r.get("token") or (r.get("data") or {}).get("token")
