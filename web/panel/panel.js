@@ -1013,6 +1013,7 @@ async function renderRaffles(box) {
                     : ''
                 }
                 ${r.status === 'draft' ? `<button class="btn btn-sm btn-ok" data-r-activate="${esc(r.id)}">Активирай</button>` : ''}
+                ${r.qualifiedCount > 0 ? `<button class="btn btn-sm" data-r-fraud="${esc(r.id)}">🔍 Провери за измами</button>` : ''}
                 <button class="btn btn-sm btn-danger" data-r-del="${esc(r.id)}">Изтрий</button>
               </td>
             </tr>`;
@@ -1104,6 +1105,95 @@ async function renderRaffles(box) {
       });
     };
   });
+
+  document.querySelectorAll('[data-r-fraud]').forEach((b) => {
+    b.onclick = () => fraudReport(byId(b.dataset.rFraud));
+  });
+}
+
+/**
+ * Проверка за злоупотреба: кой е съмнителен и защо.
+ *
+ * Показваме уликите, а не присъда — админът решава. Дисквалификацията тук
+ * маха участника от класацията и от разиграването (drawWinner пропуска
+ * дисквалифицираните), така че може спокойно да се направи ПРЕДИ тегленето.
+ */
+async function fraudReport(r) {
+  if (!r) return;
+  const data = await api(`/raffles/${r.id}/suspicious`);
+  const items = data.items || [];
+  const s = data.summary || {};
+
+  const RISK = {
+    high: ['Висок риск', 'pill-red'],
+    medium: ['Среден риск', 'pill-gold'],
+    low: ['Нисък риск', 'pill-dim'],
+  };
+
+  const rows = items.length
+    ? items
+        .map((e) => {
+          const [label, cls] = RISK[e.risk] || [e.risk, 'pill-dim'];
+          const flags = e.flags.length
+            ? e.flags.map((f) => `<div class="dim" style="font-size:11.5px">• ${esc(f.label)}</div>`).join('')
+            : '<span class="dim">—</span>';
+          return `<tr>
+            <td><strong>${esc(e.name)}</strong><div class="dim">${esc(e.handle)} · ${esc(e.email)}</div>
+                <div class="dim" style="font-size:11.5px">${esc(e.city)} · профил на ${num(e.accountAgeDays)} дни${e.signupIp ? ` · IP ${esc(e.signupIp)}` : ''}</div></td>
+            <td>${e.runTimeMs != null ? `${(e.runTimeMs / 1000).toFixed(2)} с` : '<span class="dim">не е играл</span>'}
+                ${e.disqualified ? '<div class="pill pill-red">дисквалифициран</div>' : ''}</td>
+            <td><span class="pill ${cls}">${esc(label)}</span><div class="dim" style="font-size:11px">точки: ${num(e.score)}</div></td>
+            <td>${flags}</td>
+            <td class="actions">
+              ${
+                e.disqualified
+                  ? `<button class="btn btn-sm btn-ok" data-f-allow="${esc(e.userId)}">Върни го</button>`
+                  : `<button class="btn btn-sm btn-danger" data-f-block="${esc(e.userId)}">Дисквалифицирай</button>`
+              }
+            </td>
+          </tr>`;
+        })
+        .join('')
+    : '<tr><td colspan="5" class="empty">Няма участници още</td></tr>';
+
+  const body = `
+    <div class="hint" style="margin-bottom:12px">
+      Участници: <strong>${num(s.total ?? 0)}</strong> ·
+      висок риск: <strong>${num(s.high ?? 0)}</strong> ·
+      среден: <strong>${num(s.medium ?? 0)}</strong> ·
+      дисквалифицирани: <strong>${num(s.disqualified ?? 0)}</strong>
+    </div>
+    <div class="hint" style="margin-bottom:12px">
+      Уликите идват само от базата (касови бележки, снимки, IP, възраст на профила) — нищо
+      не се вярва на клиента. <strong>„Едно и също IP“ не е присъда</strong>: семейство на един
+      Wi-Fi излиза с едно IP. Затова тежи малко, а съвпадаща бележка или снимка — тежи много.
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Участник</th><th>Време</th><th>Риск</th><th>Улики</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+
+  openModal(`🔍 Проверка за измами — ${r.title}`, body, [{ id: 'f-close', label: 'Затвори', cls: 'btn-ghost' }], true);
+  $('#f-close').onclick = closeModal;
+
+  const act = async (userId, disqualified) => {
+    try {
+      await api(`/raffles/${r.id}/entries/${userId}/disqualify`, {
+        method: 'POST',
+        body: { disqualified, reason: 'Проверка за злоупотреба от админ панела' },
+      });
+      toast(disqualified ? 'Участникът е дисквалифициран' : 'Участникът е върнат');
+      closeModal();
+      fraudReport(r);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+  document.querySelectorAll('[data-f-block]').forEach((b) => {
+    b.onclick = () => act(b.dataset.fBlock, true);
+  });
+  document.querySelectorAll('[data-f-allow]').forEach((b) => {
+    b.onclick = () => act(b.dataset.fAllow, false);
+  });
 }
 
 /** Форма за нова/редакция на томбола, с качване на снимка на наградата. */
@@ -1112,6 +1202,10 @@ function raffleForm(r) {
   const ends = r?.endsAt ? new Date(r.endsAt) : null;
   const endsLocal = ends
     ? new Date(ends.getTime() - ends.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    : '';
+  const opens = r?.officialWindow?.opensAt ? new Date(r.officialWindow.opensAt) : null;
+  const opensLocal = opens
+    ? new Date(opens.getTime() - opens.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
     : '';
 
   const body = `
@@ -1139,6 +1233,26 @@ function raffleForm(r) {
       <label class="field"><span>Условие: брой находки със снимка</span><input id="rf-cond" type="number" min="1" max="50" value="${r?.conditionPosts ?? 3}"></label>
       <label class="field"><span>Минимум участници</span><input id="rf-min" type="number" min="1" value="${r?.minParticipants ?? 5}"></label>
       <label class="field full"><span>Краен срок</span><input id="rf-ends" type="datetime-local" value="${endsLocal}"></label>
+
+      <div class="field full" style="border-top:1px solid var(--line);padding-top:14px;margin-top:4px">
+        <strong>🛡️ Защита срещу фалшиви акаунти</strong>
+        <div class="dim" style="margin-top:4px;font-size:12px">
+          Тези настройки решават дали един човек с няколко профила може да участва. По-строгите стойности
+          значат по-малко участници, но по-честна томбола.
+        </div>
+      </div>
+      <label class="field"><span>Находките от поне колко различни дни</span><input id="rf-days" type="number" min="1" max="30" value="${r?.conditionDistinctDays ?? 2}"></label>
+      <label class="field"><span>Профилът да е на поне (дни)</span><input id="rf-age" type="number" min="0" max="365" value="${r?.minAccountAgeDays ?? 7}"></label>
+      <label class="field"><span>Имейлът потвърден от поне (дни)</span><input id="rf-vage" type="number" min="0" max="365" value="${r?.minVerifiedAgeDays ?? 3}"></label>
+      <label class="field"><span>Прозорец за игра (минути)</span><input id="rf-window" type="number" min="1" max="1440" value="${r?.officialWindow?.synced ? '' : ''}${r?.officialWindowMin ?? 15}"></label>
+      <label class="field full"><span>⏱ Синхронен старт — часът, в който ВСИЧКИ играят</span>
+        <input id="rf-opens" type="datetime-local" value="${opensLocal}">
+        <div class="dim" style="font-size:11.5px;margin-top:6px">
+          Остави празно, ако няма да има синхронен старт. С час: всички играят едновременно в
+          прозореца по-горе — така човек с 5 профила пак има само един чифт ръце и не може да
+          научи дъската с втория профил. <strong>Това е най-силната защита.</strong>
+        </div>
+      </label>
     </div>
     ${isNew ? '' : `<div class="hint" style="margin-top:12px">Статус: <strong>${esc(r.status)}</strong> · участници: ${num(r.qualifiedCount)}</div>`}`;
 
@@ -1212,8 +1326,14 @@ function raffleForm(r) {
       prizePrice: $('#rf-price').value ? Number($('#rf-price').value) : undefined,
       conditionPosts: Number($('#rf-cond').value) || 3,
       minParticipants: Number($('#rf-min').value) || 5,
+      conditionDistinctDays: Number($('#rf-days').value) || 1,
+      minAccountAgeDays: Number($('#rf-age').value) || 0,
+      minVerifiedAgeDays: Number($('#rf-vage').value) || 0,
+      officialWindowMin: Number($('#rf-window').value) || 15,
       endsAt: $('#rf-ends').value ? new Date($('#rf-ends').value).toISOString() : undefined,
     };
+    const opensValue = $('#rf-opens').value;
+    payload.officialOpensAt = opensValue ? new Date(opensValue).toISOString() : undefined;
     try {
       if (isNew) {
         if (!payload.endsAt) throw new Error('Посочи краен срок.');

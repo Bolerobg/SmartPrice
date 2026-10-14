@@ -16,6 +16,7 @@ import { loadFullProfile } from '../lib/profile.js';
 import { consumeCode, issueCode } from '../lib/verification.js';
 import { attachReferral } from '../lib/referrals.js';
 import { normalizePhone } from '../lib/phone.js';
+import { domainAcceptsMail, emailDomain, emailKey, isDisposableEmail } from '../lib/emailGuard.js';
 
 const registerSchema = z.object({
   email: z.string().email('Невалиден имейл.').max(160),
@@ -106,6 +107,22 @@ export default async function authRoutes(app: FastifyInstance) {
 
     const email = input.email.toLowerCase();
 
+    // --- Един реален човек = един имейл ---------------------------------
+    // „иван+1@gmail.com“ и „и.ван@gmail.com“ са един и същ пощенски сандък,
+    // значи НЕ са втори човек. Без това едно натискане на „+“ дава нов акаунт.
+    const key = emailKey(email);
+    if (isDisposableEmail(email)) {
+      throw badRequest(
+        'Този имейл е от услуга за еднократна поща. Ползвай истинския си имейл — ' +
+          'иначе няма как да потвърдиш профила и да участваш.'
+      );
+    }
+    if (!(await domainAcceptsMail(emailDomain(email)))) {
+      throw badRequest(
+        'Този имейл домейн не приема поща. Провери адреса за печатна грешка.'
+      );
+    }
+
     // --- Един човек = един акаунт: телефонът е ключът -------------------
     const phone = normalizePhone(input.phone);
     if (!phone) {
@@ -126,12 +143,24 @@ export default async function authRoutes(app: FastifyInstance) {
     }
 
     const existing = await one<{ email_verified_at: string | null }>(
-      'select email_verified_at from profiles where email = $1',
-      [email]
+      'select email_verified_at from profiles where email_key = $1',
+      [key]
     );
 
     if (existing && existing.email_verified_at) {
       throw conflict('Вече има потвърден профил с този имейл. Влез или смени паролата.');
+    }
+
+    // Същият реален човек, но с друг вариант на адреса (алиас) → не е нов акаунт.
+    const aliasOwner = await one<{ email: string }>(
+      'select email from profiles where email_key = $1 and email <> $2',
+      [key, email]
+    );
+    if (aliasOwner) {
+      throw conflict(
+        'Вече има профил с този имейл (или негов вариант като „+нещо“ / точки). ' +
+          'Един човек — един профил. Влез с него.'
+      );
     }
 
     let userId: string;
@@ -143,9 +172,9 @@ export default async function authRoutes(app: FastifyInstance) {
         const passwordHash = await hashPassword(input.password);
         await one(
           `update profiles set password_hash = $2, name = $3, city = $4,
-                  signup_ip = coalesce(signup_ip, $5), phone = $6
+                  signup_ip = coalesce(signup_ip, $5), phone = $6, email_key = $7
             where email = $1 returning id`,
-          [email, passwordHash, input.name, input.city ?? 'София', req.ip ?? null, phone]
+          [email, passwordHash, input.name, input.city ?? 'София', req.ip ?? null, phone, key]
         );
         const row = await one<{ id: string }>('select id from profiles where email = $1', [email]);
         userId = row!.id;
@@ -155,10 +184,10 @@ export default async function authRoutes(app: FastifyInstance) {
 
         userId = await tx(async (client) => {
           const res = await client.query<{ id: string }>(
-            `insert into profiles (email, password_hash, name, handle, city, email_verified_at, signup_ip, phone)
-             values ($1, $2, $3, $4, $5, null, $6, $7)
+            `insert into profiles (email, password_hash, name, handle, city, email_verified_at, signup_ip, phone, email_key)
+             values ($1, $2, $3, $4, $5, null, $6, $7, $8)
              returning id`,
-            [email, passwordHash, input.name, handle, input.city ?? 'София', req.ip ?? null, phone]
+            [email, passwordHash, input.name, handle, input.city ?? 'София', req.ip ?? null, phone, key]
           );
           const id = res.rows[0]!.id;
           await client.query(
@@ -174,6 +203,12 @@ export default async function authRoutes(app: FastifyInstance) {
       // индекс е истинската защита — тук само превеждаме грешката на човешки.
       const code = (err as { code?: string }).code;
       const constraint = String((err as { constraint?: string }).constraint ?? '');
+      if (code === '23505' && constraint.includes('email_key')) {
+        throw conflict(
+          'Вече има профил с този имейл (или негов вариант като „+нещо“ / точки). ' +
+            'Един човек — един профил. Влез с него.'
+        );
+      }
       if (code === '23505' && constraint.includes('phone')) {
         throw conflict(
           'Вече има профил с този телефонен номер. Един човек — един профил. ' +
@@ -376,8 +411,8 @@ export default async function authRoutes(app: FastifyInstance) {
       deleted_at: string | null;
     }>(
       `select id, password_hash, email_verified_at, suspended_at, suspended_until, suspended_reason, deleted_at
-         from profiles where email = $1`,
-      [email]
+         from profiles where email = $1 or email_key = $2`,
+      [email, emailKey(email)]
     );
 
     const passwordOk = row ? await verifyPassword(input.password, row.password_hash) : false;

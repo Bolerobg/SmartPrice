@@ -44,6 +44,16 @@ export interface RaffleRow {
   prize_currency: string;
   condition_posts: number;
   condition_images_only: boolean;
+  /** Находките трябва да са от поне N различни дни (фарменето става бавно). */
+  condition_distinct_days: number;
+  /** Акаунтът трябва да е на поне N дни. */
+  min_account_age_days: number;
+  /** Имейлът трябва да е потвърден преди поне N дни. */
+  min_verified_age_days: number;
+  /** Синхронен старт: часът, в който нареждането се отваря за всички. */
+  official_opens_at: Date | null;
+  /** Колко минути трае официалният прозорец. */
+  official_window_min: number;
   min_participants: number;
   count_from_start: boolean;
   starts_at: Date;
@@ -82,6 +92,271 @@ export async function countQualifyingPosts(r: RaffleRow, userId: string): Promis
     [userId, r.condition_images_only, r.count_from_start, r.starts_at, r.ends_at]
   );
   return Number(row?.n ?? 0);
+}
+
+/** От колко РАЗЛИЧНИ дни са находките (по българско време). */
+export async function countQualifyingDays(r: RaffleRow, userId: string): Promise<number> {
+  const row = await one<{ n: number }>(
+    `select count(distinct (p.created_at at time zone 'Europe/Sofia')::date) as n
+       from posts p
+      where p.author_id = $1
+        and p.status = 'published'
+        and p.polarity = 'green'
+        and ($2 = false or (p.image_url is not null and btrim(p.image_url) <> ''))
+        and ($3 = false or p.created_at >= $4)
+        and p.created_at <= $5`,
+    [userId, r.condition_images_only, r.count_from_start, r.starts_at, r.ends_at]
+  );
+  return Number(row?.n ?? 0);
+}
+
+export interface QualificationCheck {
+  ok: boolean;
+  posts: number;
+  days: number;
+  reason?: string;
+}
+
+/**
+ * Всички условия за участие на едно място — и находки, и различни дни,
+ * и стаж на профила. Ползва се и при „участвай“, и при проверката за измами,
+ * за да няма два различни отговора на един и същ въпрос.
+ */
+export async function checkQualification(r: RaffleRow, userId: string): Promise<QualificationCheck> {
+  const [posts, days, profile] = await Promise.all([
+    countQualifyingPosts(r, userId),
+    countQualifyingDays(r, userId),
+    one<{ created_at: Date; email_verified_at: Date | null }>(
+      'select created_at, email_verified_at from profiles where id = $1',
+      [userId]
+    ),
+  ]);
+
+  const daysSince = (v: Date | null | undefined): number =>
+    v ? (Date.now() - new Date(v).getTime()) / 86_400_000 : 0;
+
+  const accountAge = daysSince(profile?.created_at);
+  const verifiedAge = daysSince(profile?.email_verified_at);
+
+  const out: QualificationCheck = { ok: true, posts, days };
+
+  if (posts < r.condition_posts) {
+    out.ok = false;
+    out.reason = `Още ${r.condition_posts - posts} находки със снимка ти трябват, за да участваш.`;
+    return out;
+  }
+  if (r.condition_distinct_days > 1 && days < r.condition_distinct_days) {
+    out.ok = false;
+    out.reason =
+      `Находките трябва да са от поне ${r.condition_distinct_days} различни дни ` +
+      `(имаш от ${days}). Качвай по няколко на ден — не всичко наведнъж.`;
+    return out;
+  }
+  if (r.min_account_age_days > 0 && accountAge < r.min_account_age_days) {
+    const left = Math.ceil(r.min_account_age_days - accountAge);
+    out.ok = false;
+    out.reason =
+      `Профилът ти трябва да е на поне ${r.min_account_age_days} дни, за да участваш. ` +
+      `Остават ${left} дни — качвай находки междувременно.`;
+    return out;
+  }
+  if (r.min_verified_age_days > 0 && verifiedAge < r.min_verified_age_days) {
+    const left = Math.ceil(r.min_verified_age_days - verifiedAge);
+    out.ok = false;
+    out.reason = `Имейлът ти трябва да е потвърден от поне ${r.min_verified_age_days} дни. Остават ${left}.`;
+    return out;
+  }
+  return out;
+}
+
+/* --------------------------------------------------- синхронен старт */
+
+export interface OfficialWindow {
+  /** Зададен ли е синхронен старт (часът е фиксиран от админа). */
+  synced: boolean;
+  /** Отворено ли е официалното нареждане точно СЕГА. */
+  open: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  /** Секунди до отваряне (0, ако вече е отворено). */
+  opensInSeconds: number;
+  /** Секунди до затваряне (0, ако е затворено). */
+  closesInSeconds: number;
+}
+
+/**
+ * Синхронният старт е най-силната защита срещу „много акаунти“: всички играят
+ * в един и същи прозорец, значи човек с 5 акаунта пак има само един чифт ръце.
+ * Ако админът не е задал час, прозорецът е отворен през цялото време (старото
+ * поведение) — така не чупим вече пуснати томболи.
+ */
+export function officialWindow(r: RaffleRow, now: Date = new Date()): OfficialWindow {
+  if (!r.official_opens_at) {
+    return {
+      synced: false,
+      open: true,
+      opensAt: null,
+      closesAt: null,
+      opensInSeconds: 0,
+      closesInSeconds: 0,
+    };
+  }
+  const opens = new Date(r.official_opens_at);
+  const closes = new Date(opens.getTime() + r.official_window_min * 60_000);
+  const t = now.getTime();
+  return {
+    synced: true,
+    open: t >= opens.getTime() && t <= closes.getTime(),
+    opensAt: opens.toISOString(),
+    closesAt: closes.toISOString(),
+    opensInSeconds: Math.max(0, Math.round((opens.getTime() - t) / 1000)),
+    closesInSeconds: Math.max(0, Math.round((closes.getTime() - t) / 1000)),
+  };
+}
+
+/* ------------------------------------------- проверка за злоупотреба */
+
+export interface FraudFlag {
+  code: string;
+  label: string;
+  weight: number;
+}
+
+export interface FraudEntry {
+  userId: string;
+  name: string;
+  handle: string;
+  email: string;
+  city: string;
+  signupIp: string | null;
+  accountAgeDays: number;
+  runTimeMs: number | null;
+  disqualified: boolean;
+  flags: FraudFlag[];
+  score: number;
+  risk: 'high' | 'medium' | 'low';
+}
+
+const FLAG = {
+  sharedReceipt: { code: 'shared_receipt', label: 'Същата касова бележка като друг участник', weight: 50 },
+  sharedPhoto: { code: 'shared_photo', label: 'Същата снимка като друг участник', weight: 45 },
+  aliasEmail: { code: 'alias_email', label: 'Същият реален имейл (алиас) като друг участник', weight: 40 },
+  sharedIp: { code: 'shared_ip', label: 'Едно и също IP като друг участник', weight: 25 },
+  youngAccount: { code: 'young_account', label: 'Профилът е по-нов от изискваното', weight: 20 },
+  tooFast: { code: 'too_fast', label: 'Подозрително бързо нареждане', weight: 10 },
+} as const;
+
+/**
+ * Търси злоупотреба сред участниците в томбола.
+ *
+ * Идеята: не се вярва на нищо подадено от клиента — всички улики идват от
+ * базата (бележки, снимки, IP, възраст на профила), а админът вижда кой е
+ * съмнителен ПРЕДИ да обяви победител и решава сам.
+ */
+export async function scanRaffleForFraud(raffle: RaffleRow): Promise<FraudEntry[]> {
+  const entrants = await many<{
+    user_id: string;
+    run_time_ms: number | null;
+    disqualified: boolean;
+    name: string;
+    handle: string;
+    email: string;
+    email_key: string | null;
+    signup_ip: string | null;
+    city: string;
+    created_at: Date;
+  }>(
+    `select e.user_id, e.run_time_ms, e.disqualified,
+            p.name, p.handle, p.email, p.email_key, p.signup_ip, p.city, p.created_at
+       from raffle_entries e
+       join profiles p on p.id = e.user_id
+      where e.raffle_id = $1
+      order by e.run_time_ms asc nulls last`,
+    [raffle.id]
+  );
+  if (!entrants.length) return [];
+
+  // 1) Материални улики: същата касова бележка или същата снимка при двама участници.
+  const sharedReceipts = await many<{ a: string; b: string }>(
+    `with ea as (
+       select e.user_id, r.fingerprint as fp
+         from raffle_entries e
+         join posts p on p.author_id = e.user_id
+         join receipts r on r.post_id = p.id
+        where e.raffle_id = $1 and r.fingerprint is not null
+     )
+     select distinct a.user_id as a, b.user_id as b
+       from ea a join ea b on a.fp = b.fp and a.user_id < b.user_id`,
+    [raffle.id]
+  );
+
+  const sharedPhotos = await many<{ a: string; b: string }>(
+    `with ea as (
+       select e.user_id, u.content_sha256 as sha
+         from raffle_entries e
+         join posts p on p.author_id = e.user_id and p.status = 'published'
+         join uploads u on u.stored_name = regexp_replace(p.image_url, '^.*/', '')
+        where e.raffle_id = $1 and u.content_sha256 is not null
+     )
+     select distinct a.user_id as a, b.user_id as b
+       from ea a join ea b on a.sha = b.sha and a.user_id < b.user_id`,
+    [raffle.id]
+  );
+
+  // 2) Свързани групи: един и същ реален имейл (алиас) или едно и също IP.
+  const byKey = new Map<string, string[]>();
+  const byIp = new Map<string, string[]>();
+  for (const e of entrants) {
+    if (e.email_key) byKey.set(e.email_key, [...(byKey.get(e.email_key) ?? []), e.user_id]);
+    if (e.signup_ip) byIp.set(e.signup_ip, [...(byIp.get(e.signup_ip) ?? []), e.user_id]);
+  }
+
+  const perUser = new Map<string, FraudFlag[]>();
+  const push = (userId: string, flag: FraudFlag) => {
+    perUser.set(userId, [...(perUser.get(userId) ?? []), flag]);
+  };
+  const markGroups = (map: Map<string, string[]>, flag: FraudFlag) => {
+    for (const ids of map.values()) {
+      if (ids.length < 2) continue;
+      for (const id of ids) push(id, flag);
+    }
+  };
+  markGroups(byIp, FLAG.sharedIp);
+  markGroups(byKey, FLAG.aliasEmail);
+
+  // Материалните улики сочат ВТОРИЯ участник — първият може да е жертвата,
+  // чиято бележка или снимка е прекопирана.
+  for (const r of sharedReceipts) push(r.b, FLAG.sharedReceipt);
+  for (const r of sharedPhotos) push(r.b, FLAG.sharedPhoto);
+
+  for (const e of entrants) {
+    const ageDays = (Date.now() - new Date(e.created_at).getTime()) / 86_400_000;
+    if (raffle.min_account_age_days > 0 && ageDays < raffle.min_account_age_days) {
+      push(e.user_id, FLAG.youngAccount);
+    }
+    if (e.run_time_ms != null && e.run_time_ms < 2200) push(e.user_id, FLAG.tooFast);
+  }
+
+  const out: FraudEntry[] = entrants.map((e) => {
+    const flags = perUser.get(e.user_id) ?? [];
+    const score = flags.reduce((s, f) => s + f.weight, 0);
+    return {
+      userId: e.user_id,
+      name: e.name,
+      handle: e.handle,
+      email: e.email,
+      city: e.city,
+      signupIp: e.signup_ip,
+      accountAgeDays: Math.floor((Date.now() - new Date(e.created_at).getTime()) / 86_400_000),
+      runTimeMs: e.run_time_ms,
+      disqualified: e.disqualified,
+      flags,
+      score,
+      risk: score >= 50 ? 'high' : score >= 25 ? 'medium' : 'low',
+    };
+  });
+
+  return out.sort((a, b) => b.score - a.score);
 }
 
 /** Участва ли вече? */

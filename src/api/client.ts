@@ -343,6 +343,22 @@ export interface RaffleItem {
   prize: RafflePrize;
   conditionPosts: number;
   conditionImagesOnly: boolean;
+  /** Находките трябва да са от поне толкова различни дни. */
+  conditionDistinctDays?: number;
+  /** Профилът трябва да е на поне толкова дни. */
+  minAccountAgeDays?: number;
+  /** Имейлът трябва да е потвърден преди поне толкова дни. */
+  minVerifiedAgeDays?: number;
+  /** Синхронен старт: кога ВСИЧКИ играят официалното нареждане. */
+  officialWindowMin?: number;
+  officialWindow?: {
+    synced: boolean;
+    open: boolean;
+    opensAt: string | null;
+    closesAt: string | null;
+    opensInSeconds: number;
+    closesInSeconds: number;
+  };
   countFromStart: boolean;
   minParticipants: number;
   startsAt: string | null;

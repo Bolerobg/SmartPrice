@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { one } from '../db.js';
@@ -6,6 +6,7 @@ import { env, features } from '../env.js';
 import { requireUserId } from '../lib/auth.js';
 import { badRequest, tooLarge, unavailable } from '../lib/errors.js';
 import { currencyLabel } from '../lib/mappers.js';
+import { recordSecurityEvent } from '../lib/security.js';
 import {
   getImage,
   publicUrl,
@@ -202,13 +203,38 @@ export default async function mediaRoutes(app: FastifyInstance) {
       throw badRequest('Файлът е празен.');
     }
 
-    await putImage(storedName, Buffer.concat(chunks), file.mimetype);
+    const buffer = Buffer.concat(chunks);
+    // Пръстов отпечатък на байтовете: същата снимка, качена от втори акаунт,
+    // се хваща веднага — това е класическият признак за „един човек, много
+    // акаунти“ (вж. migrations/015_anti_fraud.sql).
+    const sha = createHash('sha256').update(buffer).digest('hex');
+
+    await putImage(storedName, buffer, file.mimetype);
 
     await one(
-      `insert into uploads (owner_id, stored_name, mime_type, byte_size, storage)
-       values ($1,$2,$3,$4,$5) returning id`,
-      [userId, storedName, file.mimetype, bytes, storageDriver]
+      `insert into uploads (owner_id, stored_name, mime_type, byte_size, storage, content_sha256)
+       values ($1,$2,$3,$4,$5,$6) returning id`,
+      [userId, storedName, file.mimetype, bytes, storageDriver, sha]
     );
+
+    // Същата снимка вече е качвана от ДРУГ профил → сигнал до админа.
+    // Не блокираме качването (иначе чупим честни хора), само вдигаме тревога.
+    const reused = await one<{ owner_id: string }>(
+      `select owner_id from uploads
+        where content_sha256 = $1 and owner_id <> $2
+        limit 1`,
+      [sha, userId]
+    ).catch(() => null);
+    if (reused) {
+      await recordSecurityEvent({
+        kind: 'image_reuse',
+        severity: 'warning',
+        title: 'Една и съща снимка е качена от два различни профила',
+        details: { sha256: sha, storedName, firstOwnerId: reused.owner_id },
+        subjectType: 'profile',
+        subjectId: userId,
+      }).catch(() => undefined);
+    }
 
     return reply.status(201).send({
       url: publicUrl(storedName),

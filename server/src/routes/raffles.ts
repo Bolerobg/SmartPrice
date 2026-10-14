@@ -10,13 +10,16 @@ import {
   PROMO_MAX_VIEWS,
   PROMO_MAX_VIEWS as MAX_PROMO,
   buildPuzzle,
+  checkQualification,
   countQualifyingPosts,
   drawWinner,
   effectiveStatus,
   loadEntry,
   loadRaffle,
   logEvent,
+  officialWindow,
   promoState,
+  scanRaffleForFraud,
   standings,
   winnersWall,
 } from '../lib/raffles.js';
@@ -33,6 +36,16 @@ import { requireAdminAnyToken } from '../lib/admin.js';
 
 const iso = (v: Date | string | null | undefined) => (v == null ? null : v instanceof Date ? v.toISOString() : String(v));
 
+/** „след 12 минути“ / „след 2 часа“ — за съобщението при синхронен старт. */
+function formatWait(seconds: number): string {
+  if (seconds < 60) return `${seconds} секунди`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} минути`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} часа`;
+  return `${Math.round(hours / 24)} дни`;
+}
+
 function mapRaffle(r: Awaited<ReturnType<typeof loadRaffle>>, extra: Record<string, unknown> = {}) {
   return {
     id: r.id,
@@ -47,6 +60,11 @@ function mapRaffle(r: Awaited<ReturnType<typeof loadRaffle>>, extra: Record<stri
     },
     conditionPosts: r.condition_posts,
     conditionImagesOnly: r.condition_images_only,
+    conditionDistinctDays: r.condition_distinct_days,
+    minAccountAgeDays: r.min_account_age_days,
+    minVerifiedAgeDays: r.min_verified_age_days,
+    officialWindowMin: r.official_window_min,
+    officialWindow: officialWindow(r),
     minParticipants: r.min_participants,
     countFromStart: r.count_from_start,
     startsAt: iso(r.starts_at),
@@ -68,7 +86,9 @@ const isoDate = z
   .trim()
   .refine((v) => !Number.isNaN(new Date(v).getTime()), 'Невалидна дата и час.');
 
-const createSchema = z.object({
+// Полетата са отделно от проверката, защото PATCH ползва .partial() —
+// а .refine() връща ZodEffects, върху който .partial() не съществува.
+const createFields = z.object({
   title: z.string().trim().min(3).max(160),
   description: z.string().trim().max(2000).default(''),
   prizeTitle: z.string().trim().min(2).max(200),
@@ -77,12 +97,23 @@ const createSchema = z.object({
   prizePrice: z.coerce.number().min(0).max(1_000_000).optional(),
   conditionPosts: z.coerce.number().int().min(1).max(50).default(3),
   conditionImagesOnly: z.boolean().default(true),
+  conditionDistinctDays: z.coerce.number().int().min(1).max(30).default(2),
+  minAccountAgeDays: z.coerce.number().int().min(0).max(365).default(7),
+  minVerifiedAgeDays: z.coerce.number().int().min(0).max(365).default(3),
   minParticipants: z.coerce.number().int().min(1).max(100_000).default(5),
   countFromStart: z.boolean().default(true),
+  /** Синхронен старт: кога се отваря официалното нареждане за всички. */
+  officialOpensAt: isoDate.optional(),
+  officialWindowMin: z.coerce.number().int().min(1).max(1440).default(15),
   startsAt: isoDate.optional(),
   endsAt: isoDate,
   activate: z.boolean().default(true),
 });
+
+const createSchema = createFields.refine(
+  (v) => !v.officialOpensAt || new Date(v.officialOpensAt).getTime() <= new Date(v.endsAt).getTime(),
+  { message: 'Часът на официалното нареждане трябва да е преди края на томболата.', path: ['officialOpensAt'] }
+);
 
 export default async function raffleRoutes(app: FastifyInstance) {
   /* ------------------------------------------------------------ публично */
@@ -197,12 +228,11 @@ export default async function raffleRoutes(app: FastifyInstance) {
       throw badRequest('Тази томбола вече не приема участия.');
     }
 
-    const progress = await countQualifyingPosts(raffle, userId);
-    if (progress < raffle.condition_posts) {
-      throw badRequest(
-        `Още ${raffle.condition_posts - progress} находки със снимка ти трябват, за да участваш.`
-      );
-    }
+    // Всички условия на едно място: находки + различни дни + стаж на профила.
+    // Идеята е фарменето да е бавно и скъпо, а не да е „3 снимки за 5 минути“.
+    const check = await checkQualification(raffle, userId);
+    if (!check.ok) throw badRequest(check.reason ?? 'Още не покриваш условието за участие.');
+    const progress = check.posts;
 
     await query(
       `insert into raffle_entries (raffle_id, user_id, posts_count)
@@ -260,6 +290,21 @@ export default async function raffleRoutes(app: FastifyInstance) {
     if (effectiveStatus(raffle) !== 'running') {
       throw badRequest('Официалното нареждане още не е отворено (чакаме края на томболата).');
     }
+
+    // СИНХРОНЕН СТАРТ: всички играят в един и същи прозорец. Точно затова
+    // човек с 5 профила пак има само един чифт ръце — не може да нареди пет
+    // пъзела едновременно, нито да научи дъската с втория профил.
+    const win = officialWindow(raffle);
+    if (!win.open) {
+      if (win.opensInSeconds > 0) {
+        throw badRequest(
+          `Официалното нареждане се отваря след ${formatWait(win.opensInSeconds)}. ` +
+            'Всички играят по едно и също време — така никой не може да си помага с втори профил.'
+        );
+      }
+      throw badRequest('Официалният прозорец вече затвори. Следващата томбола ще има нов час.');
+    }
+
     const entry = await loadEntry(id, userId);
     if (!entry) throw badRequest('Първо се включи в томболата.');
     if (entry.official_attempts >= 1) throw badRequest('Вече използва официалното си нареждане.');
@@ -279,10 +324,18 @@ export default async function raffleRoutes(app: FastifyInstance) {
   app.post('/api/raffles/:id/run/finish', async (req) => {
     const userId = requireUserId(req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const raffle = await loadRaffle(id);
     const entry = await loadEntry(id, userId);
     if (!entry) throw badRequest('Първо се включи в томболата.');
     if (!entry.run_started_at) throw badRequest('Няма стартирано нареждане.');
     if (entry.run_time_ms != null) throw badRequest('Официалното нареждане вече е приключено.');
+
+    // Прозорецът е затворен от повече от 2 минути → нареждането не се брои.
+    // (2 минути са за закъснение в мрежата, не за игра.)
+    const win = officialWindow(raffle);
+    if (win.synced && win.closesAt && Date.now() > new Date(win.closesAt).getTime() + 120_000) {
+      throw badRequest('Официалният прозорец затвори — това нареждане вече не се брои.');
+    }
 
     // ВАЖНО: времето се смята на СЪРВЪРА — клиентът не може да поднесе „0,4 секунди“.
     const startedAt = new Date(entry.run_started_at).getTime();
@@ -366,8 +419,11 @@ export default async function raffleRoutes(app: FastifyInstance) {
       `insert into raffles
          (title, description, prize_title, prize_url, prize_image_url, prize_price,
           condition_posts, condition_images_only, min_participants, count_from_start,
+          condition_distinct_days, min_account_age_days, min_verified_age_days,
+          official_opens_at, official_window_min,
           starts_at, ends_at, status, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, coalesce($11::timestamptz, now()), $12::timestamptz, $13, $14)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::timestamptz,$15,
+               coalesce($16::timestamptz, now()), $17::timestamptz, $18, $19)
        returning id`,
       [
         input.title,
@@ -380,6 +436,11 @@ export default async function raffleRoutes(app: FastifyInstance) {
         input.conditionImagesOnly,
         input.minParticipants,
         input.countFromStart,
+        input.conditionDistinctDays,
+        input.minAccountAgeDays,
+        input.minVerifiedAgeDays,
+        input.officialOpensAt ?? null,
+        input.officialWindowMin,
         input.startsAt ?? null,
         input.endsAt,
         input.activate ? 'active' : 'draft',
@@ -394,7 +455,7 @@ export default async function raffleRoutes(app: FastifyInstance) {
   app.patch('/api/admin/raffles/:id', async (req) => {
     await adminGuard(req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const input = createSchema.partial().parse(req.body);
+    const input = createFields.partial().parse(req.body);
 
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -409,6 +470,11 @@ export default async function raffleRoutes(app: FastifyInstance) {
     if (input.prizeImageUrl !== undefined) push('prize_image_url', input.prizeImageUrl);
     if (input.prizePrice !== undefined) push('prize_price', input.prizePrice);
     if (input.conditionPosts !== undefined) push('condition_posts', input.conditionPosts);
+    if (input.conditionDistinctDays !== undefined) push('condition_distinct_days', input.conditionDistinctDays);
+    if (input.minAccountAgeDays !== undefined) push('min_account_age_days', input.minAccountAgeDays);
+    if (input.minVerifiedAgeDays !== undefined) push('min_verified_age_days', input.minVerifiedAgeDays);
+    if (input.officialOpensAt !== undefined) push('official_opens_at', input.officialOpensAt);
+    if (input.officialWindowMin !== undefined) push('official_window_min', input.officialWindowMin);
     if (input.minParticipants !== undefined) push('min_participants', input.minParticipants);
     if (input.endsAt !== undefined) push('ends_at', input.endsAt);
     if (!sets.length) throw badRequest('Няма какво да се обнови.');
@@ -491,5 +557,55 @@ export default async function raffleRoutes(app: FastifyInstance) {
       [id]
     );
     return { items: rows.map((r) => ({ kind: r.kind, detail: r.detail, at: iso(r.created_at), user: r.name })) };
+  });
+
+  /**
+   * Проверка за злоупотреба ПРЕДИ обявяване на победител.
+   *
+   * Връща всеки участник с отметките срещу него: същата касова бележка или
+   * снимка като друг участник, един и същ реален имейл (алиас), споделено IP,
+   * прекалено нов профил, невъзможно бързо нареждане. Решението е на админа —
+   * затова тук няма автоматично наказание, само подреден по риск списък.
+   */
+  app.get('/api/admin/raffles/:id/suspicious', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const raffle = await loadRaffle(id);
+    const items = await scanRaffleForFraud(raffle);
+    return {
+      items,
+      summary: {
+        total: items.length,
+        high: items.filter((i) => i.risk === 'high').length,
+        medium: items.filter((i) => i.risk === 'medium').length,
+        disqualified: items.filter((i) => i.disqualified).length,
+      },
+    };
+  });
+
+  /** Дисквалификация на участник (или връщане обратно) — само админ. */
+  app.post('/api/admin/raffles/:id/entries/:userId/disqualify', async (req) => {
+    await adminGuard(req);
+    const { id, userId } = z
+      .object({ id: z.string().uuid(), userId: z.string().uuid() })
+      .parse(req.params);
+    const { disqualified, reason } = z
+      .object({
+        disqualified: z.boolean().default(true),
+        reason: z.string().trim().max(300).optional(),
+      })
+      .parse(req.body ?? {});
+
+    const row = await one<{ user_id: string }>(
+      `update raffle_entries set disqualified = $3
+        where raffle_id = $1 and user_id = $2 returning user_id`,
+      [id, userId, disqualified]
+    );
+    if (!row) throw notFound('Този участник не е в томболата.');
+
+    await logEvent(id, userId, disqualified ? 'disqualified_by_admin' : 'requalified_by_admin', {
+      reason: reason ?? null,
+    });
+    return { ok: true, disqualified };
   });
 }

@@ -26,6 +26,24 @@ const fmt = (ms: number | null | undefined) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
 };
 
+/** „след 12:05 мин“ / „след 2 ч 5 мин“ — за обратното броене до синхронния старт. */
+const fmtWait = (seconds: number) => {
+  if (seconds <= 0) return 'сега';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h} ч ${m} мин`;
+  if (m > 0) return `${m}:${String(s).padStart(2, '0')} мин`;
+  return `${s} сек`;
+};
+
+/** 20:00 — часът на отваряне, четим за човек. */
+const clockTime = (iso: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
 /** Томбола: условия → тренировки → официално нареждане → класация. */
 export default function RaffleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -36,6 +54,9 @@ export default function RaffleDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // „Часовник“ за обратното броене до синхронния старт. Тика само когато
+  // има смисъл (зададен час и прозорецът още не е отворен), за да не хаби батерия.
+  const [nowTick, setNowTick] = useState(Date.now());
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [mode, setMode] = useState<'practice' | 'official'>('practice');
@@ -43,6 +64,15 @@ export default function RaffleDetailScreen() {
   const [pairs, setPairs] = useState<string[]>([]);
   const [countdown, setCountdown] = useState(3);
   const [lastResult, setLastResult] = useState<string | null>(null);
+
+  // Обратно броене до синхронния старт. Тикаме всяка секунда САМО когато има
+  // зададен час и прозорецът още не е отворен — иначе не пипаме нищо.
+  const tickerNeeded = Boolean(raffle?.officialWindow?.synced && !raffle.officialWindow.open);
+  useEffect(() => {
+    if (!tickerNeeded) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [tickerNeeded]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -179,8 +209,21 @@ export default function RaffleDetailScreen() {
   const progress = raffle ? Math.min(raffle.myProgress ?? 0, raffle.conditionPosts) : 0;
   const canJoin = Boolean(raffle && !entry && progress >= raffle.conditionPosts && raffle.status === 'active');
   const canPractice = Boolean(entry && raffle && (entry.practiceLeft ?? 0) > 0 && entry.runTimeMs == null);
+  // Синхронен старт: официалното нареждане е отворено само в прозореца.
+  const syncAt = raffle?.officialWindow?.synced ? raffle.officialWindow : null;
+  const secondsToOpen = syncAt?.opensAt
+    ? Math.max(0, Math.round((new Date(syncAt.opensAt).getTime() - nowTick) / 1000))
+    : 0;
+  const secondsToClose = syncAt?.closesAt
+    ? Math.max(0, Math.round((new Date(syncAt.closesAt).getTime() - nowTick) / 1000))
+    : 0;
   const canRunOfficial = Boolean(
-    entry && raffle && raffle.status === 'running' && entry.runTimeMs == null && !entry.runStarted
+    entry &&
+      raffle &&
+      raffle.status === 'running' &&
+      entry.runTimeMs == null &&
+      !entry.runStarted &&
+      (syncAt ? syncAt.open : true)
   );
 
   const statusText = useMemo(() => {
@@ -357,6 +400,27 @@ export default function RaffleDetailScreen() {
             </TouchableOpacity>
           ) : null}
         </View>
+
+        {/* Синхронен старт: казваме ЯСНО кога всички играят. Без това бутонът
+            изглежда счупен, защото сървърът отказва игра извън прозореца. */}
+        {syncAt && entry ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>
+              {syncAt.open ? '🟢 Нареждането е отворено СЕГА' : '⏱ Синхронен старт'}
+            </Text>
+            <Text style={styles.blockText}>
+              {syncAt.open
+                ? `Всички играят в един и същи прозорец. Затваря след ${fmtWait(secondsToClose)} — побързай.`
+                : `Официалното нареждане се отваря след ${fmtWait(secondsToOpen)} (в ${clockTime(syncAt.opensAt)} по твоето време) и трае ${raffle.officialWindowMin ?? 15} минути.`}
+            </Text>
+            {!syncAt.open ? (
+              <Text style={styles.blockText}>
+                Всички играят едновременно — затова никой не може да научи дъската с втори профил.
+                Сложи си аларма малко преди часа.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Тренировки и официално нареждане */}
         {entry ? (
