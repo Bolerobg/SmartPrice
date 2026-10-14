@@ -161,7 +161,7 @@ export default function RegisterScreen() {
           <Ionicons name="play-circle" size={19} color={COLORS.accentCyan} />
           <View style={{ flex: 1 }}>
             <Text style={styles.tourBtnText}>Още не знаеш как работи?</Text>
-            <Text style={styles.tourBtnSub}>Виж 10 екрана с примери — 30 секунди</Text>
+            <Text style={styles.tourBtnSub}>Виж 12 екрана с примери — 30 секунди</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
         </TouchableOpacity>

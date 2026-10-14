@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -516,6 +516,155 @@ const ToolsDemo: React.FC = () => {
 /*  Самият onboarding                                                  */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 12. Томбола — показваме ТОЧНО какъв пъзел се нарежда за време и кой печели.
+ *
+ * Дъската е същата като в истинската игра: 12 плочки с продукти от приложението,
+ * сред които 2 двойки еднакви. Натисни две еднакви, за да видиш как спира
+ * хронометърът — точно както ще е на живо.
+ */
+const RAFFLE_BOARD: { emoji: string; pair: string | null }[] = [
+  { emoji: '🧀', pair: 'cheese' },
+  { emoji: '🫒', pair: null },
+  { emoji: '☕', pair: 'coffee' },
+  { emoji: '🍫', pair: null },
+  { emoji: '🍝', pair: null },
+  { emoji: '🧀', pair: 'cheese' },
+  { emoji: '🥛', pair: null },
+  { emoji: '☕', pair: 'coffee' },
+  { emoji: '🍞', pair: null },
+  { emoji: '🍯', pair: null },
+  { emoji: '🧻', pair: null },
+  { emoji: '🥩', pair: null },
+];
+
+const RaffleDemo: React.FC = () => {
+  const [found, setFound] = useState<string[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [wrong, setWrong] = useState<number[]>([]);
+  const [ms, setMs] = useState(0);
+  const [running, setRunning] = useState(false);
+
+  // Хронометърът върви само след първото докосване — както в истинската игра.
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setMs((v) => v + 100), 100);
+    return () => clearInterval(t);
+  }, [running]);
+
+  const done = found.length === 2;
+
+  const tap = (index: number) => {
+    const tile = RAFFLE_BOARD[index]!;
+    if (done) return;
+    if (tile.pair && found.includes(tile.pair)) return; // вече намерена двойка
+
+    if (selected === null) {
+      setSelected(index);
+      if (!running) setRunning(true);
+      return;
+    }
+    if (selected === index) {
+      setSelected(null);
+      return;
+    }
+
+    const first = RAFFLE_BOARD[selected]!;
+    if (first.emoji === tile.emoji && tile.pair) {
+      const next = [...found, tile.pair];
+      setFound(next);
+      setSelected(null);
+      if (next.length === 2) setRunning(false);
+      return;
+    }
+
+    setWrong([selected, index]);
+    setSelected(null);
+    setTimeout(() => setWrong([]), 450);
+  };
+
+  const reset = () => {
+    setFound([]);
+    setSelected(null);
+    setWrong([]);
+    setMs(0);
+    setRunning(false);
+  };
+
+  const tileStyle = (index: number) => {
+    const pair = RAFFLE_BOARD[index]!.pair;
+    if (pair && found.includes(pair)) return demo.tileFound;
+    if (wrong.includes(index)) return demo.tileWrong;
+    if (selected === index) return demo.tilePick;
+    return null;
+  };
+
+  return (
+    <View style={[demo.card, demo.cardIndigo]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+        <Ionicons name="grid" size={16} color="#8B5CF6" />
+        <View style={{ flex: 1 }}>
+          <Text style={demo.title}>12 плочки · 2 двойки</Text>
+          <Text style={demo.place}>Еднаквите продукти са скрити сред разсейващи</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ color: done ? COLORS.greenBright : COLORS.accentCyan, fontSize: 17, fontWeight: '900' }}>
+            {(ms / 1000).toFixed(1)} с
+          </Text>
+          <Text style={demo.place}>време</Text>
+        </View>
+      </View>
+
+      <View style={demo.grid}>
+        {RAFFLE_BOARD.map((tile, index) => (
+          <TouchableOpacity
+            key={`${tile.emoji}-${index}`}
+            style={[demo.tile, tileStyle(index)]}
+            onPress={() => tap(index)}
+            activeOpacity={0.8}
+          >
+            <Text style={demo.tileEmoji}>{tile.emoji}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={demo.hintRow}>
+        <Ionicons
+          name={done ? 'trophy' : 'finger-print'}
+          size={14}
+          color={done ? COLORS.goldBright : COLORS.accentCyan}
+        />
+        <Text style={[demo.hint, { flex: 1, color: done ? COLORS.goldBright : COLORS.accentCyan }]}>
+          {done
+            ? `Готово за ${(ms / 1000).toFixed(1)} с — най-бързият печели 🏆`
+            : found.length === 1
+              ? 'Една двойка! Намери и втората'
+              : 'Натисни две еднакви плочки — това е тренировка и не се брои'}
+        </Text>
+        <Ionicons name="refresh" size={14} color={COLORS.textMuted} onPress={reset} />
+      </View>
+
+      {/* Кой печели и как — най-важният въпрос, затова е до самата дъска. */}
+      <View style={demo.winBox}>
+        <Ionicons name="trophy" size={15} color={COLORS.goldBright} />
+        <Text style={demo.winText}>
+          <Text style={{ fontWeight: '900', color: COLORS.textPrimary }}>Печели най-бързият</Text>, който е
+          покрил условието и е наредил пъзела. Времето се мери на сървъра, не на телефона — не може да се
+          мами. Имаш 3 тренировки, които не се броят; официалното нареждане е едно.
+        </Text>
+      </View>
+
+      <View style={demo.hintRow}>
+        <Ionicons name="time-outline" size={13} color={COLORS.textMuted} />
+        <Text style={[demo.hint, { flex: 1, color: COLORS.textMuted, fontWeight: '700' }]}>
+          Ако томболата има обявен час, всички играят едновременно — затова никой не може да научи
+          дъската с втори профил.
+        </Text>
+      </View>
+    </View>
+  );
+};
+
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -600,6 +749,16 @@ export default function OnboardingScreen() {
         body:
           'Всяка проверка носи точки доверие. Стигаш до нови значки — от „Първи поглед“ до „Пазител на цените“.\n\nВ Общност виждаш класацията: кой е спестил най-много, кой е проверил най-много и кой е Проверяващ на седмицата.',
         interactive: <BadgesDemo />,
+      },
+      {
+        key: 'raffle',
+        emoji: '🎁',
+        gradient: ['#1E1B4B', '#0B0F1A'],
+        eyebrow: 'ТОМБОЛА',
+        title: 'Нареди пъзела най-бързо',
+        body:
+          'Първо покриваш условието — примерно 3 находки със снимка, качени в приложението, и от различни дни. Така влизаш в томболата.\n\nИграта: 12 плочки с реални продукти от приложението. Сред тях има 2 двойки еднакви — намери и двете и хронометърът спира.',
+        interactive: <RaffleDemo />,
       },
       {
         key: 'share',
@@ -875,6 +1034,41 @@ const demo = StyleSheet.create({
   },
   histLabel: { color: COLORS.textSecondary, fontSize: 11.5, fontWeight: '700' },
   histPrice: { fontSize: 12, fontWeight: '900' },
+  /* Томбола — дъската с 12 плочки */
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 7,
+    marginTop: 12,
+  },
+  tile: {
+    width: '23%',
+    aspectRatio: 1,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileFound: { borderColor: 'rgba(34,197,94,0.9)', backgroundColor: 'rgba(34,197,94,0.16)' },
+  tilePick: { borderColor: 'rgba(6,182,212,0.9)', backgroundColor: 'rgba(6,182,212,0.14)' },
+  tileWrong: { borderColor: 'rgba(239,68,68,0.9)', backgroundColor: 'rgba(239,68,68,0.14)' },
+  tileEmoji: { fontSize: 21 },
+  winBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 11,
+    backgroundColor: 'rgba(251,191,36,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.35)',
+    borderRadius: 12,
+    padding: 10,
+  },
+  winText: { flex: 1, color: COLORS.textSecondary, fontSize: 11.5, lineHeight: 16.5 },
+
   actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',

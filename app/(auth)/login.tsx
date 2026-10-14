@@ -106,7 +106,7 @@ export default function LoginScreen() {
           <Ionicons name="play-circle" size={19} color={COLORS.accentCyan} />
           <View style={{ flex: 1 }}>
             <Text style={styles.tourBtnText}>Виж как работи</Text>
-            <Text style={styles.tourBtnSub}>10 екрана с примери — 30 секунди</Text>
+            <Text style={styles.tourBtnSub}>12 екрана с примери — 30 секунди</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
         </TouchableOpacity>
