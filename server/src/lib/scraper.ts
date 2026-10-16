@@ -332,6 +332,17 @@ export function htmlToText(html: string): string {
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
+    // Валутни и типографски „named“ ентитита. Без тях OpenCart страниците дават
+    // „5.50 &euro;“ и цената изглежда като число без валута → отпада.
+    .replace(/&euro;/gi, '€')
+    .replace(/&pound;/gi, '£')
+    .replace(/&yen;/gi, '¥')
+    .replace(/&cent;/gi, '¢')
+    .replace(/&mdash;/gi, '—')
+    .replace(/&ndash;/gi, '–')
+    .replace(/&laquo;/gi, '«')
+    .replace(/&raquo;/gi, '»')
+    .replace(/&sect;/gi, '§')
     .replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(Number(d)))
     .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/\n{2,}/g, '\n')
@@ -595,6 +606,21 @@ function hrefLooksLikeProduct(href: string, inner: string): boolean {
  * `?id_product=`), а ако те са малко — и по-хлабавите. Така при голям листинг не
  * хабим лимита по категории и страници.
  */
+/**
+ * Оправя адрес, изваден от HTML: `&amp;` → `&`, `&#38;` → `&`, `&quot;` → `"`.
+ *
+ * Защо: OpenCart (и още магазини) пишат `index.php?route=product/category&amp;path=20`.
+ * Ако `&amp;` остане, заявката тръгва с параметър „amp;path“ и сайтът връща
+ * началната страница вместо категорията — скраперът „не намира продукти“.
+ */
+export function decodeHref(href: string): string {
+  return href
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0?38;/g, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/g, "'");
+}
+
 export function extractProductLinks(html: string, baseUrl: string, listSelector?: string): string[] {
   const links = new Set<string>();
   const base = new URL(baseUrl);
@@ -606,7 +632,7 @@ export function extractProductLinks(html: string, baseUrl: string, listSelector?
     const re = new RegExp(`<(${tag})([^>]*)>`, 'gi');
     let m: RegExpExecArray | null;
     while ((m = re.exec(html)) !== null) {
-      const href = new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'i').exec(m[2] ?? '')?.[1];
+      const href = decodeHref(new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'i').exec(m[2] ?? '')?.[1] ?? '');
       if (href) {
         try {
           links.add(new URL(href, base).toString());
@@ -619,7 +645,7 @@ export function extractProductLinks(html: string, baseUrl: string, listSelector?
   const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]{0,600}?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    const href = m[1]!;
+    const href = decodeHref(m[1]!);
     const inner = m[2] ?? '';
     if (!hrefLooksLikeProduct(href, inner)) continue;
     try {
@@ -726,6 +752,62 @@ export function looksLikeProductPage(p: { title?: string; price?: number }): boo
   if (categoryish) return false;
   if (p.price === undefined || p.price <= 0) return false;
   return true;
+}
+
+/**
+ * OpenCart и подобни магазини имат СВОЯ карта на сайта: `index.php?route=information/sitemap`.
+ *
+ * Защо е отделна стъпка: при този тип магазини `sitemap.xml` често липсва, а
+ * продуктите в листинга са скрити зад AJAX „бърз преглед“. Картата на сайта
+ * изрежда всички продукти на една страница — една заявка вместо тридесет.
+ * Ако в нея няма директни продуктови връзки, минаваме през категориите от същата карта.
+ */
+export async function collectFromOpencart(
+  origin: string,
+  limit: number,
+  opts: FetchOpts
+): Promise<string[]> {
+  const smUrl = `${origin}/index.php?route=information/sitemap`;
+  let res: FetchResult;
+  try {
+    res = await politeFetch(smUrl, { ...opts, accept: 'text/html,application/xhtml+xml' });
+  } catch {
+    return [];
+  }
+  if (!res.ok || !res.text || res.text.length < 500) return [];
+
+  const out = new Set<string>();
+  const add = (list: string[]) => list.forEach((u) => out.add(realProductUrl(u)));
+  add(extractProductLinks(res.text, res.url));
+  if (out.size >= 2) return [...out].slice(0, limit * 3);
+
+  // Няма директни продуктови връзки? Тогава категориите от същата карта.
+  const cats = [...new Set((res.text.match(/href="([^"]*route=product\/category[^"]*)"/gi) ?? [])
+    .map((h) => decodeHref(/href="([^"]+)"/i.exec(h)?.[1] ?? ''))
+    .map((h) => {
+      try {
+        return new URL(h, res.url).toString();
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean))].slice(0, 8);
+
+  for (const c of cats) {
+    try {
+      const r2 = await politeFetch(c, opts);
+      if (r2.ok && r2.text) add(extractProductLinks(r2.text, r2.url));
+    } catch {
+      // следваща категория
+    }
+    if (out.size >= limit * 3) break;
+  }
+  return [...out].slice(0, limit * 3);
+}
+
+/** OpenCart: AJAX „бърз преглед“ → истинската продуктова страница със същия продукт. */
+export function realProductUrl(url: string): string {
+  return url.replace(/route=product\/quick_view/i, 'route=product/product');
 }
 
 export async function collectFromSitemap(
@@ -2100,13 +2182,23 @@ export async function runJob(jobId: string): Promise<void> {
       const isProductish = /\/(product|produkt|p|item|tovar|art)\//i.test(new URL(job.url).pathname);
 
       if (!isProductish) {
-        const sm = await collectFromSitemap(job.url, limit, fo);
+        // Първо OpenCart-картата (ако е такъв магазин) — после sitemap.xml.
+        const ocUrls = await collectFromOpencart(origin, limit, fo);
+        if (ocUrls.length >= 2) {
+          urls = ocUrls;
+          strategy = 'opencart';
+          await logLine(jobId, `OpenCart картата на сайта даде ${ocUrls.length} продукта.`);
+        }
+
+        const sm = urls.length
+          ? { urls: [] as string[], fromProductSitemap: false }
+          : await collectFromSitemap(job.url, limit, fo);
         if (sm.urls.length) {
           urls = sm.urls;
           sitemapFromProducts = sm.fromProductSitemap === true;
           strategy = 'sitemap';
           await logLine(jobId, `Sitemap: намерих ${sm.urls.length} продуктови адреса.`);
-        } else {
+        } else if (!urls.length) {
           await logLine(jobId, 'Няма sitemap — гледам листинга.');
           const home = await politeFetch(job.url, fo);
           // Първо най-бързото: продуктите, изброени в самия листинг. За
@@ -2185,7 +2277,10 @@ export async function runJob(jobId: string): Promise<void> {
 
         let parsed: RawProduct | null = null;
         try {
-          const res = await politeFetch(url, fo);
+          // OpenCart: връзките в листинга водят към AJAX „бърз преглед“ —
+          // истинската страница с цената е product/product със същия product_id.
+          const fetchUrl = realProductUrl(url);
+          const res = await politeFetch(fetchUrl, fo);
           if (res.ok && res.text) parsed = parseProductPage(res.text, res.url, o.selectors ?? {});
           if (!strategy) strategy = parsed?.via ?? 'heuristics';
         } catch (err) {
