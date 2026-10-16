@@ -410,6 +410,7 @@ export default function AssistantScreen() {
       >
         <FlatList
           ref={listRef}
+          style={styles.list}
           data={listData}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
@@ -451,7 +452,7 @@ export default function AssistantScreen() {
             return (
               <View style={styles.aiRow}>
                 <AssistantAvatar size={30} />
-                <View style={{ flex: 1 }}>
+                <View style={styles.aiBody}>
                   <View style={styles.aiBubble}>
                     <View style={styles.aiMetaRow}>
                       <Text style={styles.aiName}>Ценко</Text>
@@ -558,7 +559,18 @@ export default function AssistantScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
+    height: '100%',
+    maxWidth: '100%',
+    overflow: 'hidden',
     backgroundColor: COLORS.bgPrimary,
+  },
+  /* Списъкът заема останалото място и се свива (minHeight: 0), иначе при
+     тесен телефон расте с текста и полето за писане излиза извън екрана. */
+  list: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    maxWidth: '100%',
   },
   header: {
     flexDirection: 'row',
@@ -642,6 +654,7 @@ const styles = StyleSheet.create({
   },
   userBubble: {
     maxWidth: '86%',
+    flexShrink: 1,
     backgroundColor: COLORS.greenDark,
     borderRadius: 16,
     borderBottomRightRadius: 5,
@@ -658,6 +671,14 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 8,
     marginBottom: 12,
+    width: '100%',
+    maxWidth: '100%',
+  },
+  /* Дългите думи и формули не бива да разпъват балончето извън екрана. */
+  aiBody: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: '100%',
   },
   aiBubble: {
     backgroundColor: COLORS.bgCard,
@@ -667,6 +688,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 5,
     paddingHorizontal: 12,
     paddingVertical: 9,
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '100%',
   },
   aiMetaRow: {
     flexDirection: 'row',
@@ -803,6 +827,8 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 12,
     paddingBottom: 10,
+    width: '100%',
+    maxWidth: '100%',
   },
   starterChip: {
     flexDirection: 'row',
@@ -826,9 +852,13 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
     paddingTop: 8,
+    paddingBottom: 6,
+    width: '100%',
+    maxWidth: '100%',
   },
   input: {
     flex: 1,
+    minWidth: 0,
     maxHeight: 110,
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
@@ -855,7 +885,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: 'center',
     paddingTop: 6,
-    paddingBottom: Platform.OS === 'ios' ? 4 : 8,
+    paddingBottom: Platform.OS === 'ios' ? 6 : 12,
     paddingHorizontal: 16,
   },
 });
