@@ -2237,6 +2237,7 @@ async function renderScraper(box) {
   };
 
   bindScraperHistory();
+  bindScraperStop();
   bindScraperSites();
   bindScraperSchedules();
 
@@ -2265,7 +2266,10 @@ function scraperRunningHtml(items) {
               <td>${num(j.parsed)}/${num(j.target_count)}</td>
               <td>${num(j.imported)}</td>
               <td>${num(j.pages_visited)}</td>
-              <td class="actions"><button class="btn btn-sm btn-ghost" data-sc-open="${esc(j.id)}">Отвори</button></td>
+              <td class="actions">
+                <button class="btn btn-sm btn-danger" data-sc-stop="${esc(j.id)}">⏹ Спри</button>
+                <button class="btn btn-sm btn-ghost" data-sc-open="${esc(j.id)}">Отвори</button>
+              </td>
             </tr>`
               )
               .join('')}
@@ -2523,7 +2527,14 @@ function scraperHistoryHtml(items) {
               <td>${num(j.imported)}</td>
               <td>${num(j.skipped)}</td>
               <td>${ago(j.created_at)}</td>
-              <td class="actions"><button class="btn btn-sm btn-ghost" data-sc-open="${esc(j.id)}">Отвори</button></td>
+              <td class="actions">
+                ${
+                  ['queued', 'discovering', 'parsing', 'enriching', 'importing'].includes(j.status)
+                    ? `<button class="btn btn-sm btn-danger" data-sc-stop="${esc(j.id)}">⏹ Спри</button>`
+                    : ''
+                }
+                <button class="btn btn-sm btn-ghost" data-sc-open="${esc(j.id)}">Отвори</button>
+              </td>
             </tr>`
               )
               .join('')}
@@ -2540,6 +2551,38 @@ function bindScraperHistory() {
       scraperJobId = b.dataset.scOpen;
       await scraperLoadJob();
     };
+  });
+}
+
+/**
+ * Спиране на сканиране — отвсякъде в панела.
+ *
+ * Има го на три места (в „Вървят сега“, в историята и в самата задача), защото
+ * човекът не бива да търси къде точно е бутонът, когато нещо е тръгнало.
+ */
+function bindScraperStop() {
+  document.querySelectorAll('[data-sc-stop]').forEach((b) => {
+    b.onclick = () =>
+      confirmAction({
+        title: 'Спиране на сканирането',
+        message: 'Да спра ли това сканиране?',
+        details: [
+          'Спира веднага — следващите продукти не се теглят.',
+          'Вече внесеното остава, нищо не се губи.',
+          'Разписанието продължава да работи по своя график.',
+        ],
+        confirmLabel: '⏹ Спри сканирането',
+        onConfirm: async () => {
+          try {
+            await api(`/scraper/jobs/${b.dataset.scStop}/cancel`, { method: 'POST' });
+            toast('Сканирането е спряно');
+            closeModal();
+            render('scraper', true);
+          } catch (e) {
+            toast(e.message, 'error');
+          }
+        },
+      });
   });
 }
 
