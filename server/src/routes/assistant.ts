@@ -738,53 +738,81 @@ function safeSteps(raw: unknown): string[] {
 }
 
 /**
- * Подрежда отговора, ако моделът го е написал на един ред.
+ * Подрежда един ред. Връща списък от редове, на които да се покаже.
  *
- * Защо на сървъра, а не само в промпта: моделът понякога изрежда три продукта
- * в едно изречение със запетаи („2 кафета за 5.01 €, сирене за 8.13 € и
- * климатик за 12.78 €“). Тогава човекът вижда един дълъг ред и нищо не се чете.
+ * Прави две неща, без да променя думите:
+ *  1) ако в реда се изреждат няколко неща с цени (2+ „€“) — всяко отива на
+ *     свой ред с „- “ (разделяме по „, “, „ и “, „;“);
+ *  2) ако редът е дълъг абзац (3+ изречения) — всяко изречение на свой ред.
+ */
+function tidyLine(line: string): string[] {
+  const t = line.trim();
+  if (!t) return [''];
+  // Вече подредени редове (заглавие, списък, цитат, номериран) не ги пипаме.
+  if (/^(#|>|-|•|–|\*|\d{1,2}[.)])\s/.test(t)) return [t];
+
+  const prices = (t.match(/€/g) ?? []).length;
+
+  // 1) Изреждане на оферти в едно изречение → по една на ред.
+  if (prices >= 2) {
+    const headMatch = /^([^:]{4,120}:)\s*/.exec(t);
+    const head = headMatch?.[1];
+    let body = head ? t.slice(headMatch![0].length) : t;
+    // Ако започва с „днес има“ / „ето“ — това е увод, оставяме го като ред.
+    const lead = /^(.*?\b(?:има|ето|са|e|е)\b[^,]{0,40}?)(?=\s+(?:овче|сирене|кафе|2|3|1|\d))/i.exec(body);
+    let leadLine: string | undefined;
+    if (lead && lead[1].trim().length > 8 && lead[1].trim().length < 110) {
+      leadLine = lead[1].trim();
+      body = body.slice(lead[0].length).trim();
+    }
+    const parts = body
+      .split(/(?:,\s+|\s+и\s+|;\s+)(?=[^,;]{0,80}(?:€|лв\.?))/i)
+      .map((p) => p.trim().replace(/^и\s+/i, '').replace(/^а\s+/i, ''))
+      .filter((p) => p.length > 3);
+    if (parts.length >= 2) {
+      const out: string[] = [];
+      if (head) out.push(head);
+      if (leadLine) out.push(leadLine);
+      for (const p of parts) out.push(`- ${p}`);
+      return out;
+    }
+  }
+
+  // 2) Дълъг абзац → всяко изречение на свой ред (така се чете на телефон).
+  if (t.length >= 160) {
+    const sentences = t
+      .replace(/([.!?…])\s+(?=[A-ZА-ЯЁA-Za-zА-Яа-я🟢🔴🟡💰📸🎯🛒✨💡🦉])/g, '$1\n')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (sentences.length >= 3) return sentences;
+  }
+
+  return [t];
+}
+
+/**
+ * Подрежда целия отговор — ред по ред, за да не излиза нищо „на един ред“.
+ *
+ * Защо на сървъра, а не само в промпта: моделът понякога изрежда три продукта в
+ * едно изречение със запетаи („сирене за 8 €, кафе за 5 € и климатик за 12 €“)
+ * или пише дълъг абзац. Тогава човекът вижда един дълъг ред и нищо не се чете.
  * Тук само слагаме нови редове — НИЩО не измисляме и не променяме думите.
  */
 function tidyReply(replyIn: string): string {
-  const r = (replyIn ?? '').trim();
-  // Ако вече има редове или е кратко — не пипаме.
-  if (!r || r.includes('\n') || r.length < 120) return r;
-
-  // 1) Разделяме на изречения (пазим познатите съкращения като „напр.“, „т.е.“).
-  const sentences = r
-    .replace(
-      /([.!?…])\s+(?=[A-ZА-ЯЁA-Za-zА-Яа-я🟢🔴🟡💰📸🎯🛒✨💡🦉])/g,
-      '$1\n'
-    )
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const out: string[] = [];
-  for (const s of sentences) {
-    const prices = (s.match(/€/g) ?? []).length;
-    // 2) Изреждане на няколко оферти в едно изречение → по една на ред.
-    if (prices >= 2) {
-      const headMatch = /^([^:]{4,110}:)\s*/.exec(s);
-      const head = headMatch?.[1];
-      const body = head ? s.slice(headMatch![0].length) : s;
-      const parts = body
-        .split(/,\s+(?=[^,]{0,70}(?:€|лв\.?))/)
-        .map((p) => p.trim())
-        .filter((p) => p.length > 3);
-      if (parts.length >= 2) {
-        if (head) out.push(head);
-        for (const p of parts) {
-          out.push(`- ${p.replace(/^и\s+/i, '').replace(/^а\s+/i, '')}`);
-        }
-        continue;
-      }
-    }
-    out.push(s);
+  const r = (replyIn ?? '').replace(/\r\n/g, '\n').trim();
+  if (!r) return r;
+  const lines: string[] = [];
+  for (const raw of r.split('\n')) {
+    lines.push(...tidyLine(raw));
   }
-
-  // Едно изречение на абзац → въздух между тях, за да диша.
-  return out.join('\n\n');
+  // Махаме повече от един празен ред подред.
+  const out: string[] = [];
+  for (const l of lines) {
+    if (!l.trim() && (!out.length || !out[out.length - 1]!.trim())) continue;
+    out.push(l);
+  }
+  return out.join('\n').trim();
 }
 
 /** Чете отговора на модела толерантно — дори да не е идеален JSON. */
