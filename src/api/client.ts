@@ -151,12 +151,22 @@ async function rawRequest<T>(path: string, options: RequestOptions = {}): Promis
   }
 
   if (response.status === 401 && auth && retryOn401) {
-    const refreshed = await refreshTokens();
+    // Ако изобщо не е имало токен, човекът е гост (гледа потока без профил).
+    // Тогава „Сесията е изтекла“ е подвеждащо — казваме му какво да направи.
+    const hadToken = Boolean(headers.Authorization);
+    const refreshed = hadToken ? await refreshTokens() : false;
     if (refreshed) {
       return rawRequest<T>(path, { ...options, retryOn401: false });
     }
     await saveTokens(null);
     onUnauthorized?.();
+    if (!hadToken) {
+      throw new ApiError(
+        401,
+        'auth_required',
+        'За да гласуваш, да коментираш или да качиш находка, трябва профил — отнема 30 секунди.'
+      );
+    }
     throw new ApiError(401, 'unauthorized', 'Сесията е изтекла. Влез отново.');
   }
 
@@ -289,6 +299,8 @@ export interface FeatureFlags {
   payments: boolean;
   mail: boolean;
   ocrModel: string | null;
+  /** Бонус за новодошли: първа находка до N минути → значка + точки. */
+  founderBonus?: { windowMin: number; points: number } | null;
 }
 
 export interface AlertWithMatches extends PriceAlertItem {
@@ -642,7 +654,12 @@ export const api = {
     rawRequest<{ ok: boolean }>(`/api/posts/${postId}/bookmark`, { method: 'PATCH', body: payload }),
 
   createPost: (payload: CreatePostPayload) =>
-    rawRequest<{ post: PostItem; profile: UserProfile }>('/api/posts', {
+    rawRequest<{
+      post: PostItem;
+      profile: UserProfile;
+      /** Значка „Основател“, ако точно тази публикация я е отключила. */
+      founderBonus?: { title: string; points: number } | null;
+    }>('/api/posts', {
       method: 'POST',
       body: payload,
     }),

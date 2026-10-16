@@ -42,6 +42,9 @@ export interface PostRow {
   id: string;
   public_code: string;
   author_id: string;
+  /** Откъде идва цената (миграция 020): user | receipt_basket | brochure | … */
+  source?: string | null;
+  source_note?: string | null;
   polarity: 'green' | 'red';
   category: string;
   custom_category_label: string | null;
@@ -169,6 +172,9 @@ export function mapPost(params: {
   return {
     id: post.id,
     code: post.public_code,
+    // Откъде идва цената: потребител, кошче на касата, брошура, сигнал от TikTok.
+    source: post.source ?? 'user',
+    sourceNote: post.source_note ?? null,
     polarity: post.polarity,
     category: post.category,
     customCategoryLabel: post.custom_category_label ?? undefined,
@@ -278,6 +284,9 @@ export function mapProfile(p: {
   referrals_invited?: number;
   referrals_rewarded?: number;
   referrals_pending?: number;
+  created_at?: Date | string | null;
+  source?: string | null;
+  source_note?: string | null;
 }, extras: {
   badges: Array<{
     id: string;
@@ -317,6 +326,9 @@ export function mapProfile(p: {
     referralsPending: p.referrals_pending ?? 0,
     badges: extras.badges,
     donations: extras.donations,
+    // Кога е създаден профилът — нужно на приложението, за да знае дали още
+    // тече прозорецът на бонуса „Основател“.
+    createdAt: p.created_at ? iso(p.created_at) : null,
     lastDonationPromptAt: p.last_donation_prompt_at ? new Date(iso(p.last_donation_prompt_at)).getTime() : null,
     interactionsSincePrompt: p.interactions_since_prompt,
     nudgeSnoozedUntil: p.nudge_snoozed_until ? new Date(iso(p.nudge_snoozed_until)).getTime() : null,

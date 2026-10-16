@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { many, one, query } from '../db.js';
+import { many, one, query, tx } from '../db.js';
 import { env } from '../env.js';
 import { badRequest, conflict, notFound, tooLarge, unauthorized } from '../lib/errors.js';
 import { hashPassword, verifyPassword } from '../lib/auth.js';
@@ -15,6 +15,7 @@ import {
   signAdminToken,
 } from '../lib/admin.js';
 import { runSecurityScan, ALERT_EMAIL } from '../lib/security.js';
+import { getSetting, setSetting } from '../lib/settings.js';
 import {
   sendAccountDeletedEmail,
   sendAccountSuspendedEmail,
@@ -96,6 +97,250 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/stats', async (req) => {
     await requireAdminPanel(req);
     return loadDashboardStats();
+  });
+
+  /* ------------------------------------------- бонус за основатели */
+
+  /**
+   * Значка „Основател“: първата находка, качена до N минути след регистрацията.
+   * Настройките стоят в app_settings, за да може бонусът да се спре, щом
+   * базата се напълни с реални данни.
+   */
+  app.get('/api/admin/founder', async (req) => {
+    await requireAdminPanel(req);
+    const [enabled, windowMin, points, awarded] = await Promise.all([
+      getSetting('founder_bonus', 'on'),
+      getSetting('founder_window_min', '5'),
+      getSetting('founder_points', '100'),
+      one<{ n: string }>(
+        `select count(*) as n from profile_badges
+          where badge_id = 'badge-founder' and unlocked_at is not null`
+      ),
+    ]);
+    return {
+      enabled: enabled !== 'off',
+      windowMin: Number(windowMin) || 5,
+      points: Number(points) || 100,
+      awarded: Number(awarded?.n ?? 0),
+    };
+  });
+
+  app.post('/api/admin/founder', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        enabled: z.boolean().optional(),
+        windowMin: z.coerce.number().int().min(1).max(120).optional(),
+        points: z.coerce.number().int().min(0).max(10000).optional(),
+      })
+      .parse(req.body ?? {});
+
+    if (input.enabled !== undefined) await setSetting('founder_bonus', input.enabled ? 'on' : 'off');
+    if (input.windowMin !== undefined) await setSetting('founder_window_min', String(input.windowMin));
+    if (input.points !== undefined) await setSetting('founder_points', String(input.points));
+
+    await audit({ admin, action: 'founder.settings', details: input });
+    return { ok: true };
+  });
+
+  /* ------------- внасяне на реални бонове (кошче на касата) и брошури */
+
+  /**
+   * Маскира лични данни, преди да влязат в базата.
+   *
+   * По боновете редовно има неща, които НЕ ни трябват и не бива да публикуваме:
+   * последни цифри на карта, IBAN, номера на карти за лоялност. Човекът, който
+   * е изхвърлил бона, не е давал съгласие да ги вижда целият интернет.
+   */
+  const maskSensitive = (value?: string | null): string | null => {
+    if (!value) return null;
+    return value
+      .replace(/\bBG\d{2}[A-Z0-9]{14,20}\b/gi, '••••')
+      .replace(/\b(?:\d[ -]?){12,19}\b/g, '••••')
+      .replace(/\b\d{10,}\b/g, '••••');
+  };
+
+  /** Редакционният профил, под който излизат внасяните бонове. */
+  async function officialProfileId(): Promise<string> {
+    const existing = await one<{ id: string }>(
+      `select id from profiles where is_official order by created_at asc limit 1`
+    );
+    if (existing) return existing.id;
+
+    const created = await one<{ id: string }>(
+      `insert into profiles
+         (email, email_key, password_hash, name, handle, city, bio,
+          reputation_points, is_official)
+       values ($1, normalize_email($1), 'no-login', $2, $3, $4, $5, 0, true)
+       on conflict (email) do update set is_official = true
+       returning id`,
+      [
+        'redakcia@smartprice.bg',
+        'SmartPrice Редакция',
+        'smartprice_bg',
+        'София',
+        'Внасяме реални цени от изхвърлени касови бонове и официални брошури. Не сме потребител — казваме го честно, за да знаеш откъде идва всяка цена.',
+      ]
+    );
+    await query(
+      `insert into profile_badges (profile_id, badge_id)
+       select $1, id from badges on conflict do nothing`,
+      [created!.id]
+    );
+    return created!.id;
+  }
+
+  app.get('/api/admin/import/info', async (req) => {
+    await requireAdminPanel(req);
+    const authorId = await officialProfileId();
+    const official = await one<{ name: string; handle: string }>(
+      `select name, handle from profiles where id = $1`,
+      [authorId]
+    );
+    const bySource = await many<{ source: string; n: string }>(
+      `select coalesce(source, 'user') as source, count(*) as n
+         from posts group by 1 order by 2 desc`
+    );
+    return {
+      official,
+      bySource: bySource.map((r) => ({ source: r.source, count: Number(r.n) })),
+    };
+  });
+
+  const importItemSchema = z.object({
+    name: z.string().trim().min(1).max(200),
+    quantity: z.coerce.number().positive().max(10000).default(1),
+    unitPrice: z.coerce.number().min(0).max(1_000_000),
+    totalPrice: z.coerce.number().min(0).max(1_000_000).optional(),
+    highlightReason: z.string().trim().max(200).optional(),
+  });
+
+  const importPostSchema = z.object({
+    title: z.string().trim().min(3).max(200),
+    description: z.string().trim().max(2000).default(''),
+    merchantName: z.string().trim().min(1).max(200),
+    merchantTaxId: z.string().trim().max(40).optional(),
+    placeName: z.string().trim().min(1).max(200),
+    city: z.string().trim().min(1).max(80),
+    address: z.string().trim().max(200).optional(),
+    category: z
+      .enum(['restaurants', 'hotels_airbnb', 'supermarket', 'cafes_bars', 'services_tech', 'other'])
+      .default('supermarket'),
+    polarity: z.enum(['green', 'red']).default('green'),
+    pricePaid: z.coerce.number().positive().max(1_000_000),
+    referencePrice: z.coerce.number().positive().max(1_000_000).optional(),
+    currency: z.enum(['BGN', 'EUR']).default('EUR'),
+    unitQuantity: z.coerce.number().positive().max(10000).optional(),
+    unitType: z.enum(['g', 'kg', 'ml', 'l', 'pcs']).optional(),
+    receiptDate: z.string().trim().max(40).optional(),
+    receiptTime: z.string().trim().max(20).optional(),
+    imageUrl: z.string().trim().max(600).optional(),
+    sourceNote: z.string().trim().max(300).optional(),
+    items: z.array(importItemSchema).max(200).default([]),
+  });
+
+  app.post('/api/admin/import/receipts', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        source: z.enum(['receipt_basket', 'brochure', 'tiktok_signal', 'import']).default('receipt_basket'),
+        sourceNote: z.string().trim().max(300).optional(),
+        posts: z.array(importPostSchema).min(1).max(200),
+      })
+      .parse(req.body ?? {});
+
+    const authorId = await officialProfileId();
+    const created: string[] = [];
+    const skipped: Array<{ title: string; reason: string }> = [];
+
+    for (const p of input.posts) {
+      try {
+        const perUnit =
+          p.unitQuantity && p.unitType
+            ? Number(((p.pricePaid / p.unitQuantity) * (p.unitType === 'kg' || p.unitType === 'l' ? 1000 : 1)).toFixed(4))
+            : null;
+
+        const id = await tx(async (client) => {
+          const res = await client.query<{ id: string }>(
+            `insert into posts (
+               author_id, polarity, category, platform_tag, title, description,
+               place_name, city, address, price_paid, reference_price, currency,
+               unit_quantity, unit_type, price_per_unit, image_url, tags,
+               seller_type, source, source_note
+             ) values (
+               $1,$2,$3,'На място',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+               'business',$17,$18
+             ) returning id`,
+            [
+              authorId,
+              p.polarity,
+              p.category,
+              p.title,
+              p.description,
+              p.placeName,
+              p.city,
+              p.address ?? null,
+              p.pricePaid,
+              p.referencePrice ?? null,
+              p.currency,
+              p.unitQuantity ?? null,
+              p.unitType ?? null,
+              perUnit,
+              p.imageUrl ?? '',
+              [p.polarity === 'green' ? '#ТопНаходка' : '#ЧервенФлаг', `#${p.city.replace(/\s+/g, '')}`],
+              input.source,
+              maskSensitive(p.sourceNote ?? input.sourceNote ?? null),
+            ]
+          );
+          const postId = res.rows[0]!.id;
+
+          await client.query(
+            `insert into price_history (post_id, price, status, reported_by)
+             values ($1,$2,'initial',$3)`,
+            [postId, p.pricePaid, authorId]
+          );
+
+          const receipt = await client.query<{ id: string }>(
+            `insert into receipts (
+               post_id, merchant_name, merchant_tax_id, receipt_date, receipt_time,
+               total_amount, currency, confidence, verified_by_ai, source, image_url
+             ) values ($1,$2,$3,$4,$5,$6,$7,0,false,'manual',$8) returning id`,
+            [
+              postId,
+              p.merchantName,
+              maskSensitive(p.merchantTaxId ?? null),
+              p.receiptDate ?? null,
+              p.receiptTime ?? null,
+              p.pricePaid,
+              p.currency,
+              p.imageUrl ?? null,
+            ]
+          );
+          const receiptId = receipt.rows[0]!.id;
+
+          for (const [index, item] of p.items.entries()) {
+            const total = item.totalPrice ?? Number((item.quantity * item.unitPrice).toFixed(2));
+            await client.query(
+              `insert into receipt_items
+                 (receipt_id, position, name, quantity, unit_price, total_price, highlight_reason)
+               values ($1,$2,$3,$4,$5,$6,$7)`,
+              [receiptId, index, item.name, item.quantity, item.unitPrice, total, item.highlightReason ?? null]
+            );
+          }
+          return postId;
+        });
+        created.push(id);
+      } catch (err) {
+        skipped.push({ title: p.title, reason: (err as Error).message.slice(0, 200) });
+      }
+    }
+
+    await audit({
+      admin,
+      action: 'import.receipts',
+      details: { source: input.source, created: created.length, skipped: skipped.length },
+    });
+    return { created: created.length, skipped };
   });
 
   /* ------------------------------------------------------- потребители */

@@ -144,6 +144,8 @@ const PAGES = {
   posts: ['Оферти', 'Всички оферти с ID, локация и модерация'],
   raffles: ['Томболи', 'Създай томбола, сложи наградата със снимка и я разиграй'],
   demo: ['Демо играч', 'Тестов играч, който печели — за демонстрация и проби'],
+  founder: ['Основатели', 'Бонус за първите: значка „Основател“ за първа находка до 5 мин.'],
+  import: ['Внасяне на бонове', 'Методът „кошче на касата“: реални бонове наведнъж, под профил „Редакция“'],
   comments: ['Коментари', 'Преглед и модерация на коментарите'],
   reports: ['Сигнали', 'Какво сигнализират потребителите'],
   categories: ['Категории', 'Етикети и думи за търсене'],
@@ -229,6 +231,8 @@ async function render(page, force = false) {
     if (page === 'posts') return await renderPosts(box, force);
     if (page === 'raffles') return await renderRaffles(box, force);
     if (page === 'demo') return await renderDemo(box, force);
+    if (page === 'founder') return await renderFounder(box, force);
+    if (page === 'import') return await renderImport(box, force);
     if (page === 'comments') return await renderComments(box, force);
     if (page === 'reports') return await renderReports(box, force);
     if (page === 'categories') return await renderCategories(box, force);
@@ -1797,6 +1801,131 @@ async function renderReferrals(box) {
 }
 
 /* ----------------------------------------------------------- любими */
+
+/**
+ * Бонус за основатели. Идеята: докато сайтът е още празен, първата находка
+ * на нов човек се награждава веднага (значка „Основател“ + точки), за да
+ * има причина да качи нещо още в първите минути. Щом базата се напълни,
+ * бонусът се изключва оттук.
+ */
+async function renderFounder(box) {
+  const data = await api('/founder');
+  box.innerHTML = `
+    <div class="grid grid-3" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Издадени значки „Основател“</div><div class="kpi-value gold">${num(data.awarded)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Прозорец</div><div class="kpi-value cyan">${num(data.windowMin)} мин</div></div>
+      <div class="card kpi"><div class="kpi-label">Бонус точки</div><div class="kpi-value">${num(data.points)}</div></div>
+    </div>
+
+    <div class="card" style="border-color:${data.enabled ? 'rgba(34,197,94,.55)' : 'rgba(148,163,184,.35)'}">
+      <div class="card-title">${data.enabled ? '🟢 Бонусът за основатели е ВКЛЮЧЕН' : '⚪ Бонусът за основатели е изключен'}</div>
+      <div class="hint" style="margin:8px 0 12px">
+        ${data.enabled
+          ? 'Всеки нов потребител, който качи първата си находка в рамките на ' + num(data.windowMin) + ' минути от регистрацията, получава значка „Основател“ и ' + num(data.points) + ' точки.'
+          : 'Сега никой не получава значката. Включи го, докато базата още е празна — иначе новите хора няма причина да качат първата си находка.'}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label class="field" style="max-width:160px"><span>Прозорец (мин.)</span>
+          <input id="f-win" type="number" min="1" max="120" value="${num(data.windowMin)}"></label>
+        <label class="field" style="max-width:160px"><span>Бонус точки</span>
+          <input id="f-points" type="number" min="0" max="10000" value="${num(data.points)}"></label>
+        <button class="btn btn-ok" id="f-save">Запази</button>
+        <button class="btn ${data.enabled ? 'btn-danger' : 'btn-ok'}" id="f-toggle">
+          ${data.enabled ? 'Изключи бонуса' : 'Включи бонуса'}
+        </button>
+      </div>
+    </div>`;
+
+  $('#f-save')?.addEventListener('click', async () => {
+    const windowMin = Number($('#f-win').value);
+    const points = Number($('#f-points').value);
+    if (!Number.isFinite(windowMin) || windowMin < 1 || windowMin > 120) return toast('Прозорецът е между 1 и 120 минути');
+    if (!Number.isFinite(points) || points < 0 || points > 10000) return toast('Точките са между 0 и 10000');
+    await api('/founder', { method: 'POST', body: { windowMin, points } });
+    toast('Настройките са запазени');
+    render('founder', true);
+  });
+
+  $('#f-toggle')?.addEventListener('click', async () => {
+    await api('/founder', { method: 'POST', body: { enabled: !data.enabled } });
+    toast(data.enabled ? 'Бонусът е изключен' : 'Бонусът е включен');
+    render('founder', true);
+  });
+}
+
+const SOURCE_TITLES = {
+  user: 'От потребители',
+  receipt_basket: 'Кошче на касата',
+  brochure: 'Официална брошура',
+  tiktok_signal: 'Сигнал от TikTok (с разрешение)',
+  import: 'Друг внос',
+};
+
+/**
+ * Внасяне на реални бонове.
+ *
+ * Идеята: вместо да чакаме органични потребители, събираме изхвърлените бонове
+ * от кошчетата до касите и ги внасяме наведнъж. Всичко влиза под профил
+ * „SmartPrice Редакция“ и носи етикет за източника — така е ясно, че това не са
+ * потребителски отзиви, а реални касови бележки, внесени от нас.
+ */
+async function renderImport(box, force) {
+  const data = await api('/import/info');
+  const total = (data.bySource || []).reduce((s, r) => s + Number(r.count), 0);
+  const imported = (data.bySource || [])
+    .filter((r) => r.source !== 'user')
+    .reduce((s, r) => s + Number(r.count), 0);
+
+  box.innerHTML = `
+    <div class="grid grid-3" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Всички оферти</div><div class="kpi-value">${num(total)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Внесени от Редакцията</div><div class="kpi-value gold">${num(imported)}</div></div>
+      <div class="card kpi"><div class="kpi-label">От потребители</div><div class="kpi-value cyan">${num(total - imported)}</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🗂 Откъде идват цените</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Източник</th><th>Брой оферти</th></tr></thead>
+        <tbody>
+        ${
+          (data.bySource || []).length
+            ? data.bySource
+                .map(
+                  (r) => `<tr>
+              <td>${esc(SOURCE_TITLES[r.source] || r.source)}</td>
+              <td>${num(r.count)}</td>
+            </tr>`
+                )
+                .join('')
+            : '<tr><td colspan="2" class="empty">Още няма оферти</td></tr>'
+        }
+        </tbody></table></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🧾 Как се внасят бонове (методът „кошче на касата“)</div>
+      <div class="hint" style="margin:8px 0 12px">
+        Внасяш под профил <strong>${esc((data.official || {}).name || 'SmartPrice Редакция')}</strong>
+        (@${esc((data.official || {}).handle || 'smartprice_bg')}) — не под твоя. Така всички виждат,
+        че това са реални касови бонове, внесени от редакцията, а не потребителски отзиви.
+        Личните данни по боновете (карта, IBAN, дълги номера) се маскират автоматично.
+      </div>
+      <div class="hint" style="margin-bottom:10px">
+        1) Събираш шепа изхвърлени бонове от кошчето до касите.<br>
+        2) Гледаш ги с AI скенера (или ги въвеждаш на ръка) и ги записваш в <code>receipts.json</code>.<br>
+        3) Пускаш скрипта — внася по 25 на заявка и казва какво е отказано.
+      </div>
+      <pre style="background:#0B0F1A;border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:12px;overflow:auto;font-size:12.5px;color:#CBD5E1">cd C:\Dockers\SmartPrice\server
+python import_receipts.py --example &gt; receipts.json     # шаблон
+python import_receipts.py --file receipts.json          # проба (нищо не се качва)
+python import_receipts.py --file receipts.json --commit  # внася наистина</pre>
+      <div class="hint warn" style="margin-top:10px">
+        Паролата се подава с <code>--password</code> или през променливата
+        <code>SMART_PRICE_ADMIN_PASSWORD</code>. Никъде не се записва във файл.
+      </div>
+    </div>`;
+}
 
 async function renderFavorites(box) {
   const data = await api('/favorites?limit=50');

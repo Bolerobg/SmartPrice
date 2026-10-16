@@ -239,6 +239,11 @@ export interface UserProfile {
   referralsPending: number;
   badges: BadgeItem[];
   donations: DonationRecord[];
+  /** Откъде идва цената: 'user' | 'receipt_basket' | 'brochure' | 'tiktok_signal' | 'import' */
+  source?: string;
+  sourceNote?: string | null;
+  /** Кога е създаден профилът (ISO низ). Ползва се за прозореца на „Основател“. */
+  createdAt?: string | null;
   lastDonationPromptAt: number | null;
   interactionsSincePrompt: number;
   nudgeSnoozedUntil: number | null;

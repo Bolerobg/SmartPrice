@@ -5,6 +5,7 @@ import { requireUserId, optionalUserId } from '../lib/auth.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { countPosts, loadPosts, type SortMode } from '../lib/feed.js';
 import { loadFullProfile } from '../lib/profile.js';
+import { getSetting } from '../lib/settings.js';
 
 const CATEGORIES = [
   'restaurants',
@@ -214,6 +215,13 @@ export default async function postRoutes(app: FastifyInstance) {
             `#${input.city.replace(/\s+/g, '')}`,
           ];
 
+    // Значка „Основател“: първата находка, качена в рамките на няколко минути
+    // след регистрацията. Настройките се четат преди транзакцията.
+    const founderEnabled = (await getSetting('founder_bonus', 'on')) !== 'off';
+    const founderWindowMin = Number(await getSetting('founder_window_min', '5')) || 5;
+    const founderPoints = Number(await getSetting('founder_points', '100')) || 100;
+    let founderBonus: { title: string; points: number } | null = null;
+
     const postId = await tx(async (client) => {
       const res = await client.query<{ id: string }>(
         `insert into posts (
@@ -315,12 +323,48 @@ export default async function postRoutes(app: FastifyInstance) {
         [userId, points]
       );
 
+      // Значка „Основател“. Брои се само ПЪРВАТА публикация и само ако е
+      // качена до founderWindowMin минути след регистрацията. Тук броят на
+      // публикациите вече е 1 (току-що вмъкнахме тази), затова проверката
+      // „posts = 1“ хваща точно първата находка.
+      if (founderEnabled) {
+        const chk = await client.query<{ posts: string; age_min: string | null; already: boolean }>(
+          `select
+             (select count(*) from posts where author_id = $1)                                as posts,
+             (select extract(epoch from (now() - created_at)) / 60 from profiles
+               where id = $1)                                                                 as age_min,
+             exists(select 1 from profile_badges
+                     where profile_id = $1 and badge_id = 'badge-founder'
+                       and unlocked_at is not null)                                          as already`,
+          [userId]
+        );
+        const row = chk.rows[0];
+        const ageMin = row?.age_min == null ? null : Number(row.age_min);
+        if (row && !row.already && Number(row.posts) === 1 && ageMin !== null && ageMin <= founderWindowMin) {
+          await client.query(
+            `insert into profile_badges (profile_id, badge_id, unlocked_at)
+             values ($1, 'badge-founder', now())
+             on conflict (profile_id, badge_id)
+             do update set unlocked_at = coalesce(profile_badges.unlocked_at, now())`,
+            [userId]
+          );
+          await client.query(
+            `update profiles set reputation_points = reputation_points + $2 where id = $1`,
+            [userId, founderPoints]
+          );
+          founderBonus = { title: 'Основател', points: founderPoints };
+        }
+      }
+
       return id;
     });
 
-    return reply
-      .status(201)
-      .send({ post: await loadOnePost(postId, userId), profile: await loadFullProfile(userId) });
+    return reply.status(201).send({
+      post: await loadOnePost(postId, userId),
+      profile: await loadFullProfile(userId),
+      // Казано изрично, за да може приложението да покаже поздрав веднага.
+      founderBonus,
+    });
   });
 
   // ---------------------------------------------------------------- Редакция / изтриване

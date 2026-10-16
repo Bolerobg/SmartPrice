@@ -23,6 +23,8 @@ import { SmartToolsModal } from '@/components/SmartToolsModal';
 import { api } from '@/src/api/client';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/src/auth/AuthContext';
+import { FounderBanner } from '@/components/FounderBanner';
 import {
   calculateDistanceKm,
   detectUserAndStoreLocation,
@@ -65,7 +67,9 @@ export default function FeedScreen() {
     setSelectedCityFilter,
     openDonationModal,
     totalCommunitySavedAllPosts,
+    openAuthPrompt,
   } = useApp();
+  const { isAuthenticated } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [codeBusy, setCodeBusy] = useState(false);
@@ -394,6 +398,45 @@ export default function FeedScreen() {
           <Text style={styles.codeHintText}>
             Всяка оферта има ID (само числа, напр. 48219357). Напиши го тук, за да я намериш веднага.
           </Text>
+        </View>
+      )}
+
+      {/* Бонусът за новодошли: първа находка в първите минути → „Основател“ */}
+      <FounderBanner />
+
+      {/* Гостът чете потока, но не може да участва. Вместо да го оставяме да
+          се чуди защо нищо не става при натискане — казваме му какво печели. */}
+      {!isAuthenticated && (
+        <View style={styles.guestCard}>
+          <View style={styles.guestRow}>
+            <View style={styles.guestIcon}>
+              <Ionicons name="people" size={19} color={COLORS.black} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.guestTitle}>Виждаш реалните цени. Влез и участвай.</Text>
+              <Text style={styles.guestSub}>
+                Профилът е безплатен и отнема 30 секунди — после гласуваш, коментираш, качваш
+                находки, събираш значки и участваш в томболата.
+              </Text>
+            </View>
+          </View>
+          <View style={styles.guestButtons}>
+            <TouchableOpacity
+              style={styles.guestPrimary}
+              activeOpacity={0.9}
+              onPress={() => router.push('/(auth)/register' as never)}
+            >
+              <Ionicons name="rocket" size={15} color={COLORS.white} />
+              <Text style={styles.guestPrimaryText}>Регистрирай се</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.guestGhost}
+              activeOpacity={0.85}
+              onPress={() => openAuthPrompt('Виж какво получаваш с профил — безплатно е.')}
+            >
+              <Text style={styles.guestGhostText}>Какво получавам?</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -862,6 +905,45 @@ export default function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
+  guestCard: {
+    marginHorizontal: 14,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: COLORS.indigoSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyanBorder,
+  },
+  guestRow: { flexDirection: 'row', gap: 11, alignItems: 'flex-start' },
+  guestIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.accentCyan,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestTitle: { color: COLORS.textPrimary, fontSize: 14.5, fontWeight: '900' },
+  guestSub: { color: COLORS.textSecondary, fontSize: 12.6, lineHeight: 18, marginTop: 4 },
+  guestButtons: { flexDirection: 'row', gap: 9, marginTop: 12, flexWrap: 'wrap' },
+  guestPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: COLORS.greenPrimary,
+  },
+  guestPrimaryText: { color: COLORS.white, fontSize: 13, fontWeight: '900' },
+  guestGhost: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  guestGhostText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '800' },
   // Търсене по ID на оферта
   codeHint: {
     flexDirection: 'row',

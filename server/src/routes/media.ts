@@ -7,6 +7,7 @@ import { requireUserId } from '../lib/auth.js';
 import { badRequest, tooLarge, unavailable } from '../lib/errors.js';
 import { currencyLabel } from '../lib/mappers.js';
 import { recordSecurityEvent } from '../lib/security.js';
+import { getSetting } from '../lib/settings.js';
 import {
   getImage,
   publicUrl,
@@ -294,10 +295,18 @@ export default async function mediaRoutes(app: FastifyInstance) {
     return { receipt: result };
   });
 
-  app.get('/api/health/features', async () => ({
-    ocr: features.ocr,
-    payments: features.payments,
-    mail: features.mail,
-    ocrModel: features.ocr ? env.OCR_MODEL : null,
-  }));
+  app.get('/api/health/features', async () => {
+    // Бонусът за основатели се показва на новодошлите, затова пътува заедно с
+    // останалите флагове „какво може приложението“ (публичен endpoint).
+    const founderOn = (await getSetting('founder_bonus', 'on')) !== 'off';
+    const windowMin = Number(await getSetting('founder_window_min', '5')) || 5;
+    const points = Number(await getSetting('founder_points', '100')) || 100;
+    return {
+      ocr: features.ocr,
+      payments: features.payments,
+      mail: features.mail,
+      ocrModel: features.ocr ? env.OCR_MODEL : null,
+      founderBonus: founderOn ? { windowMin, points } : null,
+    };
+  });
 }

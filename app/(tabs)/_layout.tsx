@@ -3,8 +3,22 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
+import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/src/auth/AuthContext';
 
 export default function TabsLayout() {
+  const { isAuthenticated } = useAuth();
+  const { openAuthPrompt } = useApp();
+
+  // Гостът чете потока и класацията свободно, но „Сподели“ и „Профил“ искат
+  // профил. Вместо да го изхвърляме на екран за вход, му показваме поканата
+  // (с бутони „Регистрирай се“ / „Вече имам профил“).
+  const guardTab = (reason: string) => (e: { preventDefault: () => void }) => {
+    if (isAuthenticated) return;
+    e.preventDefault();
+    openAuthPrompt(reason);
+  };
+
   return (
     <Tabs
       screenOptions={{
@@ -35,6 +49,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="add"
+        listeners={{ tabPress: guardTab('За да качиш находка, трябва профил. Отнема 30 секунди.') }}
         options={{
           title: 'Сподели',
           tabBarIcon: ({ focused }) => (
@@ -60,6 +75,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="profile"
+        listeners={{ tabPress: guardTab('Профилът пази значките, точките и любимите ти цени.') }}
         options={{
           title: 'Профил',
           tabBarIcon: ({ color, size }) => (

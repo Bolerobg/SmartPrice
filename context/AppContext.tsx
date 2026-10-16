@@ -165,6 +165,16 @@ interface AppContextValue {
     openShare: (post: PostItem) => void;
     closeShare: () => void;
 
+    /** Покана „направи профил“ — показва се, когато гост натисне нещо, което иска вход */
+    isAuthPromptOpen: boolean;
+    authPromptReason: string;
+    openAuthPrompt: (reason?: string) => void;
+    closeAuthPrompt: () => void;
+
+    /** Поздравът при отключена значка „Основател“ (или null) */
+    founderCelebration: { title: string; points: number } | null;
+    closeFounderCelebration: () => void;
+
     totalCommunitySavedAllPosts: number;
   }
 
@@ -212,6 +222,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // ---------------------------------------------------- „Добави на началния екран“
     const [isAddToHomeOpen, setIsAddToHomeOpen] = useState(false);
     const [addToHomeMode, setAddToHomeMode] = useState<'invite' | 'help'>('invite');
+
+    // Гост може да чете потока, но за действие (глас, коментар, находка) трябва
+    // профил. Вместо суха грешка му показваме покана за регистрация.
+    const [isAuthPromptOpen, setIsAuthPromptOpen] = useState(false);
+    const [authPromptReason, setAuthPromptReason] = useState('');
+    const openAuthPrompt = useCallback((reason?: string) => {
+      setAuthPromptReason(reason ?? '');
+      setIsAuthPromptOpen(true);
+    }, []);
+    const closeAuthPrompt = useCallback(() => setIsAuthPromptOpen(false), []);
+    const requireAuth = useCallback(
+      (reason?: string): boolean => {
+        if (isAuthenticated) return true;
+        setAuthPromptReason(reason ?? '');
+        setIsAuthPromptOpen(true);
+        return false;
+      },
+      [isAuthenticated]
+    );
+
+    // Поздравът „Основател“ — включва се от createPost, когато сървърът каже,
+    // че точно тази находка е отключила значката.
+    const [founderCelebration, setFounderCelebration] = useState<
+      { title: string; points: number } | null
+    >(null);
+    const closeFounderCelebration = useCallback(() => setFounderCelebration(null), []);
 
     const openAddToHome = useCallback((mode: 'invite' | 'help' = 'help') => {
       setAddToHomeMode(mode);
@@ -290,29 +326,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Първоначално зареждане
   useEffect(() => {
-    if (!isAuthenticated) {
-      setIsLoading(false);
-      setPosts([]);
-      return;
-    }
     let cancelled = false;
     (async () => {
       setIsLoading(true);
       try {
-        const [feed, board, stats, alerts, flags] = await Promise.all([
-          api.feed({ limit: 60 }),
+        // Потокът се показва и БЕЗ профил — това е входната врата от TikTok.
+        // Затова го зареждаме винаги; само алармите (за любими цени) искат вход.
+        const feed = await api.feed({ limit: 60 });
+        if (cancelled) return;
+        setPosts(feed.items);
+        setError(null);
+
+        const [board, stats, flags] = await Promise.all([
           api.leaderboard(50).catch(() => ({ items: [] as LeaderboardUser[] })),
           api.communityStats().catch(() => null),
-          api.alerts().catch(() => ({ items: [] as AlertWithMatches[] })),
           api.features().catch(() => null),
         ]);
         if (cancelled) return;
-        setPosts(feed.items);
         setLeaderboard(board.items);
         setCommunityStats(stats);
-        setPriceAlerts(alerts.items);
         setFeatures(flags);
-        setError(null);
+
+        if (isAuthenticated) {
+          const alerts = await api.alerts().catch(() => ({ items: [] as AlertWithMatches[] }));
+          if (!cancelled) setPriceAlerts(alerts.items);
+        } else if (!cancelled) {
+          setPriceAlerts([]);
+        }
       } catch (err) {
         if (!cancelled) setError(messageOf(err));
       } finally {
@@ -326,7 +366,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Презареждане при смяна на филтрите (сървърна филтрация)
   useEffect(() => {
-    if (!isAuthenticated || isLoading) return;
+    if (isLoading) return;
     let cancelled = false;
     loadFeed().catch((err) => {
       if (!cancelled) setError(messageOf(err));
@@ -452,9 +492,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         receipt,
       };
 
-      const { post, profile } = await api.createPost(payload);
+      const { post, profile, founderBonus } = await api.createPost(payload);
       setPosts((prev) => [post, ...prev]);
       setAuthProfile(profile);
+      if (founderBonus) setFounderCelebration(founderBonus);
       void loadSideData();
       void recordUserInteraction(
         'Страхотна публикация! За да поддържаме AI скенера на касови бележки, подкрепи SmartPrice с дарение.'
@@ -482,6 +523,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const toggleReaction = useCallback(
     async (postId: string, reactionKey: ReactionKey) => {
+      if (!requireAuth('За да гласуваш, трябва профил. Отнема 30 секунди.')) return;
       triggerHaptic('light');
       try {
         const { post } = await api.toggleReaction(postId, reactionKey);
@@ -491,11 +533,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setError(messageOf(err));
       }
     },
-    [applyPostUpdate, recordUserInteraction]
+    [applyPostUpdate, recordUserInteraction, requireAuth]
   );
 
   const markPostHelpedMe = useCallback(
     async (postId: string): Promise<number> => {
+      if (!requireAuth('За да отбележиш, че ти е помогнало, трябва профил.')) return 0;
       triggerHaptic('medium');
       try {
         const result = await api.markHelped(postId);
@@ -512,11 +555,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return 0;
       }
     },
-    [applyPostUpdate, recordUserInteraction, setAuthProfile]
+    [applyPostUpdate, recordUserInteraction, setAuthProfile, requireAuth]
   );
 
   const confirmPriceValidToday = useCallback(
     async (postId: string) => {
+      if (!requireAuth('За да потвърдиш цена, трябва профил.')) return;
       triggerHaptic('success');
       try {
         const { post, profile } = await api.confirmPrice(postId);
@@ -526,11 +570,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setError(messageOf(err));
       }
     },
-    [applyPostUpdate, setAuthProfile]
+    [applyPostUpdate, setAuthProfile, requireAuth]
   );
 
   const reportUpdatedPrice = useCallback(
     async (postId: string, newPrice: number) => {
+      if (!requireAuth('За да докладваш нова цена, трябва профил.')) return;
       if (!Number.isFinite(newPrice) || newPrice <= 0) return;
       triggerHaptic('medium');
       try {
@@ -541,7 +586,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setError(messageOf(err));
       }
     },
-    [applyPostUpdate, setAuthProfile]
+    [applyPostUpdate, setAuthProfile, requireAuth]
   );
 
   const addPriceAlert = useCallback(
@@ -741,6 +786,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             openAddToHome,
             closeAddToHome,
 
+            isAuthPromptOpen,
+            authPromptReason,
+            openAuthPrompt,
+            closeAuthPrompt,
+
+            founderCelebration,
+            closeFounderCelebration,
+
             sharingPost,
             openShare,
             closeShare,
@@ -788,6 +841,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             addToHomeMode,
             openAddToHome,
             closeAddToHome,
+
+            isAuthPromptOpen,
+            authPromptReason,
+            openAuthPrompt,
+            closeAuthPrompt,
+
+            founderCelebration,
+            closeFounderCelebration,
 
             sharingPost,
             openShare,

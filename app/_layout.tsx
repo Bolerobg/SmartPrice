@@ -13,6 +13,8 @@ import { DonationModal } from '@/components/DonationModal';
 import { AlertHost } from '@/components/AlertHost';
 import { ShareModal } from '@/components/ShareModal';
 import { RafflePromoHost } from '@/components/RafflePromoModal';
+import { AuthPromptModal } from '@/components/AuthPromptModal';
+import { FounderCelebration } from '@/components/FounderCelebration';
 // Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
 // Импортът е само за страничния ефект и трябва да е преди първия Alert.alert.
 import '@/lib/alertHost';
@@ -145,7 +147,18 @@ const Splash: React.FC = () => {
 /* ------------------------------------------------------------------ */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isBootstrapping, isAuthenticated } = useAuth();
-  const { isAddToHomeOpen, addToHomeMode, closeAddToHome, sharingPost, closeShare } = useApp();
+  const {
+    isAddToHomeOpen,
+    addToHomeMode,
+    closeAddToHome,
+    sharingPost,
+    closeShare,
+    isAuthPromptOpen,
+    authPromptReason,
+    closeAuthPrompt,
+    founderCelebration,
+    closeFounderCelebration,
+  } = useApp();
   const segments = useSegments();
   const router = useRouter();
 
@@ -181,9 +194,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // отвори /raffle и /raffle/<id> и да види наградата. Иначе натискането на
       // „Виж томболата“ само го връщаше на екрана за вход (нищо не се случваше).
       const isPublicRaffle = segments[0] === 'raffle';
-      if (!inAuthGroup && !isPublicPost && !isPublicTour && !isPublicRaffle) {
-        // Първото пускане води до обяснението, после до входа.
-        router.replace(onboardingSeen ? '/(auth)/login' : '/(auth)/onboarding');
+      // Потокът се чете и БЕЗ профил — това е входната врата от TikTok:
+      // човекът първо вижда реалните находки, чак после решава да влезе.
+      const isTabs = segments[0] === '(tabs)';
+      if (!inAuthGroup && !isPublicPost && !isPublicTour && !isPublicRaffle && !isTabs) {
+        // Първото пускане води до обяснението, после директно в потока.
+        router.replace(onboardingSeen ? '/(tabs)' : '/(auth)/onboarding');
       }
       return;
     }
@@ -213,6 +229,14 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         <ShareModal post={sharingPost} onClose={closeShare} />
         {/* Реклама на томболата: макс. 3 пъти, с X, на различни влизания */}
         <RafflePromoHost />
+        {/* Гост натисна нещо, което иска профил → покана вместо суха грешка */}
+        <AuthPromptModal
+          visible={isAuthPromptOpen}
+          reason={authPromptReason}
+          onClose={closeAuthPrompt}
+        />
+        {/* Значка „Основател“ — поздрав веднага след първата находка */}
+        <FounderCelebration data={founderCelebration} onClose={closeFounderCelebration} />
       </>
     );
   }
