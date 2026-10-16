@@ -343,9 +343,17 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
             <FlatList
               data={filteredCities}
               keyExtractor={(item) => item}
-              keyboardShouldPersistTaps="handled"
+              // „always“: с отворена клавиатура първото докосване вече избира град,
+              // вместо да се изразходва само за затваряне на клавиатурата.
+              keyboardShouldPersistTaps="always"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.listContent}
+              // ВАЖНО: без ограничена височина списъкът се разпъва и НЕ се скролва
+              // (градовете „не мърдат“). flex:1 + minHeight:0 му дава точно
+              // остатъка от листа, който да скролва.
+              style={styles.list}
+              nestedScrollEnabled
+              bounces={false}
               // Рендираме малко наведнъж, с известна височина на реда — така
               // 189-те града не товарят телефона при отваряне и търсене.
               initialNumToRender={16}
@@ -455,6 +463,12 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 28 : 16,
     maxHeight: '88%',
+    // Без това списъкът вътре не получава ограничена височина и не скролва.
+    overflow: 'hidden',
+  },
+  list: {
+    flex: 1,
+    minHeight: 0,
   },
   handleBar: {
     width: 44,
@@ -499,7 +513,10 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: COLORS.textPrimary,
-    fontSize: 14,
+    // 16px е задължително: iOS Safari сам зуумва страницата, ако полето е под
+    // 16px — точно когато човек тръгне да пише, екранът „се разваля“.
+    fontSize: 16,
+    ...(Platform.OS === 'web' ? { touchAction: 'manipulation' as const } : {}),
   },
   quickSection: {
     marginBottom: 12,
