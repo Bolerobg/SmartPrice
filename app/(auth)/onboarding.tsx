@@ -1275,4 +1275,12 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderSubtle,
   },
   ghostBtnText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '800' },
+  /* Малка връзка за тези, които вече имат профил. */
+  loginLink: { alignItems: 'center', paddingTop: 4 },
+  loginLinkText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
 });
