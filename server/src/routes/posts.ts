@@ -7,6 +7,7 @@ import { countPosts, loadPosts, type SortMode } from '../lib/feed.js';
 import { loadFullProfile } from '../lib/profile.js';
 import { getSetting } from '../lib/settings.js';
 import { checkFirstToComplete } from '../lib/sponsorRaffles.js';
+import { checkShopPrice } from '../lib/shopPrice.js';
 
 const CATEGORIES = [
   'restaurants',
@@ -191,6 +192,41 @@ export default async function postRoutes(app: FastifyInstance) {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const userId = optionalUserId(req);
     return { post: await loadOnePost(id, userId) };
+  });
+
+  /**
+   * Цената в магазина „сега“ — за сверяване с нашата цена на екрана на офертата.
+   *
+   * Публичен е: гостът също трябва да може да провери дали офертата е валидна.
+   * Няма странични ефекти (не пипа price_history) — само четене на страницата.
+   * Резултатът се кешира 10 минути в `checkShopPrice`.
+   */
+  app.get('/api/posts/:id/shop-price', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const row = await one<{
+      source_url: string | null;
+      place_name: string;
+      price_paid: string;
+      title: string;
+    }>('select source_url, place_name, price_paid, title from posts where id = $1', [id]);
+    if (!row) throw notFound('Офертата не е намерена.');
+    if (!row.source_url) throw badRequest('Тази оферта е от физически обект — няма линк към онлайн магазин.');
+
+    const force = String((req.query as Record<string, unknown>)?.refresh ?? '') === '1';
+    const result = await checkShopPrice(row.source_url, force);
+    const ourPrice = Number(row.price_paid);
+
+    return {
+      ...result,
+      ourPriceEur: Number(ourPrice.toFixed(2)),
+      shopName: row.place_name,
+      postTitle: row.title,
+      /** Разлика спрямо нашата цена: положителна = в магазина е по-скъпо. */
+      diffEur:
+        result.ok && result.priceEur !== undefined
+          ? Number((result.priceEur - ourPrice).toFixed(2))
+          : null,
+    };
   });
 
   // ---------------------------------------------------------------- Създаване

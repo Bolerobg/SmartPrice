@@ -519,6 +519,24 @@ export interface AdminRaffleInput {
   activate?: boolean;
 }
 
+/**
+ * Отговор от проверката на цената в онлайн магазина (за сверка с нашата цена).
+ * Ако `ok` е false — `reason` казва честно защо (магазинът не отговори и т.н.).
+ */
+export interface ShopPriceCheck {
+  ok: boolean;
+  priceEur?: number;
+  title?: string;
+  checkedAt: string;
+  reason?: string;
+  cached?: boolean;
+  ourPriceEur: number;
+  shopName: string;
+  postTitle: string;
+  /** Положителна = в магазина е по-скъпо; отрицателна = по-евтино. */
+  diffEur: number | null;
+}
+
 export interface ReferralSummary {
   code: string;
   link: string;
@@ -728,6 +746,13 @@ export const api = {
   },
 
   post: (id: string) => rawRequest<{ post: PostItem }>(`/api/posts/${id}`),
+
+  /**
+   * Цената в онлайн магазина „сега“ — за сверяване с нашата цена.
+   * Публичен е (работи и за гост). `refresh` = 1 заобикаля 10-минутния кеш.
+   */
+  shopPrice: (id: string, refresh = false) =>
+    rawRequest<ShopPriceCheck>(`/api/posts/${id}/shop-price${refresh ? '?refresh=1' : ''}`),
 
   /** Търсене по ID на офертата (числов код, напр. 48219357). Работи и без вход. */
   postByCode: (code: string) =>

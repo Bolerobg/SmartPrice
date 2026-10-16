@@ -25,8 +25,26 @@ import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAt, formatPostedAtLong, formatRelativeTime } from '@/src/lib/format';
-import { loadSimilarOffers } from '@/src/api/client';
-import type { SimilarOffer } from '@/src/api/client';
+import { api, loadSimilarOffers } from '@/src/api/client';
+import type { SimilarOffer, ShopPriceCheck } from '@/src/api/client';
+
+/** „Същата цена ✓“ / „в магазина е с X € по-скъпо“ — кратката присъда за сверката. */
+const shopVerdict = (c: ShopPriceCheck | null): string => {
+  if (!c) return 'Провери с едно натискане — четем цената от сайта на магазина в момента.';
+  if (!c.ok || c.diffEur === null) return c.reason ?? 'Не успях да проверя цената в магазина.';
+  const d = c.diffEur;
+  if (Math.abs(d) < 0.01) return 'Същата цена — офертата е валидна ✓';
+  return d > 0
+    ? `В магазина е с ${d.toFixed(2)} € по-скъпо — още си на далавера ✓`
+    : `В магазина е с ${Math.abs(d).toFixed(2)} € по-евтино — провери пак`;
+};
+
+/** Цвят на присъдата: по-скъпо в магазина = добре за нас, по-евтино = лошо. */
+const shopVerdictColor = (c: ShopPriceCheck | null): string => {
+  if (!c || !c.ok || c.diffEur === null) return COLORS.textSecondary;
+  if (Math.abs(c.diffEur) < 0.01) return COLORS.greenBright;
+  return c.diffEur > 0 ? COLORS.greenBright : COLORS.redBright;
+};
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -51,6 +69,9 @@ export default function PostDetailScreen() {
   // същия продукт. Показваме ги, за да може човекът да сравни и да избере
   // най-изгодното, вместо да вижда само една оферта.
   const [similar, setSimilar] = useState<{ count: number; items: SimilarOffer[] } | null>(null);
+  // Сверка с магазина: цената в сайта на магазина „сега“.
+  const [shopCheck, setShopCheck] = useState<ShopPriceCheck | null>(null);
+  const [shopBusy, setShopBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -439,6 +460,135 @@ export default function PostDetailScreen() {
                 )}
               </View>
             </View>
+
+            {/* Сверка с магазина: нашата цена ↔ цената в сайта на магазина СЕГА */}
+            {post.sourceUrl ? (
+              <View
+                style={{
+                  marginTop: 10,
+                  padding: 10,
+                  borderRadius: 12,
+                  backgroundColor: 'rgba(96, 165, 250, 0.08)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(96, 165, 250, 0.25)',
+                  gap: 8,
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: COLORS.textMuted,
+                        fontSize: 10,
+                        fontWeight: '800',
+                        letterSpacing: 0.4,
+                      }}
+                    >
+                      НАШАТА ЦЕНА
+                    </Text>
+                    <Text style={{ color: COLORS.textPrimary, fontSize: 18, fontWeight: '900' }}>
+                      {post.pricePaid.toFixed(2)} €
+                    </Text>
+                  </View>
+                  <Ionicons name="swap-horizontal" size={18} color={COLORS.textMuted} />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: COLORS.textMuted,
+                        fontSize: 10,
+                        fontWeight: '800',
+                        letterSpacing: 0.4,
+                      }}
+                    >
+                      В МАГАЗИНА СЕГА
+                    </Text>
+                    {shopCheck?.ok && shopCheck.priceEur !== undefined ? (
+                      <Text
+                        style={{
+                          color: shopVerdictColor(shopCheck),
+                          fontSize: 18,
+                          fontWeight: '900',
+                        }}
+                      >
+                        {shopCheck.priceEur.toFixed(2)} €
+                      </Text>
+                    ) : (
+                      <Text
+                        style={{
+                          color: COLORS.textSecondary,
+                          fontSize: 15,
+                          fontWeight: '800',
+                        }}
+                      >
+                        {shopBusy ? '…' : '— €'}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+
+                <Text
+                  style={{
+                    color: shopVerdictColor(shopCheck),
+                    fontSize: 11.5,
+                    fontWeight: '700',
+                  }}
+                >
+                  {shopBusy ? 'Проверявам сайта на магазина…' : shopVerdict(shopCheck)}
+                </Text>
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  disabled={shopBusy}
+                  onPress={async () => {
+                    setShopBusy(true);
+                    try {
+                      setShopCheck(await api.shopPrice(post.id, Boolean(shopCheck)));
+                    } catch (err) {
+                      setShopCheck({
+                        ok: false,
+                        checkedAt: new Date().toISOString(),
+                        reason:
+                          err instanceof Error ? err.message : 'Не успях да проверя цената в магазина.',
+                        ourPriceEur: post.pricePaid,
+                        shopName: post.placeName,
+                        postTitle: post.title,
+                        diffEur: null,
+                      });
+                    } finally {
+                      setShopBusy(false);
+                    }
+                  }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: 9,
+                    borderRadius: 10,
+                    backgroundColor: 'rgba(96, 165, 250, 0.18)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(96, 165, 250, 0.4)',
+                  }}
+                >
+                  <Ionicons
+                    name={shopBusy ? 'hourglass-outline' : 'refresh'}
+                    size={14}
+                    color="#60A5FA"
+                  />
+                  <Text style={{ color: '#60A5FA', fontSize: 12, fontWeight: '800' }}>
+                    {shopBusy
+                      ? 'Проверявам…'
+                      : shopCheck
+                        ? 'Провери отново'
+                        : 'Провери цената в магазина сега'}
+                  </Text>
+                </TouchableOpacity>
+
+                <Text style={{ color: COLORS.textMuted, fontSize: 10 }}>
+                  Проверката чете публичната страница на продукта — не променя офертата.
+                </Text>
+              </View>
+            ) : null}
 
             <TouchableOpacity
               activeOpacity={0.85}
