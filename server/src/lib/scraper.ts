@@ -2155,6 +2155,9 @@ export async function runJob(jobId: string): Promise<void> {
           finished_at: new Date(),
         });
         await logLine(jobId, 'Спирам: няма намерени продукти.');
+        // ВАЖНО: и при този изход разписанието се обновява. „Нула нови продукта“ е
+        // точно случаят „сайтът се изчерпи“, който трябва да го спре сам.
+        if (job.schedule_id) await updateScheduleAfterJob(job.schedule_id, jobId).catch(() => undefined);
         return;
       }
 
@@ -2215,6 +2218,7 @@ export async function runJob(jobId: string): Promise<void> {
 
     if (!products.length) {
       await setStatus(jobId, 'failed', { error: 'Нищо не успях да прочета.', finished_at: new Date() });
+      if (job.schedule_id) await updateScheduleAfterJob(job.schedule_id, jobId).catch(() => undefined);
       return;
     }
     await query(`update scrape_jobs set strategy = $2 where id = $1`, [jobId, strategy || 'heuristics']);
