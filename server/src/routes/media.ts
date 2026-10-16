@@ -305,6 +305,8 @@ export default async function mediaRoutes(app: FastifyInstance) {
       ocr: features.ocr,
       payments: features.payments,
       mail: features.mail,
+      // AI съветникът „Ценко“ — приложението показва бутона му само ако е включен.
+      assistant: features.assistant,
       ocrModel: features.ocr ? env.OCR_MODEL : null,
       founderBonus: founderOn ? { windowMin, points } : null,
     };

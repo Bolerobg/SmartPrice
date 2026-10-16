@@ -21,6 +21,7 @@ import ogRoutes from './routes/og.js';
 import raffleRoutes from './routes/raffles.js';
 import referralRoutes from './routes/referrals.js';
 import adminRoutes from './routes/admin.js';
+import assistantRoutes from './routes/assistant.js';
 import { startSecurityMonitor } from './lib/security.js';
 import { seedDemoData } from './seed.js';
 
@@ -152,6 +153,7 @@ export async function buildApp() {
         ocr: features.ocr,
         payments: features.payments,
         mail: features.mail,
+        assistant: features.assistant,
       },
       time: new Date().toISOString(),
     };
@@ -173,6 +175,8 @@ export async function buildApp() {
   // Админ панелът (отделен дашборд): статистики, CRUD, спиране на профили,
   // аларми за ненормална активност
   await app.register(adminRoutes);
+  // AI съветникът „Ценко“ — чат, който познава приложението и подканя към действие
+  await app.register(assistantRoutes);
 
   /* ---------------------------------------------------------------------
    *  Спрени/изтрити профили и активност.

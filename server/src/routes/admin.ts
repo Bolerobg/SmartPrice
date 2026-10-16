@@ -15,6 +15,7 @@ import {
   signAdminToken,
 } from '../lib/admin.js';
 import { runSecurityScan, ALERT_EMAIL } from '../lib/security.js';
+import { invalidateKnowledgeCache } from './assistant.js';
 import { getSetting, setSetting } from '../lib/settings.js';
 import {
   sendAccountDeletedEmail,
@@ -1293,6 +1294,197 @@ export default async function adminRoutes(app: FastifyInstance) {
     });
 
     return reply.status(201).send({ url, byteSize: bytes, mimeType: file.mimetype });
+  });
+
+  /* ==========================================================================
+   *  AI СЪВЕТНИКЪТ „ЦЕНКО“ — знанието и статистиката
+   *
+   *  Ценко чете наръчника от базата (assistant_knowledge) при всеки въпрос.
+   *  Затова КОГАТО ВЛЕЗЕ НОВО НЕЩО В ПРИЛОЖЕНИЕТО, тук се добавя нов ред —
+   *  и Ценко веднага започва да го обяснява на хората. Без нов билд.
+   * ========================================================================== */
+
+  const knowledgeInput = z.object({
+    title: z.string().trim().min(3, 'Заглавието е задължително.').max(200),
+    body: z.string().trim().min(3, 'Обяснението е задължително.').max(4000),
+    // Думите могат да дойдат като текст, разделен със запетаи (така ги пише човек).
+    keywords: z
+      .union([z.array(z.string()), z.string()])
+      .optional()
+      .transform((v) =>
+        Array.isArray(v)
+          ? v.map((s) => s.trim()).filter(Boolean)
+          : String(v ?? '')
+              .split(/[,;\n]/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+      ),
+    category: z.string().trim().max(40).default('basics'),
+    priority: z.coerce.number().int().min(1).max(10).default(5),
+    isActive: z.boolean().default(true),
+  });
+
+  app.get('/api/admin/assistant/knowledge', async (req) => {
+    await requireAdminPanel(req);
+    const q = z
+      .object({ q: z.string().trim().max(120).optional() })
+      .parse(req.query ?? {});
+    const rows = await many<{
+      id: string;
+      title: string;
+      body: string;
+      keywords: string[] | null;
+      category: string;
+      priority: number;
+      is_active: boolean;
+      source: string;
+      updated_at: string;
+    }>(
+      q.q
+        ? `select id::text, title, body, keywords, category, priority, is_active, source, updated_at::text
+             from assistant_knowledge
+            where title ilike $1 or body ilike $1
+            order by priority asc, updated_at desc`
+        : `select id::text, title, body, keywords, category, priority, is_active, source, updated_at::text
+             from assistant_knowledge
+            order by priority asc, updated_at desc`,
+      q.q ? [`%${q.q}%`] : []
+    );
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        body: r.body,
+        keywords: r.keywords ?? [],
+        category: r.category,
+        priority: r.priority,
+        isActive: r.is_active,
+        source: r.source,
+        updatedAt: r.updated_at,
+      })),
+    };
+  });
+
+  app.post('/api/admin/assistant/knowledge', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = knowledgeInput.parse(req.body ?? {});
+    const row = await one<{ id: string }>(
+      `insert into assistant_knowledge (title, body, keywords, category, priority, is_active, source)
+       values ($1,$2,$3::text[],$4,$5,$6,'admin') returning id::text`,
+      [input.title, input.body, input.keywords, input.category, input.priority, input.isActive]
+    );
+    await audit({
+      admin,
+      action: 'assistant_knowledge_create',
+      targetType: 'assistant_knowledge',
+      targetId: row?.id ?? null,
+      targetLabel: input.title,
+      details: { category: input.category, priority: input.priority },
+      ip: req.ip,
+    });
+    // Кешът на знанието е 2 минути → чистим го, за да влезе веднага.
+    invalidateKnowledgeCache();
+    return { ok: true, id: row?.id ?? null };
+  });
+
+  app.patch('/api/admin/assistant/knowledge/:id', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { id } = z.object({ id: z.string().min(1) }).parse(req.params);
+    const input = knowledgeInput.partial().parse(req.body ?? {});
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    const put = (sql: string, v: unknown) => {
+      values.push(v);
+      sets.push(sql.replace('?', `$${values.length}`));
+    };
+    if (input.title !== undefined) put('title = ?', input.title);
+    if (input.body !== undefined) put('body = ?', input.body);
+    if (input.keywords !== undefined) put('keywords = ?::text[]', input.keywords);
+    if (input.category !== undefined) put('category = ?', input.category);
+    if (input.priority !== undefined) put('priority = ?', input.priority);
+    if (input.isActive !== undefined) put('is_active = ?', input.isActive);
+    if (!sets.length) throw badRequest('Няма какво да се обнови.');
+    values.push(id);
+    await one(
+      `update assistant_knowledge set ${sets.join(', ')}, updated_at = now()
+        where id = $${values.length}::bigint returning id`,
+      values
+    );
+    await audit({
+      admin,
+      action: 'assistant_knowledge_update',
+      targetType: 'assistant_knowledge',
+      targetId: id,
+      targetLabel: input.title ?? null,
+      details: { fields: Object.keys(input) },
+      ip: req.ip,
+    });
+    invalidateKnowledgeCache();
+    return { ok: true };
+  });
+
+  app.delete('/api/admin/assistant/knowledge/:id', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { id } = z.object({ id: z.string().min(1) }).parse(req.params);
+    await one('delete from assistant_knowledge where id = $1::bigint returning id', [id]);
+    await audit({
+      admin,
+      action: 'assistant_knowledge_delete',
+      targetType: 'assistant_knowledge',
+      targetId: id,
+      ip: req.ip,
+    });
+    invalidateKnowledgeCache();
+    return { ok: true };
+  });
+
+  /** Какво питат хората — за да знаем какво да добавим в наръчника. */
+  app.get('/api/admin/assistant/questions', async (req) => {
+    await requireAdminPanel(req);
+    const [recent, top, stats] = await Promise.all([
+      many<{
+        question: string;
+        user_name: string | null;
+        is_greeting: boolean;
+        latency_ms: number | null;
+        created_at: string;
+      }>(
+        `select m.question, p.name as user_name, m.is_greeting, m.latency_ms, m.created_at::text
+           from assistant_messages m
+           left join profiles p on p.id = m.user_id
+          where m.is_greeting = false
+          order by m.created_at desc
+          limit 40`
+      ),
+      many<{ question: string; n: number }>(
+        `select lower(question) as question, count(*)::int as n
+           from assistant_messages
+          where is_greeting = false and char_length(question) > 6
+          group by lower(question)
+          having count(*) > 1
+          order by n desc
+          limit 15`
+      ),
+      one<{
+        total: number;
+        today: number;
+        users: number;
+        guests: number;
+        avg_ms: number | null;
+        prompt_tokens: number | null;
+        answer_tokens: number | null;
+      }>(
+        `select count(*)::int as total,
+                count(*) filter (where created_at > now() - interval '24 hours')::int as today,
+                count(distinct user_id) filter (where user_id is not null)::int as users,
+                count(*) filter (where user_id is null)::int as guests,
+                round(avg(latency_ms))::int as avg_ms,
+                coalesce(sum(prompt_tokens),0)::int as prompt_tokens,
+                coalesce(sum(answer_tokens),0)::int as answer_tokens
+           from assistant_messages`
+      ),
+    ]);
+    return { recent, top, stats };
   });
 }
 
