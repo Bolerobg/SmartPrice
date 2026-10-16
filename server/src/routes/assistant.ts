@@ -891,7 +891,7 @@ function tidyReply(replyIn: string): string {
 function parseAnswer(raw: string): ModelAnswer {
   const text = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   try {
-    const parsed = JSON.parse(text) as {
+    const parsed = JSON.parse(textOrFirstJsonObject(text)) as {
       reply?: unknown;
       steps?: unknown;
       mood?: unknown;
@@ -924,6 +924,101 @@ function parseAnswer(raw: string): ModelAnswer {
   }
 }
 
+/**
+ * Изважда JSON от отговора на модела дори когато е обграден с текст
+ * („Ето отговора: {…}“). Без това Ценко губеше отговора и казваше „моментна
+ * претовареност“ на въпроси, на които моделът всъщност е отговорил.
+ */
+function textOrFirstJsonObject(text: string): string {
+  if (text.startsWith('{') && text.endsWith('}')) return text;
+  const start = text.indexOf('{');
+  if (start < 0) return text;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return text.slice(start);
+}
+
+/** Един опит към модел: кой доставчик, кой модел, колко място и колко чакаме. */
+interface ModelAttempt {
+  label: string;
+  url: string;
+  key: string;
+  model: string;
+  maxTokens: number;
+  timeoutMs: number;
+  /** Строг JSON формат — поддържа се от DeepSeek, не от всеки доставчик. */
+  jsonMode: boolean;
+}
+
+interface ModelResult {
+  content: string;
+  finish: string;
+  usage: Record<string, number>;
+  model: string;
+}
+
+/** Едно извикване към модел (DeepSeek или резервния през OpenRouter). */
+async function callModel(
+  attempt: ModelAttempt,
+  system: string,
+  turns: ChatTurn[]
+): Promise<ModelResult> {
+  const response = await fetch(`${attempt.url}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${attempt.key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: attempt.model,
+      max_tokens: attempt.maxTokens,
+      // По-ниска температура = по-подреден JSON и по-малко „забиване“.
+      temperature: 0.6,
+      ...(attempt.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      messages: [{ role: 'system', content: system }, ...turns],
+    }),
+    signal: AbortSignal.timeout(attempt.timeoutMs),
+  });
+
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 300);
+    throw new Error(`${attempt.label} върна ${response.status}: ${detail}`);
+  }
+
+  const data = (await response.json()) as {
+    model?: string;
+    choices?: Array<{
+      message?: { content?: string; reasoning_content?: string };
+      finish_reason?: string;
+    }>;
+    usage?: Record<string, number>;
+  };
+
+  const msg = data.choices?.[0]?.message;
+  return {
+    content: (msg?.content ?? '').trim(),
+    finish: data.choices?.[0]?.finish_reason ?? '',
+    usage: data.usage ?? {},
+    model: data.model ?? attempt.model,
+  };
+}
+
 async function callDeepSeek(
   turns: ChatTurn[],
   grounding: Grounding,
@@ -933,75 +1028,75 @@ async function callDeepSeek(
   const system = [PERSONA, groundingBlock(grounding), kb].filter(Boolean).join('\n\n---\n\n');
 
   /**
-   * Едно извикване към DeepSeek.
+   * Опитите, по ред: DeepSeek → DeepSeek с повече място → резервен модел.
    *
-   * Връща и `content`, и `reasoning` — при моделите с „мислене“ целият бюджет
-   * понякога отива в мисленето и видимият отговор идва ПРАЗЕН. Точно това
-   * караше Ценко да казва „Млъкнах за момент“ на по-дългите въпроси.
+   * Защо верига: „забиването“ на някои въпроси идваше от три неща — забавяне на
+   * доставчика (чакаше се до 60 сек.), празен отговор (бюджетът се изяждаше от
+   * „мислене“) и ОТРЯЗАН JSON при дълъг отговор. Сега всяко от тях води до
+   * следващия опит, вместо до „Млъкнах за момент“.
    */
-  const once = async (maxTokens: number) => {
-    const response = await fetch(`${env.DEEPSEEK_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: env.ASSISTANT_MODEL,
-        // Колко да „мисли“ моделът. За чат low = бърз отговор (~2 сек).
-        effort: env.ASSISTANT_EFFORT,
-        max_tokens: maxTokens,
-        temperature: 1.1,
-        response_format: { type: 'json_object' },
-        messages: [{ role: 'system', content: system }, ...turns],
-      }),
-      signal: AbortSignal.timeout(60_000),
+  const attempts: ModelAttempt[] = [
+    {
+      label: 'DeepSeek',
+      url: env.DEEPSEEK_BASE_URL,
+      key: env.DEEPSEEK_API_KEY,
+      model: env.ASSISTANT_MODEL,
+      maxTokens: env.ASSISTANT_MAX_TOKENS,
+      timeoutMs: env.ASSISTANT_TIMEOUT_MS,
+      jsonMode: true,
+    },
+    // Втори опит при същия доставчик, но с повече място: най-честата причина за
+    // „забиване“ е отрязан отговор (моделът не е свършил JSON-а).
+    {
+      label: 'DeepSeek (втори опит, повече място)',
+      url: env.DEEPSEEK_BASE_URL,
+      key: env.DEEPSEEK_API_KEY,
+      model: env.ASSISTANT_MODEL,
+      maxTokens: Math.max(2600, env.ASSISTANT_MAX_TOKENS * 2),
+      timeoutMs: env.ASSISTANT_TIMEOUT_MS + 10_000,
+      jsonMode: true,
+    },
+  ];
+
+  // Резервен доставчик: ако DeepSeek не отговори (забавяне, грешка, празно),
+  // Ценко минава през OpenRouter и пак отговаря. Затова не „забива“.
+  if (env.OPENROUTER_API_KEY) {
+    attempts.push({
+      label: 'резервен модел',
+      url: env.OPENROUTER_BASE_URL,
+      key: env.OPENROUTER_API_KEY,
+      model: env.ASSISTANT_FALLBACK_MODEL,
+      maxTokens: Math.max(2600, env.ASSISTANT_MAX_TOKENS),
+      timeoutMs: env.ASSISTANT_TIMEOUT_MS,
+      jsonMode: false,
     });
+  }
 
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => '')).slice(0, 400);
-      throw new Error(`DeepSeek ${response.status}: ${detail}`);
+  const problems: string[] = [];
+  let partial: ModelResult | null = null;
+
+  for (const attempt of attempts) {
+    try {
+      const result = await callModel(attempt, system, turns);
+      // Отрязан отговор (finish=length) значи счупен JSON — пробваме с повече място.
+      if (result.content && result.finish !== 'length') {
+        return { answer: parseAnswer(result.content), usage: result.usage, model: result.model };
+      }
+      if (result.content && !partial) partial = result;
+      problems.push(
+        `${attempt.label}: ${result.content ? 'отрязан отговор (не стигна място)' : 'празен отговор'}`
+      );
+    } catch (err) {
+      problems.push(`${attempt.label}: ${(err as Error)?.message?.slice(0, 140) ?? String(err)}`);
     }
-
-    const data = (await response.json()) as {
-      model?: string;
-      choices?: Array<{
-        message?: { content?: string; reasoning_content?: string };
-        finish_reason?: string;
-      }>;
-      usage?: Record<string, number>;
-    };
-
-    const msg = data.choices?.[0]?.message;
-    return {
-      content: (msg?.content ?? '').trim(),
-      reasoning: (msg?.reasoning_content ?? '').trim(),
-      finish: data.choices?.[0]?.finish_reason ?? '',
-      usage: data.usage ?? {},
-      model: data.model ?? env.ASSISTANT_MODEL,
-    };
-  };
-
-  let first = await once(env.ASSISTANT_MAX_TOKENS);
-
-  // Ако отговорът е празен (или е само мислене), опитваме пак с двойно повече
-  // място. Второто извикване обикновено минава — първото е изяло бюджета.
-  if (!first.content) {
-    first = await once(Math.max(1200, env.ASSISTANT_MAX_TOKENS * 2));
   }
 
-  if (!first.content) {
-    // Честно: по-добре ясна грешка, отколкото „Млъкнах“ без причина.
-    throw new Error(
-      `DeepSeek върна празен отговор (finish=${first.finish || '?'}, мислене ${first.reasoning.length} знака)`
-    );
+  // Всичко се провали, но имаме частичен текст — по-добре той, отколкото нищо.
+  if (partial) {
+    return { answer: parseAnswer(partial.content), usage: partial.usage, model: partial.model };
   }
 
-  return {
-    answer: parseAnswer(first.content),
-    usage: first.usage,
-    model: first.model,
-  };
+  throw new Error(`Не успях да получа отговор (${problems.join(' | ')})`);
 }
 
 /* ----------------------------------------------------------- маршрути */

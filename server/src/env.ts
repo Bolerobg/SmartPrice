@@ -49,6 +49,14 @@ const schema = z.object({
   DEEPSEEK_BASE_URL: z.string().url().default('https://api.deepseek.com/v1'),
   // 'deepseek-flash' = DeepSeek-V4.1-Flash: бърз, евтин и разбира шеги.
   ASSISTANT_MODEL: z.string().default('deepseek-flash'),
+  /**
+   * Резервен модел, ако DeepSeek се забави или върне празно/отрязано. Ползва се
+   * през OpenRouter (същият ключ като OCR-а). Затова Ценко НЕ „забива“ — при
+   * проблем минава на резерва и отговаря.
+   */
+  ASSISTANT_FALLBACK_MODEL: z.string().default('deepseek/deepseek-v4.1-flash'),
+  /** Колко да чакаме един опит (по-дълго = „забил“ за човека). */
+  ASSISTANT_TIMEOUT_MS: z.coerce.number().int().min(5000).max(120000).default(30000),
   // Колко да „мисли“ моделът: low | high | max. За чат low е достатъчно и
   // отговаря за ~2 секунди; high/max стават за по-сложни въпроси.
   ASSISTANT_EFFORT: z.enum(['low', 'high', 'max']).default('low'),
