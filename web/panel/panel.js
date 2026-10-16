@@ -822,6 +822,7 @@ async function renderPosts(box, force) {
               <td><span class="pill ${p.status === 'published' ? 'pill-green' : p.status === 'hidden' ? 'pill-gold' : 'pill-red'}">${esc(p.status)}</span></td>
               <td class="actions">
                 <button class="btn btn-sm" data-post="${esc(p.id)}">Отвори</button>
+                <button class="btn btn-sm" data-preview="${esc(p.id)}" data-preview-title="${esc(p.title)}" title="Виж как изглежда за потребителя">👁 Преглед</button>
                 ${p.latitude && p.longitude ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}">🗺</a>` : ''}
               </td>
             </tr>`
@@ -845,6 +846,9 @@ async function renderPosts(box, force) {
     document.querySelectorAll('[data-post]').forEach((b) => {
       b.onclick = () => openPost(data.items.find((x) => x.id === b.dataset.post));
     });
+    document.querySelectorAll('[data-preview]').forEach((b) => {
+      b.onclick = () => openPostPreview(b.dataset.preview, b.dataset.previewTitle);
+    });
   };
 
   $('#p-go').onclick = load;
@@ -852,6 +856,91 @@ async function renderPosts(box, force) {
     if (e.key === 'Enter') load();
   };
   await load();
+}
+
+/** Копира текст в клипборда (с резервен вариант за по-стар браузър). */
+function copyText(text) {
+  const ok = () => toast('Копирано');
+  const fallback = () => {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand('copy');
+      ok();
+    } catch {
+      toast('Не можа да копира', 'error');
+    }
+    area.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
+/* ------------------------------------------- преглед „като потребител“ */
+
+/**
+ * Показва офертата ТОЧНО както я вижда човекът в приложението.
+ *
+ * Защо: в панела админът вижда таблица с ID-та, цени и статуси — но не и това,
+ * което потребителят наистина получава: как изглежда снимката, изпъква ли
+ * „спестеното“, вижда ли се мястото на картата. Затова тук отваряме СЪЩАТА
+ * публична страница в телефонна рамка, а не преправено копие — така прегледът
+ * не може да „излъже“.
+ */
+function openPostPreview(postId, title) {
+  if (!postId) return;
+  const url = `${location.origin}/post/${postId}`;
+  const body = `
+    <div class="hint" style="margin-bottom:12px">
+      Това е <strong>същата страница</strong>, която отваря потребителят — с неговите права, без админски.
+      ${title ? `<br><span class="dim">${esc(title)}</span>` : ''}
+    </div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:0 0 auto;background:#0B0F1A;border:1px solid rgba(148,163,184,.25);border-radius:28px;padding:10px;box-shadow:0 18px 40px rgba(0,0,0,.45)">
+        <div id="pv-frame-wrap" style="width:372px;height:640px;border-radius:20px;overflow:hidden;background:#060911;transition:width .18s ease,height .18s ease">
+          <iframe id="pv-frame" src="${url}" style="width:100%;height:100%;border:0"></iframe>
+        </div>
+      </div>
+      <div style="flex:1;min-width:230px;max-width:340px">
+        <div class="card" style="padding:14px">
+          <div class="card-title">Какво да гледаш</div>
+          <ul style="padding-left:18px;color:var(--muted);font-size:13px;line-height:1.75">
+            <li>Снимката чете ли се — така я вижда човекът</li>
+            <li>Цената и „спестено“ изглеждат ли вярно</li>
+            <li>Мястото на картата точно ли е</li>
+            <li>Скрита оферта: тук я виждаш само ти, другите — не</li>
+          </ul>
+        </div>
+        <div class="toolbar" style="margin-top:10px">
+          <button class="btn btn-sm" id="pv-phone">📱 Телефон</button>
+          <button class="btn btn-sm" id="pv-desk">🖥 Широко</button>
+        </div>
+        <div class="hint" style="margin-top:10px">
+          Вътре в рамката можеш да цъкаш и да скролваш — това е истинското приложение.
+        </div>
+      </div>
+    </div>`;
+
+  openModal('👁 Как го вижда потребителят', body, [
+    { id: 'pv-open', label: 'Отвори в нов таб', cls: 'btn-primary', onClick: () => window.open(url, '_blank', 'noopener') },
+    { id: 'pv-copy', label: 'Копирай линка', cls: 'btn', onClick: () => copyText(url) },
+    { id: 'pv-close', label: 'Затвори', cls: 'btn-ghost', onClick: closeModal },
+  ], true);
+
+  const wrap = document.getElementById('pv-frame-wrap');
+  document.getElementById('pv-phone').onclick = () => {
+    if (wrap) { wrap.style.width = '372px'; wrap.style.height = '640px'; }
+  };
+  document.getElementById('pv-desk').onclick = () => {
+    if (wrap) { wrap.style.width = '960px'; wrap.style.height = '600px'; }
+  };
 }
 
 function openPost(p) {
@@ -890,6 +979,7 @@ function openPost(p) {
     </div>`;
 
   openModal(`Оферта ${p.public_code}`, body, [
+    { id: 'pp-preview', label: '👁 Виж като потребител', cls: 'btn', onClick: () => { closeModal(); openPostPreview(p.id, p.title); } },
     { id: 'pp-save', label: 'Запази', cls: 'btn-primary' },
     { id: 'pp-del', label: '🗑 Премахни', cls: 'btn-danger' },
     { id: 'pp-hard', label: 'Изтрий завинаги', cls: 'btn-danger' },
