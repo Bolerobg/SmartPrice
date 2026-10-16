@@ -662,6 +662,8 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 11,
     marginTop: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   headerBtn: {
     width: 32,
@@ -735,6 +737,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
     maxWidth: '100%',
+    // Ако в отговора има нещо нечупливо (код, дълъг линк), то се подрязва в
+    // балончето — не избутва бутоните извън екрана на телефон.
+    overflow: 'hidden',
   },
   aiMetaRow: {
     flexDirection: 'row',
@@ -822,11 +827,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
+    maxWidth: '100%',
+    flexShrink: 1,
   },
   suggestionText: {
     color: COLORS.accentCyan,
     fontSize: 11.5,
     fontWeight: '800',
+    flexShrink: 1,
+    minWidth: 0,
   },
   systemBubble: {
     flexDirection: 'row',
@@ -884,11 +893,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
     paddingVertical: 8,
     borderRadius: 12,
+    // Дългите въпроси се пренасят, вместо да разпънат екрана на телефон.
+    maxWidth: '100%',
+    flexShrink: 1,
   },
   starterText: {
     color: COLORS.textPrimary,
     fontSize: 12,
     fontWeight: '700',
+    flexShrink: 1,
+    minWidth: 0,
   },
   inputRow: {
     flexDirection: 'row',

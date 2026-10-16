@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { COLORS } from '@/constants/theme';
 
@@ -198,11 +199,21 @@ export const MarkdownText: React.FC<Props> = ({ text, style }) => {
     );
   }
 
-  return <View>{blocks}</View>;
+  // maxWidth/overflow: дори нещо нечупливо (дълъг линк, код) не може да
+  // разпъне балончето и да изхвърли бутоните извън екрана на телефон.
+  return <View style={styles.root}>{blocks}</View>;
 };
 
 const styles = StyleSheet.create({
-  base: { color: COLORS.textPrimary, fontSize: 14.5, lineHeight: 21.5 },
+  /* Нищо в отговора не може да излезе извън балончето. */
+  root: {
+    maxWidth: '100%',
+    overflow: 'hidden',
+    ...(Platform.OS === 'web'
+      ? ({ wordBreak: 'break-word', overflowWrap: 'anywhere' } as never)
+      : null),
+  },
+  base: { color: COLORS.textPrimary, fontSize: 14.5, lineHeight: 21.5, flexShrink: 1 },
   bold: { fontWeight: '800', color: COLORS.textPrimary },
   italic: { fontStyle: 'italic' },
   code: {
@@ -212,16 +223,24 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(6, 182, 212, 0.10)',
     paddingHorizontal: 4,
     borderRadius: 4,
+    flexShrink: 1,
   },
-  link: { color: COLORS.accentCyan, textDecorationLine: 'underline' },
+  link: { color: COLORS.accentCyan, textDecorationLine: 'underline', flexShrink: 1 },
   h2: { fontSize: 17, fontWeight: '900', marginTop: 2, marginBottom: 2 },
   h3: { fontSize: 15.5, fontWeight: '800', marginTop: 2 },
   gap: { height: 8 },
   hr: { height: 1, backgroundColor: 'rgba(148, 163, 184, 0.28)', marginVertical: 8 },
-  listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 5 },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+    marginTop: 5,
+    width: '100%',
+    maxWidth: '100%',
+  },
   listBullet: { color: COLORS.accentCyan, fontWeight: '900', width: 12 },
   listNum: { color: COLORS.accentCyan, fontWeight: '900', minWidth: 16 },
-  listText: { flex: 1 },
+  listText: { flex: 1, minWidth: 0 },
   quoteBox: {
     borderLeftWidth: 3,
     borderLeftColor: COLORS.goldBright,
@@ -237,11 +256,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 10,
     marginVertical: 6,
+    maxWidth: '100%',
+    overflow: 'hidden',
   },
   codeBlockText: {
     fontFamily: 'monospace',
     fontSize: 12.5,
     lineHeight: 18,
     color: COLORS.textSecondary,
+    flexShrink: 1,
   },
 });
