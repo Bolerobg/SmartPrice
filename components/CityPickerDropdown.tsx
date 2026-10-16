@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -37,6 +37,59 @@ const POPULAR_QUICK_CITIES = [
   'Плевен',
 ];
 
+/**
+ * Един ред в списъка — изнесен и memo-нат.
+ *
+ * Защо: градовете са 189. Докато човек пише в търсачката, списъкът се пре-рендира
+ * на всяка буква и на телефон това „забива“ (189 реда × икони). С memo се
+ * пре-рисуват само редовете, които наистина се променят.
+ */
+const CityRow = memo(function CityRow({
+  city,
+  selected,
+  count,
+  onChoose,
+}: {
+  city: string;
+  selected: boolean;
+  count?: number;
+  onChoose: (city: string) => void;
+}) {
+  const isAll = city === 'Всички градове';
+  return (
+    <TouchableOpacity
+      style={[styles.cityRow, selected && styles.cityRowSelected]}
+      onPress={() => onChoose(city)}
+      activeOpacity={0.75}
+    >
+      <View style={styles.cityRowLeft}>
+        <Ionicons
+          name={isAll ? 'globe-outline' : selected ? 'location' : 'location-outline'}
+          size={17}
+          color={selected ? COLORS.greenBright : COLORS.textSecondary}
+        />
+        <Text style={[styles.cityRowText, selected && styles.cityRowTextSelected]}>{city}</Text>
+      </View>
+
+      <View style={styles.cityRowRight}>
+        {count !== undefined && count > 0 && (
+          <View style={styles.countBadge}>
+            <Text style={styles.countBadgeText}>{count} сигнала</Text>
+          </View>
+        )}
+        {selected && <Ionicons name="checkmark-circle" size={19} color={COLORS.greenBright} />}
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+/**
+ * Височината на един ред — за getItemLayout (без измерване на всеки ред).
+ * ТРЯБВА да съвпада с `height` в стила `cityRow` по-долу, иначе скролът
+ * „прескача“ при 189 реда.
+ */
+const CITY_ROW_HEIGHT = 44;
+
 export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
   selectedCity,
   onSelectCity,
@@ -46,7 +99,18 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
   accentColor = COLORS.greenBright,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  /** Какво пише човекът (реагира веднага) и какво филтрираме (със закъснение). */
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  /**
+   * Пауза 180 мс преди филтриране: 189 реда не се пре-рендират на всяка буква.
+   * Точно това караше списъка да „забива“ на телефон, докато се пише.
+   */
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput), 180);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const allAvailableCities = useMemo(() => {
     const base = includeAllOption
@@ -67,11 +131,17 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
   const isFilteredActive =
     includeAllOption && selectedCity !== 'Всички градове';
 
-  const handleChoose = (city: string) => {
-    onSelectCity(city);
-    setSearchQuery('');
-    setIsOpen(false);
-  };
+  const handleChoose = useCallback(
+    (city: string) => {
+      // Затваряме ПЪРВО: ако родителят се пре-рендира бавно след смяната на
+      // града, листът оставаше отворен и изглеждаше „забил“.
+      setIsOpen(false);
+      setSearchInput('');
+      setSearchQuery('');
+      onSelectCity(city);
+    },
+    [onSelectCity]
+  );
 
   return (
     <>
@@ -140,7 +210,9 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
 
       <Modal
         visible={isOpen}
-        animationType="slide"
+        // На web „slide“ анимацията понякога остава заседнала и листът не се
+        // затваря, макар филтърът да е приложен. Затова там — без анимация.
+        animationType={Platform.OS === 'web' ? 'none' : 'slide'}
         transparent
         onRequestClose={() => setIsOpen(false)}
       >
@@ -172,12 +244,17 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
                 style={styles.searchInput}
                 placeholder="Търси град, курорт или населено място..."
                 placeholderTextColor={COLORS.textMuted}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
+                value={searchInput}
+                onChangeText={setSearchInput}
                 autoCorrect={false}
               />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
+              {searchInput.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchInput('');
+                    setSearchQuery('');
+                  }}
+                >
                   <Ionicons
                     name="close-circle"
                     size={18}
@@ -188,7 +265,7 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
             </View>
 
             {/* Бързи чипове за най-търсените градове, когато няма въведен текст */}
-            {searchQuery.trim().length === 0 && (
+            {searchInput.trim().length === 0 && (
               <View style={styles.quickSection}>
                 <Text style={styles.quickSectionLabel}>
                   ⚡ Най-често избирани:
@@ -269,65 +346,35 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.listContent}
-              renderItem={({ item }) => {
-                const isSelected = selectedCity === item;
-                const count =
-                  item === 'Всички градове'
-                    ? undefined
-                    : cityPostCounts?.[item.toLowerCase()] || 0;
-
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.cityRow,
-                      isSelected && styles.cityRowSelected,
-                    ]}
-                    onPress={() => handleChoose(item)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={styles.cityRowLeft}>
-                      <Ionicons
-                        name={
-                          item === 'Всички градове'
-                            ? 'globe-outline'
-                            : isSelected
-                            ? 'location'
-                            : 'location-outline'
-                        }
-                        size={17}
-                        color={
-                          isSelected ? COLORS.greenBright : COLORS.textSecondary
-                        }
-                      />
-                      <Text
-                        style={[
-                          styles.cityRowText,
-                          isSelected && styles.cityRowTextSelected,
-                        ]}
-                      >
-                        {item}
-                      </Text>
-                    </View>
-
-                    <View style={styles.cityRowRight}>
-                      {count !== undefined && count > 0 && (
-                        <View style={styles.countBadge}>
-                          <Text style={styles.countBadgeText}>
-                            {count} сигнала
-                          </Text>
-                        </View>
-                      )}
-                      {isSelected && (
-                        <Ionicons
-                          name="checkmark-circle"
-                          size={19}
-                          color={COLORS.greenBright}
-                        />
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                );
-              }}
+              // Рендираме малко наведнъж, с известна височина на реда — така
+              // 189-те града не товарят телефона при отваряне и търсене.
+              initialNumToRender={16}
+              maxToRenderPerBatch={16}
+              windowSize={7}
+              removeClippedSubviews={false}
+              getItemLayout={(_, index) => ({
+                length: CITY_ROW_HEIGHT,
+                offset: CITY_ROW_HEIGHT * index,
+                index,
+              })}
+              ListEmptyComponent={
+                <Text style={styles.listEmptyText}>
+                  Няма град с такова име. Напиши го и го избери по-горе — ще го
+                  добавим като населено място.
+                </Text>
+              }
+              renderItem={({ item }) => (
+                <CityRow
+                  city={item}
+                  selected={selectedCity === item}
+                  count={
+                    item === 'Всички градове'
+                      ? undefined
+                      : cityPostCounts?.[item.toLowerCase()] || 0
+                  }
+                  onChoose={handleChoose}
+                />
+              )}
             />
           </View>
         </KeyboardAvoidingView>
@@ -512,6 +559,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    height: CITY_ROW_HEIGHT,
     paddingVertical: 11.5,
     paddingHorizontal: 12,
     borderRadius: 14,
@@ -552,5 +600,13 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 11,
     fontWeight: '700',
+  },
+  listEmptyText: {
+    color: COLORS.textMuted,
+    fontSize: 12.5,
+    textAlign: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    lineHeight: 18,
   },
 });
