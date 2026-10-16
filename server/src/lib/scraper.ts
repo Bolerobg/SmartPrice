@@ -714,6 +714,33 @@ export function extractProductLinks(html: string, baseUrl: string, listSelector?
  * Но листингът им съдържа всичко нужно — снимка, име и цена до всяка връзка.
  * Една заявка вместо тридесет, а и сайтовете ни харесват повече така.
  */
+/**
+ * Строга цена за КАРТА в листинг: число с валутен знак ВЕДНАГА до него.
+ *
+ * Защо не общата евристика: тя взима „всяко число“ и при JavaScript магазини
+ * (home-max.bg) това дава цени от вида 263 250 € или 161 157 €, извадени от
+ * сметки в скриптовете на страницата. В една карта цената ВИНАГИ е до валутния
+ * знак („12.78 €“, „12,78 лв.“), затова тук искаме точно това съседство.
+ * По-добре без цена (продуктът се пропуска), отколкото грозна цена в приложението.
+ */
+export function strictCardPrice(html: string): { price?: number; currency?: string } {
+  const text = htmlToText(html).slice(0, 6000);
+  const patterns: Array<[RegExp, string]> = [
+    [/(\d[\d\s.,]*)\s?(?:€|EUR)(?![A-Za-z])/i, 'EUR'],
+    [/(\d[\d\s.,]*)\s?(?:лв\.?|BGN)(?![A-Za-zа-яА-Я])/i, 'BGN'],
+    [/(?:€|EUR)\s?(\d[\d\s.,]*)/i, 'EUR'],
+    [/(?:лв\.?|BGN)\s?(\d[\d\s.,]*)/i, 'BGN'],
+  ];
+  for (const [re, currency] of patterns) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const price = parsePrice(m[1]!);
+    // Таван 200 000 € — по-скъпо от това не е „находка“, а грешка в четенето.
+    if (price && price > 0 && price <= 200_000) return { price, currency };
+  }
+  return {};
+}
+
 export function extractListingProducts(html: string, pageUrl: string): RawProduct[] {
   const links = extractProductLinks(html, pageUrl);
   if (!links.length) return [];
@@ -730,7 +757,7 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
     const alt = /alt=["']([^"']{3,})["']/i.exec(imgTag)?.[1];
     const titleAttr =
       /title=["']([^"']{3,})["']/i.exec(window)?.[1] ?? /aria-label=["']([^"']{3,})["']/i.exec(window)?.[1];
-    const { price, currency } = extractGenericPrice(window);
+    const { price, currency } = strictCardPrice(window);
     const image = extractGenericImage(window, pageUrl);
 
     const title = htmlToText(alt || titleAttr || '');
@@ -937,6 +964,33 @@ export function realProductUrl(url: string): string {
   return url.replace(/route=product\/quick_view/i, 'route=product/product');
 }
 
+/**
+ * Чете компресиран sitemap (`.xml.gz`).
+ *
+ * Защо: част от магазините (Magento, големи каталози) подават картата си gzip-ната.
+ * Тогава обикновеното четене връща двоичен боклук и „няма адреси“, макар картата да
+ * съдържа стотици продукти.
+ */
+async function fetchGzSitemap(url: string, opts: FetchOpts): Promise<string | null> {
+  try {
+    if (!(await robotsAllows(url, opts.respectRobots ?? true))) return null;
+    await politeDelay(new URL(url).host, Math.max(0, Math.min(5000, opts.delayMs ?? DEFAULTS.delayMs)));
+    const res = await fetch(url, {
+      headers: { 'User-Agent': pickUserAgent(), Accept: 'application/xml,text/xml,application/gzip,*/*' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 25_000),
+    });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    // Ако сървърът вече я е разкомпресирал (Content-Encoding), това е готов XML.
+    if (/^\s*</.test(buf.toString('latin1').slice(0, 8))) return buf.toString('utf8');
+    const { gunzipSync } = await import('node:zlib');
+    return gunzipSync(buf).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
 export async function collectFromSitemap(
   startUrl: string,
   limit: number,
@@ -985,17 +1039,25 @@ export async function collectFromSitemap(
     seenSitemaps.add(sitemapUrl);
 
     let res: FetchResult;
-    try {
-      res = await politeFetch(sitemapUrl, {
-        delayMs: opts.delayMs,
-        respectRobots: opts.respectRobots,
-        allowPrivate: opts.allowPrivate,
-        accept: 'application/xml,text/xml,*/*',
-      });
-    } catch {
-      return;
+    // Компресираните карти се четат отделно — иначе е двоичен боклук.
+    if (/\.gz(\?|$)/i.test(sitemapUrl)) {
+      const unzipped = await fetchGzSitemap(sitemapUrl, opts);
+      if (!unzipped) return;
+      seenSitemaps.add(sitemapUrl);
+      res = { ok: true, status: 200, url: sitemapUrl, contentType: 'application/xml', text: unzipped };
+    } else {
+      try {
+        res = await politeFetch(sitemapUrl, {
+          delayMs: opts.delayMs,
+          respectRobots: opts.respectRobots,
+          allowPrivate: opts.allowPrivate,
+          accept: 'application/xml,text/xml,*/*',
+        });
+      } catch {
+        return;
+      }
+      if (!res.ok || !res.text) return;
     }
-    if (!res.ok || !res.text) return;
     visited.push(sitemapUrl);
     if (/product|produkt|tovar|goods/i.test(sitemapUrl)) fromProductSitemap = true;
 
