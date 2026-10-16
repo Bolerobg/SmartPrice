@@ -858,9 +858,18 @@ export default function OnboardingScreen() {
       router.back();
       return;
     }
+    // „Пропусни“ води НАПРАВО в приложението. Потокът се чете и без профил,
+    // значи обяснението не бива да е врата — то е покана. Който иска, се връща
+    // към него от „Виж как работи“.
+    await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, '1');
+    router.replace('/(tabs)');
+  }, [router, isReview]);
+
+  /** За тези, които вече имат профил — направо на вход. */
+  const goLogin = useCallback(async () => {
     await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, '1');
     router.replace('/(auth)/login');
-  }, [router, isReview]);
+  }, [router]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
@@ -966,13 +975,19 @@ export default function OnboardingScreen() {
               </Text>
             </TouchableOpacity>
             {!isReview && (
-              <TouchableOpacity
-                style={styles.ghostBtn}
-                onPress={() => void skip()}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.ghostBtnText}>Вече имам профил</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={styles.ghostBtn}
+                  onPress={() => void skip()}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="flame" size={15} color={COLORS.greenBright} />
+                  <Text style={styles.ghostBtnText}>Разгледай първо — без профил</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => void goLogin()} activeOpacity={0.7} style={styles.loginLink}>
+                  <Text style={styles.loginLinkText}>Вече имам профил</Text>
+                </TouchableOpacity>
+              </>
             )}
           </>
         ) : (
@@ -1250,8 +1265,10 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: COLORS.black, fontSize: 16, fontWeight: '900' },
   ghostBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
     borderRadius: 15,
     paddingVertical: 14,
     borderWidth: 1,

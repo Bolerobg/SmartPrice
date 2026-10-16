@@ -28,7 +28,14 @@ import { COLORS } from '@/constants/theme';
 const APP_DISPLAY_HOST = (process.env.EXPO_PUBLIC_API_URL || 'https://smartprice.bg')
   .replace(/^https?:\/\//, '')
   .replace(/\/+$/, '');
-const MIN_SPLASH_MS = 1400;
+const MIN_SPLASH_MS = 3200;
+
+/** Трите обещания, които се появяват едно след друго на сплаша. */
+const SPLASH_FEATURES: { icon: string; text: string }[] = [
+  { icon: 'pricetags', text: 'Реални цени от хора като теб' },
+  { icon: 'alert-circle', text: 'Червени флагове и скрити такси' },
+  { icon: 'scan', text: 'Снимаш бона — AI го прочита' },
+];
 
 const SPLASH_HINTS = [
   'Топ находки от реални хора',
@@ -47,6 +54,9 @@ const Splash: React.FC = () => {
   const textOpacity = useRef(new Animated.Value(0)).current;
   const barWidth = useRef(new Animated.Value(0)).current;
   const [hintIndex, setHintIndex] = useState(0);
+  // Трите обещания излизат едно по едно — така сплашът има „дишане“, не е
+  // просто лого, което изчезва, преди човек да го прочете.
+  const featAnims = useRef(SPLASH_FEATURES.map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -79,10 +89,18 @@ const Splash: React.FC = () => {
       ])
     ).start();
 
+    // Трите обещания: появяват се последователно (леко отдолу нагоре).
+    Animated.stagger(
+      420,
+      featAnims.map((a) =>
+        Animated.timing(a, { toValue: 1, duration: 460, delay: 620, useNativeDriver: true })
+      )
+    ).start();
+
     // Сменящи се подсказки
-    const t = setInterval(() => setHintIndex((i) => (i + 1) % SPLASH_HINTS.length), 1100);
+    const t = setInterval(() => setHintIndex((i) => (i + 1) % SPLASH_HINTS.length), 1300);
     return () => clearInterval(t);
-  }, [barWidth, glow, logoOpacity, logoScale, textOpacity]);
+  }, [barWidth, featAnims, glow, logoOpacity, logoScale, textOpacity]);
 
   return (
     <LinearGradient colors={['#0F172A', '#0B0F1A', '#0B0F1A']} style={styles.splash}>
@@ -123,6 +141,47 @@ const Splash: React.FC = () => {
           Всеки споделя цена — всички печелим.{'\n'}Без реклами. Без платени ревюта.
         </Text>
       </Animated.View>
+
+      {/* Какво получава човекът — три реда, които се появяват един след друг */}
+      <View style={{ marginTop: 22, gap: 10, width: '100%', maxWidth: 330 }}>
+        {SPLASH_FEATURES.map((f, i) => (
+          <Animated.View
+            key={f.text}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              opacity: featAnims[i],
+              transform: [
+                {
+                  translateY: featAnims[i].interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            }}
+          >
+            <View
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 10,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(148,163,184,0.14)',
+                borderWidth: 1,
+                borderColor: 'rgba(148,163,184,0.22)',
+              }}
+            >
+              <Ionicons name={f.icon as never} size={15} color={COLORS.greenBright} />
+            </View>
+            <Text style={{ color: COLORS.textSecondary, fontSize: 13.5, fontWeight: '700' }}>
+              {f.text}
+            </Text>
+          </Animated.View>
+        ))}
+      </View>
 
       <Animated.View style={[styles.hintPill, { opacity: textOpacity }]}>
         <Text style={styles.hintPillText}>{SPLASH_HINTS[hintIndex]}</Text>
