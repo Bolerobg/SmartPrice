@@ -21,7 +21,7 @@ export default function Root({ children }: PropsWithChildren) {
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no, viewport-fit=cover"
+          content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
         <meta name="theme-color" content="#060911" />
         {/* Основният ресет на Expo за ScrollView */}
@@ -44,18 +44,6 @@ html, body {
   text-rendering: optimizeLegibility;
 }
 body { margin: 0; background-color: #060911; -webkit-text-size-adjust: 100%; }
-
-/* ---- iPhone: полетата за писане НЕ бива да са под 16px ----
-   Safari зуумва сам при докосване на поле с шрифт под 16px и тогава
-   страницата „излиза" от екрана. Затова на тесен екран вдигаме шрифта
-   на всички полета до 16px — тогава зум изобщо не се случва. */
-@media (max-width: 820px) {
-  #root input,
-  #root textarea {
-    font-size: 16px !important;
-    line-height: 22px !important;
-  }
-}
 
 ::selection {
   background: rgba(34, 211, 238, 0.25);

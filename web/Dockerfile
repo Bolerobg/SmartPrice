@@ -32,6 +32,9 @@ COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /out /usr/share/nginx/html
 # Отделният админ дашборд (собствена страница на /panel/) — не минава през Expo
 COPY web/panel /usr/share/nginx/html/panel
+# PWA манифестът: Expo не го копира при output:'single', затова го слагаме ние —
+# без него телефонът слага произволна икона, когато приложението се инсталира.
+COPY public/manifest.webmanifest /usr/share/nginx/html/manifest.webmanifest
 
 # Панелът се зареждаше като /panel/panel.js без версия, затова браузърът
 # продължаваше да ползва СТАРИЯ файл от кеша и новите полета „не се виждаха“,

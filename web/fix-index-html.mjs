@@ -23,7 +23,7 @@ if (!path) {
 let html = readFileSync(path, 'utf8');
 
 const VIEWPORT =
-  '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />';
+  '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no, viewport-fit=cover" />';
 
 const CSS = `<style id="smartprice-mobile-fit">
       /* Ширината на документа никога не надхвърля екрана */
@@ -57,6 +57,17 @@ const CSS = `<style id="smartprice-mobile-fit">
       }
       #root [style*="overflow-x: auto"]::-webkit-scrollbar {
         display: none;
+      }
+      /* ВАЖНО за iPhone: Safari зуумва САМ, щом докоснеш поле за писане с
+         шрифт под 16px. Тогава страницата „излиза" от екрана и бутоните се
+         губят точно когато човекът тръгне да пише. Затова на телефон всички
+         полета са поне 16px — тогава зум изобщо не се случва. */
+      @media (max-width: 820px) {
+        #root input,
+        #root textarea {
+          font-size: 16px !important;
+          line-height: 22px !important;
+        }
       }
     </style>`;
 
