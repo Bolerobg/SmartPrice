@@ -219,10 +219,8 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
         activeOpacity={0.88}
         onPress={() => {
           // Винаги отваряме ОФЕРТАТА (за да се свери цената — както при
-          // физическите магазини). Линкът към онлайн магазина е ВЪТРЕ в картата
-          // (бутонът „Отвори продукта в онлайн магазина“ долу), не при докосване
-          // на картата — иначе човек излиза от приложението, преди да е видял
-          // нашата цена и снимката.
+          // физическите магазини). На картата НЯМА линк към онлайн магазина —
+          // по желание на потребителя; линкът живее в екрана на офертата.
           router.push(`/post/${post.id}`);
         }}
         style={styles.cardBodyTap}
@@ -515,81 +513,11 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
         )}
       </TouchableOpacity>
 
-      {/* Онлайн оферта → отваряме ПРОДУКТА в магазина. Физически обект → Google Maps.
-          Преди този ред се показваше и за онлайн оферти и човек попадаше на картата
-          на „pottery-factory.com“, вместо на самия продукт. */}
-      {post.sourceUrl ? (
-        <TouchableOpacity
-          activeOpacity={0.82}
-          onPress={() =>
-            void Linking.openURL(post.sourceUrl as string).catch(() => router.push(`/post/${post.id}`))
-          }
-          style={{
-            marginHorizontal: 12,
-            marginBottom: 8,
-            backgroundColor: 'rgba(96, 165, 250, 0.10)',
-            borderWidth: 1,
-            borderColor: 'rgba(96, 165, 250, 0.32)',
-            borderRadius: 12,
-            paddingHorizontal: 10,
-            paddingVertical: 7,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
-          }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1 }}>
-            <Ionicons name="cart-outline" size={16} color="#60A5FA" />
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: COLORS.textPrimary,
-                  fontSize: 11.5,
-                  fontWeight: '700',
-                }}
-                numberOfLines={1}
-              >
-                🛒 {(post.sourceUrl as string).replace(/^https?:\/\//, '').split('/')[0]}
-              </Text>
-              <Text
-                style={{
-                  color: COLORS.textMuted,
-                  fontSize: 10,
-                  fontWeight: '600',
-                }}
-                numberOfLines={1}
-              >
-                Отваря продукта в онлайн магазина
-              </Text>
-            </View>
-          </View>
-
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 4,
-              backgroundColor: 'rgba(59, 130, 246, 0.18)',
-              paddingHorizontal: 8,
-              paddingVertical: 4,
-              borderRadius: 8,
-              flexShrink: 0,
-            }}
-          >
-            <Ionicons name="open-outline" size={12} color="#60A5FA" />
-            <Text
-              style={{
-                color: '#60A5FA',
-                fontSize: 10.5,
-                fontWeight: '800',
-              }}
-            >
-              Отвори
-            </Text>
-          </View>
-        </TouchableOpacity>
-      ) : (
+      {/* Онлайн оферта (внесена от магазин) → БЕЗ линк на картата.
+          Искането е ясно: на главната оферта да няма линк към магазина. Линкът
+          остава в екрана на офертата, а тук картата е само за физически обекти —
+          за тях води до Google Maps с адреса. */}
+      {post.sourceUrl ? null : (
         /* Google Maps Адрес и Локация на обекта (само за физически обекти) */
         <TouchableOpacity
           activeOpacity={0.82}
