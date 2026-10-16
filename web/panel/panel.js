@@ -2171,6 +2171,7 @@ const SCRAPE_STATUS_LABELS = {
 let scraperSelected = new Set();
 let scraperPoll = null;
 let scraperJobId = null;
+let bulkPrefill = '';
 let scraperLastForm = null;
 
 function scraperStopPoll() {
@@ -2213,7 +2214,7 @@ async function renderScraper(box) {
       </div>
       <div class="form-grid">
         <label class="field full"><span>Адрес на магазина</span>
-          <input id="sc-url" placeholder="https://magazin.bg/kategoriya/producti" value="${esc(scraperLastForm?.url || '')}"></label>
+          <textarea id="sc-url" rows="2" style="min-height:56px" placeholder="https://magazin.bg/kategoriya/producti&#10;https://drug-magazin.bg/&#10;&#10;← може и 10 адреса, по един на ред">${esc(scraperLastForm?.url || '')}</textarea></label>
         <label class="field" style="max-width:180px"><span>Колко продукта</span>
           <input id="sc-count" type="number" min="1" max="2000" value="${Number(scraperLastForm?.count || 20)}"></label>
         <label class="field" style="max-width:260px"><span>Какво да направи</span>
@@ -2293,8 +2294,20 @@ async function renderScraper(box) {
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
         <button class="btn btn-primary" id="sc-run">▶ Пусни обиколката</button>
+        <button class="btn" id="sc-multi-sched" title="Задай разписание за всички адреси от полето">📅 Разписание за всички</button>
         <button class="btn btn-ghost" id="sc-probe">🔍 Проба на един адрес</button>
         <span class="hint" id="sc-note" style="margin:0"></span>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        За МНОГО сайтове: сложи адресите в полето горе (по един на ред) и:
+        <strong>▶ Пусни обиколката</strong> = еднократна обиколка за всеки сега ·
+        <strong>📅 Разписание за всички</strong> = всеки ден само, разпръснато във времето.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-running">🔄 Вървящи сега</button>
+        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-schedules">📅 Разписания и дневен лимит</button>
+        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-history">🕓 История</button>
+        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-sites">🌐 Научени сайтове</button>
       </div>
       <div id="sc-probe-out" style="margin-top:12px"></div>
     </div>
@@ -2338,17 +2351,36 @@ async function renderScraper(box) {
 
   $('#sc-run').onclick = async () => {
     const form = readForm();
-    if (!/^https?:\/\//i.test(form.url)) return toast('Адресът трябва да започва с https://', 'warn');
-    const { url, count, ...options } = form;
+    // Един адрес или списък (по един на ред) — пускаме обиколка за всеки.
+    const urls = form.url.split(/\s+/).map((u) => u.trim()).filter(Boolean);
+    if (!urls.length) return toast('Дай поне един адрес', 'warn');
+    const bad = urls.find((u) => !/^https?:\/\//i.test(u));
+    if (bad) return toast(`Адресът „${bad}“ трябва да започва с https://`, 'warn');
+    if (urls.length > 50) return toast('Най-много 50 адреса наведнъж', 'warn');
+    const { count, ...options } = form;
     const btn = $('#sc-run');
     btn.disabled = true;
-    btn.textContent = 'Пущам…';
+    btn.textContent = urls.length > 1 ? `Пущам ${urls.length}…` : 'Пущам…';
     try {
       scraperLastForm = form;
-      const res = await api('/scraper/jobs', { method: 'POST', body: { url, count, options } });
-      scraperJobId = res.jobId;
+      let ok2 = 0;
+      const failed = [];
+      for (const u of urls) {
+        try {
+          const res = await api('/scraper/jobs', { method: 'POST', body: { url: u, count, options } });
+          if (urls.length === 1) scraperJobId = res.jobId;
+          ok2++;
+        } catch (e) {
+          failed.push(`${u} — ${e.message}`);
+        }
+      }
       scraperSelected = new Set();
-      toast(res.mode === 'import' ? 'Обиколката тръгна — ще внася директно' : 'Обиколката тръгна — ще ти покажа какво е намерила');
+      toast(
+        urls.length === 1
+          ? 'Обиколката тръгна'
+          : `Пуснати ${ok2} обиколки${failed.length ? `, ${failed.length} не тръгнаха` : ''}`
+      );
+      if (failed.length) console.warn('не тръгнаха:', failed);
       await render('scraper', true);
     } catch (e) {
       toast(e.message, 'error');
@@ -2356,6 +2388,22 @@ async function renderScraper(box) {
       btn.textContent = '▶ Пусни обиколката';
     }
   };
+
+  /** „Разписание за всички“ — подава адресите от полето към формата за много сайтове. */
+  $('#sc-multi-sched').onclick = () => {
+    bulkPrefill = ($('#sc-url').value || '').trim();
+    const b = $('#sc-sched-bulk');
+    if (b) b.click();
+    else toast('Секцията „Разписания“ не е налична — презареди страницата', 'warn');
+  };
+
+  /** Навигация към секциите (без смяна на адреса, за да не чупи рутера). */
+  document.querySelectorAll('[data-scroll-to]').forEach((b) => {
+    b.onclick = () => {
+      const el = document.getElementById(b.dataset.scrollTo);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+  });
 
   $('#sc-probe').onclick = async () => {
     const form = readForm();
@@ -2516,7 +2564,7 @@ function bindScraperSchedules() {
       s ? 'Редакция на разписание' : 'Ново разписание',
       `
       <div class="hint" style="margin-bottom:10px">Квотата се разпределя на групи през активните часове, на случаен интервал. Така сайтът вижда нормален трафик, а не 20 заявки за минута.</div>
-      <label class="field full"><span>Адрес на магазина / категорията</span>
+      <label class="field full"><span>Адрес на магазина / категорията <span class="hint" style="margin:0">(може няколко — по един на ред)</span></span>
         <input id="sch-url" placeholder="https://magazin.bg/kategoriya" value="${esc(s?.url || '')}"></label>
       <div class="form-grid" style="margin-top:8px">
         <label class="field"><span>Име (за теб)</span><input id="sch-label" value="${esc(s?.label || '')}"></label>
@@ -2668,7 +2716,7 @@ function bindScraperSchedules() {
       `
       <div class="hint" style="margin-bottom:10px">Всеки адрес на нов ред (до 200). Всеки сайт тръгва на СВОЙ случаен момент в активните часове — не удрят всички наведнъж. Сайтове, които вече имат разписание, се прескачат.</div>
       <label class="field full"><span>Адреси (един на ред)</span>
-        <textarea id="blk-urls" rows="8" placeholder="https://magazin1.bg\nhttps://magazin2.bg\nhttps://magazin3.bg/kategoriya"></textarea></label>
+        <textarea id="blk-urls" rows="8" placeholder="https://magazin1.bg\nhttps://magazin2.bg\nhttps://magazin3.bg/kategoriya">${esc(bulkPrefill)}</textarea></label>
       <div class="form-grid" style="margin-top:10px">
         <label class="field"><span>Колко продукта на ден (за всеки)</span><input id="blk-quota" type="number" min="1" max="2000" value="${Number(lastOpts.__quota ?? 20)}"></label>
         <label class="field"><span>Група от</span><input id="blk-bmin" type="number" min="1" max="200" value="3"></label>
