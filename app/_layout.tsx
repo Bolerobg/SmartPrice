@@ -197,7 +197,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // Потокът се чете и БЕЗ профил — това е входната врата от TikTok:
       // човекът първо вижда реалните находки, чак после решава да влезе.
       const isTabs = segments[0] === '(tabs)';
-      if (!inAuthGroup && !isPublicPost && !isPublicTour && !isPublicRaffle && !isTabs) {
+      // AI съветникът „Ценко“ е достъпен и за гости. Иначе натискането на
+      // бутона му (или директен адрес /assistant) хвърляше госта обратно в
+      // потока и чатът изглеждаше „счупен“ — нищо не се отваряше.
+      const isPublicAssistant = segments[0] === 'assistant';
+      if (
+        !inAuthGroup &&
+        !isPublicPost &&
+        !isPublicTour &&
+        !isPublicRaffle &&
+        !isPublicAssistant &&
+        !isTabs
+      ) {
         // Първото пускане води до обяснението, после директно в потока.
         router.replace(onboardingSeen ? '/(tabs)' : '/(auth)/onboarding');
       }
