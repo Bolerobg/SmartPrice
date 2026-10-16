@@ -157,7 +157,8 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
    */
   const sheetBody = (
     <View style={styles.sheet}>
-      <View style={styles.handleBar} />
+      {/* Дръжката е за „изтеглящ се“ лист — на web листът се разгъва на място. */}
+      {!IS_WEB ? <View style={styles.handleBar} /> : null}
 
       {/* Заглавие на падащото меню */}
       <View style={styles.modalHeader}>
@@ -372,16 +373,22 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
       </TouchableOpacity>
 
       {/*
-        ВАЖНО (защо не е `Modal` на web): React Native `Modal` на web се рендира
-        в портал, със собствена анимация и отделен слой — при 189 реда и
-        отворена клавиатура на телефон това караше менюто да „забива“ (листът
-        се отваряше бавно, списъкът не се скролваше, а понякога оставаше
-        отворен). На web ползваме обикновен фиксиран overlay: по-лек е, скролва
-        нативно и се затваря мигновено. Нативно (iOS/Android) си остава Modal.
+        ВАЖНО (защо НЕ е `Modal` и НЕ е fixed overlay на web):
+        1. React Native `Modal` на web се рендира в портал със собствена
+           анимация — при 189 реда на телефон менюто отваряше бавно.
+        2. `position: fixed` изглеждаше добре, докато някой родител не получи
+           `transform` (анимация, KeyboardAvoiding и т.н.). Тогава „фиксираният“
+           слой се закача за ТОЗИ родител, излиза извън екрана и прихваща
+           докосванията — екранът изглежда ЗАМРЪЗНАЛ (точно това се случваше на
+           екрана „Сподели“).
+
+        Затова на web листът се РАЗГЪВА НА МЯСТО (в нормалния поток на
+        страницата, точно под бутона). Няма overlay, няма z-index, няма какво да
+        блокира докосванията. Нативно (iOS/Android) си остава `Modal`.
       */}
       {IS_WEB
         ? isOpen
-          ? <View style={styles.webOverlay}>{sheetBody}</View>
+          ? <View style={styles.webInline}>{sheetBody}</View>
           : null
         : (
           <Modal
@@ -403,6 +410,20 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
 };
 
 const styles = StyleSheet.create({
+  /**
+   * На web: листът се разгъва НА МЯСТО под бутона (не е overlay).
+   * Няма `position: fixed` — значи няма как да „избяга“ под родител с transform
+   * и няма какво да блокира докосванията (това замразяваше екрана „Сподели“).
+   */
+  webInline: {
+    marginTop: -2,
+    marginBottom: 12,
+    borderRadius: 18,
+    backgroundColor: COLORS.bgSecondary,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
+    overflow: 'hidden',
+  },
   dropdownTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -477,14 +498,20 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: COLORS.bgSecondary,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
+    // На web листът е разгънат на място: рамката я дава `webInline`, а
+    // височината се определя от списъка (който има собствен maxHeight).
+    ...(Platform.OS === 'web'
+      ? { maxHeight: 'none' as unknown as number, borderWidth: 0 }
+      : {
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+          borderWidth: 1,
+          borderColor: COLORS.borderStrong,
+          maxHeight: '88%',
+        }),
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 28 : 16,
-    maxHeight: '88%',
     // Без това списъкът вътре не получава ограничена височина и не скролва.
     overflow: 'hidden',
   },

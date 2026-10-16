@@ -4,6 +4,7 @@ import {
   Animated,
   Easing,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -297,7 +298,7 @@ export default function AssistantScreen() {
 
   /** Извиква сървъра и добавя отговора. */
   const ask = useCallback(
-    async (question: string, opts: { greeting?: boolean } = {}) => {
+    async (question: string, opts: { greeting?: boolean; resend?: boolean } = {}) => {
       setBusy(true);
       try {
         const history = messages
@@ -305,14 +306,23 @@ export default function AssistantScreen() {
           .slice(-SEND_HISTORY)
           .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.text }));
 
+        // resend = въпросът ВЕЧЕ е в историята (повторен опит след загубен
+        // отговор), затова не го добавяме втори път.
         const answer = await api.assistantChat(
           opts.greeting
             ? { messages: history, greeting: true, screen: fromScreen }
-            : {
-                messages: [...history, { role: 'user' as const, content: question }],
-                screen: fromScreen,
-              }
+            : opts.resend
+              ? { messages: history, screen: fromScreen }
+              : {
+                  messages: [...history, { role: 'user' as const, content: question }],
+                  screen: fromScreen,
+                }
         );
+
+        // Празен отговор не бива да оставя чата „мълчащ“ — казваме го честно.
+        if (!answer.reply || !answer.reply.trim()) {
+          throw new Error('Ценко не успя да подреди отговор. Питай пак след секунда 🙏');
+        }
 
         setMessages((prev) => [
           ...prev,
@@ -327,6 +337,11 @@ export default function AssistantScreen() {
           },
         ]);
         setQuotaLeft((n) => (n === null ? null : Math.max(0, n - 1)));
+        // На телефон отговорът може да остане зад клавиатурата — скриваме я и
+        // скролваме пак, за да се ВИДИ отговорът (иначе изглежда, че мълчи).
+        if (Platform.OS !== 'web') Keyboard.dismiss();
+        scrollToEnd();
+        setTimeout(scrollToEnd, 400);
       } catch (err) {
         const msg =
           err instanceof ApiError
@@ -355,6 +370,22 @@ export default function AssistantScreen() {
   useEffect(() => {
     if (!booted || messages.length > 0 || busy) return;
     void ask('', { greeting: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booted]);
+
+  /**
+   * СПАСЕНИЕ НА ЗАГУБЕН ОТГОВОР.
+   *
+   * Ако последният въпрос остане без отговор (телефонът заключи екрана, човекът
+   * излезе от приложението, страницата се презареди със нов service worker) —
+   * при следващо отваряне питаме пак САМО. Затова чатът не стои „мълчащ“ с
+   * въпрос, на който вече има отговор.
+   */
+  useEffect(() => {
+    if (!booted || busy || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'user' || !last.text.trim()) return;
+    void ask(last.text, { resend: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booted]);
 
