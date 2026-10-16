@@ -1,9 +1,9 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -259,49 +259,40 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
         „забива“ на телефон. Иначе показваме само 12-те най-често избирани.
       */}
       {searchQuery.trim().length > 0 || showAll ? (
-        <FlatList
-        data={filteredCities}
-        keyExtractor={(item) => item}
-        // „always“: с отворена клавиатура първото докосване вече избира град,
-        // вместо да се изразходва само за затваряне на клавиатурата.
-        keyboardShouldPersistTaps="always"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
-        // ВАЖНО: без ограничена височина списъкът се разпъва и НЕ се скролва
-        // (градовете „не мърдат“). flex:1 + minHeight:0 му дава точно
-        // остатъка от листа, който да скролва.
-        style={styles.list}
-        nestedScrollEnabled
-        bounces={false}
-        // Рендираме малко наведнъж, с известна височина на реда — така
-        // 189-те града не товарят телефона при отваряне и търсене.
-        initialNumToRender={12}
-        maxToRenderPerBatch={12}
-        updateCellsBatchingPeriod={40}
-        windowSize={5}
-        removeClippedSubviews={false}
-        getItemLayout={(_, index) => ({
-          length: CITY_ROW_HEIGHT,
-          offset: CITY_ROW_HEIGHT * index,
-          index,
-        })}
-        ListEmptyComponent={
-          <Text style={styles.listEmptyText}>
-            Няма град с такова име. Напиши го и го избери по-горе — ще го добавим като
-            населено място.
-          </Text>
-        }
-        renderItem={({ item }) => (
-          <CityRow
-            city={item}
-            selected={selectedCity === item}
-            count={
-              item === 'Всички градове' ? undefined : cityPostCounts?.[item.toLowerCase()] || 0
-            }
-            onChoose={handleChoose}
-          />
-        )}
-        />
+        /*
+          Обикновен ScrollView с ВСИЧКИ редове — без виртуализация.
+          Защо: FlatList-ът на web (в този custom scroll контейнер) режеше
+          списъка до ~30 реда и не можеше да се скролне до края. Тук всички
+          189 града се рендират веднага и се стига до последния.
+        */
+        <ScrollView
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="always"
+          showsVerticalScrollIndicator
+          nestedScrollEnabled
+        >
+          {filteredCities.length === 0 ? (
+            <Text style={styles.listEmptyText}>
+              Няма град с такова име. Напиши го и го избери по-горе — ще го добавим като
+              населено място.
+            </Text>
+          ) : (
+            filteredCities.map((city) => (
+              <CityRow
+                key={city}
+                city={city}
+                selected={selectedCity === city}
+                count={
+                  city === 'Всички градове'
+                    ? undefined
+                    : cityPostCounts?.[city.toLowerCase()] || 0
+                }
+                onChoose={handleChoose}
+              />
+            ))
+          )}
+        </ScrollView>
       ) : (
         <TouchableOpacity
           style={styles.showAllBtn}

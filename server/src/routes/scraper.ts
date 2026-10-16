@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { many, one, query } from '../db.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { audit, requireAdminPanel } from '../lib/admin.js';
+import { importExternalProducts } from '../lib/externalImport.js';
 import {
   alreadyImported,
   downloadImage,
@@ -158,6 +159,39 @@ export default async function scraperRoutes(app: FastifyInstance) {
   });
 
   /* ------------------------------------------------------------ задачи */
+
+  /**
+   * Внасяне на продукти, обходени ОТВЪН сървъра.
+   *
+   * Някои магазини (remedium.bg, sopharmacy.bg, zora.bg…) са зад Cloudflare и
+   * връщат 403 на датацентъра, но се отварят от потребителски IP. За тях
+   * локалният скрипт `scripts/scrape_local.py` чете продуктите и ги праща тук.
+   */
+  app.post('/api/admin/scraper/import-external', async (req) => {
+    await requireAdminPanel(req);
+    const input = z
+      .object({
+        domain: z.string().trim().min(3).max(120),
+        items: z
+          .array(
+            z.object({
+              title: z.string().trim().min(2).max(300),
+              url: z.string().trim().min(8).max(600),
+              price: z.coerce.number().min(0).max(1_000_000),
+              currency: z.string().trim().max(8).optional(),
+              imageUrl: z.string().trim().max(600).optional(),
+              description: z.string().trim().max(4000).optional(),
+              listPrice: z.coerce.number().min(0).max(1_000_000).optional(),
+            })
+          )
+          .min(1)
+          .max(200),
+      })
+      .parse(req.body ?? {});
+
+    const result = await importExternalProducts(input.domain, input.items);
+    return { ok: true, ...result };
+  });
 
   app.post('/api/admin/scraper/jobs', async (req) => {
     const admin = await requireAdminPanel(req);

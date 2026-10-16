@@ -50,3 +50,6 @@ yarn-error.*
 # TypeScript
 *.tsbuildinfo
 web/tiktok/
+
+# Локален скрапер: админ паролата не влиза в git
+scripts/.local-scrape.env
