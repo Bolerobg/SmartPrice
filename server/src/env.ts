@@ -57,7 +57,7 @@ const schema = z.object({
   // Максимум отговори на час (на профил / на IP за гостите).
   ASSISTANT_MAX_PER_HOUR: z.coerce.number().int().min(3).max(200).default(40),
   // Твърд таван на разхода на отговор (вкл. „мислене“).
-  ASSISTANT_MAX_TOKENS: z.coerce.number().int().min(200).max(4000).default(900),
+  ASSISTANT_MAX_TOKENS: z.coerce.number().int().min(200).max(4000).default(1800),
 
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
