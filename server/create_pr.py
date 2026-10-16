@@ -76,7 +76,7 @@ Stripe вече **не приема BGN** („Use eur instead") → цялото
 | `tsc --noEmit` (app + server) | **0 грешки** |
 
 ### Публикувано
-Живее на **https://smart.lookthis.online** (nginx + отделен Cloudflare тунел).
+Живее на **https://smartprice.bg** (nginx + отделен Cloudflare тунел).
 
 ### Какво НЕ е в този PR
 - Няма `.env` и ключове (те са в `.gitignore`)

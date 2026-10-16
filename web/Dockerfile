@@ -1,6 +1,6 @@
 # ============================================================================
 # SmartPrice — web приложение (Expo export) + nginx, който проксира API-то.
-# Всичко на един домейн: smart.lookthis.online
+# Всичко на един домейн: smartprice.bg
 # ============================================================================
 
 # --- Етап 1: билд на Expo web ---
@@ -8,9 +8,11 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 # Публичният адрес се вгражда в билда (Expo inlines EXPO_PUBLIC_* при export)
-ARG EXPO_PUBLIC_API_URL=https://smart.lookthis.online
+ARG EXPO_PUBLIC_API_URL=https://smartprice.bg
+ARG EXPO_PUBLIC_APP_URL=https://smartprice.bg
 ARG EXPO_PUBLIC_DEEP_LINK_SCHEME=smartprice
 ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
+ENV EXPO_PUBLIC_APP_URL=$EXPO_PUBLIC_APP_URL
 ENV EXPO_PUBLIC_DEEP_LINK_SCHEME=$EXPO_PUBLIC_DEEP_LINK_SCHEME
 ENV CI=1
 

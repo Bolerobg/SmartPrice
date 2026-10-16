@@ -10,6 +10,11 @@ import { AppError } from './errors.js';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
+// Публичният адрес идва от PUBLIC_BASE_URL — при смяна на домейна се
+// променя само .env, не кодът.
+const APP_URL = env.PUBLIC_BASE_URL.replace(/\/+$/, '');
+const APP_HOST = APP_URL.replace(/^https?:\/\//, '');
+
 export interface SendResult {
   id: string;
 }
@@ -146,7 +151,7 @@ function layout(params: {
     </table>
 
     <p style="margin:18px 0 0 0;font-size:11px;color:#334155;">
-      SmartPrice — споделяне на реални цени · <a href="https://smart.lookthis.online" style="color:#475569;text-decoration:none;">smart.lookthis.online</a>
+      SmartPrice — споделяне на реални цени · <a href="${APP_URL}" style="color:#475569;text-decoration:none;">${APP_HOST}</a>
     </p>
   </td></tr>
 </table>
@@ -179,7 +184,7 @@ export async function sendVerificationEmail(params: {
       `Твоят код за потвърждение е: ${params.code}\n\n` +
       `Кодът е валиден 15 минути и може да се използва само веднъж.\n` +
       `Ако не си се регистрирал, игнорирай това писмо.\n\n` +
-      `smart.lookthis.online`,
+      `${APP_HOST}`,
   });
 }
 
@@ -208,7 +213,7 @@ export async function sendPasswordResetEmail(params: {
       `Твоят код е: ${params.code}\n\n` +
       `Кодът е валиден 15 минути.\n` +
       `Ако не си поискал смяна, игнорирай това писмо — паролата остава същата.\n\n` +
-      `smart.lookthis.online`,
+      `${APP_HOST}`,
   });
 }
 
@@ -245,7 +250,7 @@ function plainLayout(params: { heading: string; intro: string; bodyHtml: string;
         <div style="height:1px;background:#233049;margin-bottom:14px;"></div>
         <p style="margin:0;font-size:11.5px;line-height:1.7;color:#475569;">
           SmartPrice — споделяне на реални цени ·
-          <a href="https://smart.lookthis.online" style="color:#64748B;text-decoration:none;">smart.lookthis.online</a><br>
+          <a href="${APP_URL}" style="color:#64748B;text-decoration:none;">${APP_HOST}</a><br>
           Този имейл е изпратен автоматично, не отговаряй на него.
         </p>
       </td></tr>
@@ -296,7 +301,7 @@ export async function sendAccountSuspendedEmail(params: {
       `Причина: ${params.reason}\n` +
       (params.until ? `Срок: до ${params.until}\n` : 'Срок: неопределен\n') +
       `\nДокато е спрян, не можеш да влизаш и офертите ти не се виждат.\n\n` +
-      `smart.lookthis.online`,
+      `${APP_HOST}`,
   });
 }
 
@@ -329,7 +334,7 @@ export async function sendAccountDeletedEmail(params: {
       `Профилът ти в SmartPrice беше изтрит.\n` +
       `Причина: ${params.reason}\n\n` +
       `Офертите и коментарите ти вече не се показват.\n\n` +
-      `smart.lookthis.online`,
+      `${APP_HOST}`,
   });
 }
 

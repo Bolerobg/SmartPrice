@@ -4,7 +4,7 @@
 **собствен Node/TypeScript API**. Дизайнът и структурата на приложението са
 запазени — сменен е само източникът на данни: вече няма симулации.
 
-**Публикувано на: https://smart.lookthis.online**
+**Публикувано на: https://smartprice.bg**
 
 > ⚠️ **Валута:** България е в еврозоната и Stripe вече отказва BGN
 > („The currency bgn is no longer supported. Use eur instead.“).
@@ -19,7 +19,7 @@
 ## Публикуване (как е устроено)
 
 ```
-Интернет → Cloudflare (smart.lookthis.online)
+Интернет → Cloudflare (smartprice.bg)
          → Cloudflare Tunnel "smartprice"  → localhost:3030
          → контейнер "smart" (nginx)
               ├── /            → статично Expo web приложение
@@ -176,7 +176,7 @@ stripe listen --forward-to http://127.0.0.1:4000/api/donations/webhook
 
 ```bash
 # 89 проверки: auth, права, постове, реакции, коментари, цени, аларми, класация
-python server/smoke_test.py https://smart.lookthis.online
+python server/smoke_test.py https://smartprice.bg
 
 # реален OCR: генерира бележка, качва я, разчита я
 python server/ocr_e2e_test.py
@@ -185,7 +185,7 @@ python server/ocr_e2e_test.py
 python server/payment_e2e_test.py
 
 # webhook: подписва синтетично събитие и проверява целия път до значката
-python server/webhook_e2e_test.py https://smart.lookthis.online whsec_XXXX
+python server/webhook_e2e_test.py https://smartprice.bg whsec_XXXX
 ```
 
 Всичките работят и срещу `http://127.0.0.1:4000` (локално, без Cloudflare).

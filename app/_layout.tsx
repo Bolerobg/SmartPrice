@@ -20,6 +20,12 @@ import { ONBOARDING_SEEN_KEY } from './(auth)/onboarding';
 import { COLORS } from '@/constants/theme';
 
 /** Колко минимум да се вижда splash екранът (за да не премигва) */
+
+/** Домейнът, който се показва на splash екрана. Идва от билда
+ *  (EXPO_PUBLIC_API_URL), затова смяната на домейна не иска промяна в кода. */
+const APP_DISPLAY_HOST = (process.env.EXPO_PUBLIC_API_URL || 'https://smartprice.bg')
+  .replace(/^https?:\/\//, '')
+  .replace(/\/+$/, '');
 const MIN_SPLASH_MS = 1400;
 
 const SPLASH_HINTS = [
@@ -129,7 +135,7 @@ const Splash: React.FC = () => {
         />
       </View>
 
-      <Text style={styles.splashFoot}>smart.lookthis.online</Text>
+      <Text style={styles.splashFoot}>{APP_DISPLAY_HOST}</Text>
     </LinearGradient>
   );
 };

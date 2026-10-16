@@ -80,14 +80,17 @@ services:
       context: .
       dockerfile: web/Dockerfile
       args:
-        EXPO_PUBLIC_API_URL: ${PUBLIC_BASE_URL:-https://smart.lookthis.online}
+        EXPO_PUBLIC_API_URL: ${PUBLIC_BASE_URL:-https://smartprice.bg}
+        EXPO_PUBLIC_APP_URL: ${PUBLIC_BASE_URL:-https://smartprice.bg}
         EXPO_PUBLIC_DEEP_LINK_SCHEME: ${EXPO_PUBLIC_DEEP_LINK_SCHEME:-smartprice}
     container_name: smart
     restart: unless-stopped
     depends_on:
       - api
     ports:
-      - "127.0.0.1:${WEB_HOST_PORT:-3030}:80"
+      # WEB_HOST_BIND=0.0.0.0, когато reverse proxy (NPM/nginx) е в друг
+      # Docker контейнер и трябва да стигне до този порт по IP.
+      - "${WEB_HOST_BIND:-127.0.0.1}:${WEB_HOST_PORT:-3030}:80"
 
 volumes:
   smartprice_pgdata:

@@ -24,7 +24,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sp_test_helpers import register_and_login  # noqa: E402
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "https://smart.lookthis.online"
+BASE = sys.argv[1] if len(sys.argv) > 1 else "https://smartprice.bg"
 SECRET = sys.argv[2] if len(sys.argv) > 2 else ""
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

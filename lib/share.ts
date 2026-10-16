@@ -17,12 +17,12 @@ import type { PostItem } from '@/types';
 
 /** Публичният адрес на приложението (за линкове, които се пращат навън). */
 export function publicBaseUrl(): string {
-  const fromEnv = process.env.EXPO_PUBLIC_API_URL;
+  const fromEnv = process.env.EXPO_PUBLIC_APP_URL || process.env.EXPO_PUBLIC_API_URL;
   if (fromEnv && /^https?:\/\//.test(fromEnv)) return fromEnv.replace(/\/+$/, '');
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }
-  return 'https://smart.lookthis.online';
+  return 'https://smartprice.bg';
 }
 
 /** Линк към конкретна оферта. */

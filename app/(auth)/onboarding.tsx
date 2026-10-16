@@ -371,7 +371,7 @@ const ShareDemo: React.FC = () => {
           <Ionicons name="logo-whatsapp" size={15} color={COLORS.greenBright} />
           <View style={{ flex: 1 }}>
             <Text style={demo.sharePreviewTitle}>🟢 ТОП НАХОДКА · Овче сирене 1 кг</Text>
-            <Text style={demo.sharePreviewUrl}>smart.lookthis.online/post/…</Text>
+            <Text style={demo.sharePreviewUrl}>smartprice.bg/post/…</Text>
           </View>
         </View>
       ) : (

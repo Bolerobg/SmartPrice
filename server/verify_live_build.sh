@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Проверка на ЖИВИЯ билд: сервира ли еврото и останало ли е „лв.“
 set -u
-BUNDLE_URL=$(curl -s --max-time 25 https://smart.lookthis.online/ | grep -oE '/_expo/static/js/web/[a-zA-Z0-9._-]+\.js' | head -1)
+BUNDLE_URL=$(curl -s --max-time 25 https://smartprice.bg/ | grep -oE '/_expo/static/js/web/[a-zA-Z0-9._-]+\.js' | head -1)
 echo "bundle: $BUNDLE_URL"
 TMP="$LOCALAPPDATA/Temp/smartprice_bundle.js"
-curl -s --max-time 60 "https://smart.lookthis.online${BUNDLE_URL}" -o "$TMP"
+curl -s --max-time 60 "https://smartprice.bg${BUNDLE_URL}" -o "$TMP"
 echo "размер: $(wc -c < "$TMP" | tr -d ' ') байта"
 echo
 echo "=== Трябва да ПРИСЪСТВУВА ==="
