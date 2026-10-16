@@ -223,6 +223,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   const [minTimePassed, setMinTimePassed] = useState(false);
   const [onboardingSeen, setOnboardingSeen] = useState<boolean | null>(null);
+  // Показали ли сме обяснението „Как работи“ в тази сесия. Пази се в ref, за да
+  // не върне човека обратно в обяснението, след като го е пропуснал (иначе
+  // цикъл: поток → обяснение → поток).
+  const introShownRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setMinTimePassed(true), MIN_SPLASH_MS);
@@ -260,6 +264,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // бутона му (или директен адрес /assistant) хвърляше госта обратно в
       // потока и чатът изглеждаше „счупен“ — нищо не се отваряше.
       const isPublicAssistant = segments[0] === 'assistant';
+      // ПЪРВО ПУСКАНЕ: обяснението „Как работи“ излиза веднага след сплаша.
+      // Потокът се чете и без профил, затова човек се озоваваше направо в него
+      // и обяснението никога не се показваше. Споделен линк (post/<id>) и
+      // прегледът (/tour) остават непокътнати.
+      if (!onboardingSeen && !introShownRef.current && !inAuthGroup && !isPublicTour) {
+        introShownRef.current = true;
+        router.replace('/(auth)/onboarding');
+        return;
+      }
+
       if (
         !inAuthGroup &&
         !isPublicPost &&
