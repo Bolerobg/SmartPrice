@@ -772,39 +772,48 @@ export function looksLikeProductPage(p: { title?: string; price?: number }): boo
  * `<p class="price">4.50 €</p>`, `<img>`.
  */
 export function extractOpencartCards(html: string, pageUrl: string): RawProduct[] {
-  const thumbParts = html.split(/<div[^>]+class="[^"]*\bproduct-thumb\b[^"]*"/i).slice(1);
-  const parts = thumbParts.length ? thumbParts : html.split(/<div[^>]+class="[^"]*\bcaption\b[^"]*"/i).slice(1);
   const out: RawProduct[] = [];
-
-  for (const part of parts.slice(0, 80)) {
-    const seg = part.slice(0, 4000);
-    const aTag = /<h4[^>]*>\s*<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,200}?)<\/a>/i.exec(seg);
-    if (!aTag) continue;
-    const sourceUrl = resolveUrl(decodeHref(aTag[1]!), pageUrl);
-    const title = htmlToText(aTag[2]!).slice(0, 200);
+  // Търсим самите заглавия на картите. НЕ режем по контейнера: в този шаблон
+  // картата съдържа големи вградени SVG икони и цената остава извън прозореца.
+  const re = /<h4[^>]*>\s*<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,200}?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const sourceUrl = resolveUrl(decodeHref(m[1]!), pageUrl);
+    const title = htmlToText(m[2]!).slice(0, 200);
     if (!sourceUrl || !title || title.length < 3) continue;
+    if (out.some((x) => x.sourceUrl === sourceUrl)) continue;
 
-    const priceHtml = /<p[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([\s\S]{0,140}?)<\/p>/i.exec(seg)?.[1];
-    const { price, currency } = extractGenericPrice(priceHtml ?? seg.slice(0, 1800));
-    const image = extractGenericImage(seg, pageUrl) ?? undefined;
+    // Прозорецът е около картата: снимката е ПРЕДИ заглавието, цената — след него.
+    const from = Math.max(0, m.index - 2600);
+    const to = Math.min(html.length, m.index + 1800);
+    const window = html.slice(from, to);
+
+    // Цената: първо „новата“, после първото число с валута.
+    const priceBlock =
+      /<[^>]*class="[^"]*\bprice-new\b[^"]*"[^>]*>([\s\S]{0,80}?)<\//i.exec(window)?.[1] ??
+      /<p[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([\s\S]{0,200}?)<\/p>/i.exec(window)?.[1];
+    const { price, currency } = extractGenericPrice(priceBlock ?? window);
+
+    // Снимката: последната `<img>` преди заглавието (картата), не икона.
+    // ВНИМАНИЕ: в този шаблон картата има големи вградени SVG икони и снимката
+    // може да е 8–9 хил. знака преди заглавието — тясно окно я пропуска.
+    const before = html.slice(Math.max(0, m.index - 12_000), m.index);
+    const imgs = [...before.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)]
+      .map((x) => x[1]!)
+      .filter((src) => src && !/\.(svg|gif)$/i.test(src) && !/icon|logo|placeholder|loader/i.test(src));
+    const image = resolveUrl(imgs.length ? imgs[imgs.length - 1]! : undefined, pageUrl);
 
     out.push({
       sourceUrl,
       title,
       price,
       currency,
-      imageUrl: image,
+      imageUrl: image && /^https?:/i.test(image) ? image : undefined,
       via: 'opencart',
     });
+    if (out.length >= 200) break;
   }
-
-  const seen = new Set<string>();
-  return out.filter((p) => {
-    const key = `${p.sourceUrl}|${(p.title ?? '').toLowerCase()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return out;
 }
 
 export async function collectFromOpencart(
