@@ -232,13 +232,17 @@ export default function AssistantScreen() {
       }
     ).visualViewport;
     if (!vv) return;
-    const apply = () => setViewHeight(Math.round(vv.height));
+    // Сменяме височината САМО при истинска промяна и само при resize.
+    // (Ако слушаме и 'scroll', на iPhone се пре-рисува при всяко докосване и
+    // фокусът върху полето се отменя — клавиатурата не излиза.)
+    const apply = () => {
+      const next = Math.round(vv.height);
+      setViewHeight((prev) => (prev === next ? prev : next));
+    };
     apply();
     vv.addEventListener('resize', apply);
-    vv.addEventListener('scroll', apply);
     return () => {
       vv.removeEventListener('resize', apply);
-      vv.removeEventListener('scroll', apply);
     };
   }, []);
   const [topics, setTopics] = useState<AssistantTopic[]>([]);

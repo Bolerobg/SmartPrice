@@ -23,7 +23,7 @@ if (!path) {
 let html = readFileSync(path, 'utf8');
 
 const VIEWPORT =
-  '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no, viewport-fit=cover" />';
+  '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />';
 
 const CSS = `<style id="smartprice-mobile-fit">
       /* Ширината на документа никога не надхвърля екрана */
@@ -68,6 +68,16 @@ const CSS = `<style id="smartprice-mobile-fit">
           font-size: 16px !important;
           line-height: 22px !important;
         }
+      }
+      /* Полетата за писане остават нормално докосваеми и селектируеми —
+         iPhone отваря клавиатурата само когато полето е истински „живо“. */
+      #root input,
+      #root textarea {
+        touch-action: manipulation;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-user-modify: read-write;
+        pointer-events: auto;
       }
     </style>`;
 

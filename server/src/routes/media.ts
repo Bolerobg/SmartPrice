@@ -63,6 +63,9 @@ const str = (value: unknown, max = 200): string | undefined => {
  * Извиква реален vision модел през OpenRouter и връща структурирани данни.
  * Няма „демо“ fallback — ако няма ключ, endpoint-ът казва честно, че OCR не е наличен.
  */
+/** Официалният фиксиран курс: 1 € = 1.95583 лв. България е в еврозоната. */
+const BGN_PER_EUR = 1.95583;
+
 async function callOpenRouter(imageDataUrl: string, categoryHint?: string, polarityHint?: string) {
   const response = await fetch(`${env.OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',
@@ -147,18 +150,36 @@ async function callOpenRouter(imageDataUrl: string, categoryHint?: string, polar
   const itemsTotal = Number(items.reduce((acc, i) => acc + i.totalPrice, 0).toFixed(2));
   const totalAmount = num(parsed.totalAmount, itemsTotal);
 
+  // На касовите бележки още пише „лв.“, но приложението работи в евро
+  // (България е в еврозоната). Затова превалутираме ТУК и то детерминистично —
+  // не оставяме сметката на AI-я. Курсът е фиксиран: 1 € = 1.95583 лв.
+  const isBgn = parsed.currency === 'BGN';
+  const toEur = (value: number) => Number((value / BGN_PER_EUR).toFixed(2));
+  const eurItems = isBgn
+    ? items.map((item) => ({
+        ...item,
+        unitPrice: toEur(item.unitPrice),
+        totalPrice: toEur(item.totalPrice),
+      }))
+    : items;
+  const eurTotal = isBgn ? toEur(totalAmount) : Number(totalAmount.toFixed(2));
+
   return {
     merchantName: str(parsed.merchantName, 200) ?? 'Неразчетен търговец',
     merchantTaxId: str(parsed.merchantTaxId, 40),
     date: str(parsed.date, 40),
     time: str(parsed.time, 20),
-    totalAmount: Number(totalAmount.toFixed(2)),
-    // Валутата по подразбиране е EUR — България е в еврозоната.
-    currency: currencyLabel(parsed.currency === 'BGN' ? 'BGN' : 'EUR'),
-    currencyCode: parsed.currency === 'BGN' ? 'BGN' : 'EUR',
+    totalAmount: eurTotal,
+    // Приложението работи в евро — винаги връщаме евро.
+    currency: currencyLabel('EUR'),
+    currencyCode: 'EUR',
+    // Колко е било на бележката (за прозрачност: човекът вижда и двете).
+    originalTotalAmount: isBgn ? Number(totalAmount.toFixed(2)) : null,
+    originalCurrency: isBgn ? 'BGN' : null,
+    exchangeRate: isBgn ? BGN_PER_EUR : null,
     confidenceScore: Math.min(1, Math.max(0, num(parsed.confidenceScore, 0))),
     verifiedByAi: true,
-    items,
+    items: eurItems,
     model: env.OCR_MODEL,
   };
 }
