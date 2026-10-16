@@ -255,6 +255,45 @@ export interface FetchResult {
 }
 
 /** Учтива заявка: идентифицираме се, чакаме, не преследваме вътрешни адреси. */
+/**
+ * Декодира тялото с ПРАВИЛНИЯ encoding.
+ *
+ * Защо: старите български магазини (напр. mobilen.bg) са на windows-1251. Ако ги
+ * декодираме като UTF-8, кирилицата излиза „??????“ и заглавията са боклук.
+ * Ред: charset от заглавието → от <meta>/<?xml…encoding> → ако няма обявен,
+ * пробваме utf-8 и windows-1251 и взимаме този с по-малко счупени знаци.
+ */
+export function decodeBody(buf: ArrayBuffer, contentType = ''): string {
+  const bytes = new Uint8Array(buf);
+  const head = new TextDecoder('latin1').decode(bytes.slice(0, 4096));
+  const declared =
+    /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ??
+    /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1] ??
+    /encoding=["']([\w-]+)["']/i.exec(head)?.[1];
+
+  const tryDecode = (label: string): string | null => {
+    try {
+      return new TextDecoder(label, { fatal: false }).decode(bytes);
+    } catch {
+      return null;
+    }
+  };
+  const brokenCount = (s: string | null) => (s ? (s.match(/\ufffd/g) ?? []).length : Number.POSITIVE_INFINITY);
+
+  if (declared) {
+    const d = tryDecode(declared);
+    if (d && brokenCount(d) === 0) return d;
+    const win = tryDecode('windows-1251');
+    if (win && brokenCount(win) < brokenCount(d)) return win;
+    if (d) return d;
+  }
+  const utf8 = tryDecode('utf-8');
+  if (utf8 && brokenCount(utf8) === 0) return utf8;
+  const win = tryDecode('windows-1251');
+  if (win && brokenCount(win) < brokenCount(utf8)) return win;
+  return utf8 ?? '';
+}
+
 export async function politeFetch(url: string, opts: FetchOpts = {}): Promise<FetchResult> {
   const url0 = normalizeStartUrl(url);
   if (!opts.allowPrivate && isPrivateHost(url0.hostname)) {
@@ -286,7 +325,9 @@ export async function politeFetch(url: string, opts: FetchOpts = {}): Promise<Fe
       });
       const contentType = res.headers.get('content-type') ?? '';
       const isText = /json|html|xml|text/i.test(contentType);
-      const text = isText ? (await res.text()).slice(0, 1_500_000) : '';
+      // ВАЖНО: четем байтовете и ги декодираме сами — res.text() винаги приема UTF-8
+      // и разваля кирилицата на сайтовете на windows-1251.
+      const text = isText ? decodeBody(await res.arrayBuffer(), contentType).slice(0, 1_500_000) : '';
 
       if (!opts.accept && /json/i.test(contentType) && !htmlOnly) {
         htmlOnly = true;
@@ -615,6 +656,8 @@ function hrefLooksLikeProduct(href: string, inner: string): boolean {
  */
 export function decodeHref(href: string): string {
   return href
+    .replace(/&#x([0-9a-f]{2,4});/gi, (_m, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d{2,5});/g, (_m, d) => String.fromCharCode(Number(d)))
     .replace(/&amp;/gi, '&')
     .replace(/&#0?38;/g, '&')
     .replace(/&quot;/gi, '"')
@@ -797,6 +840,8 @@ export function extractOpencartCards(html: string, pageUrl: string): RawProduct[
     const { price, currency } = extractGenericPrice(
       priceBlock ? `<div class="price">${priceBlock}</div>` : window
     );
+    // Карта без цена не е продукт („ХоумМакс Помощник“, блог заглавия и т.н.).
+    if (!price || price <= 0) continue;
 
     // Снимката: последната `<img>` преди заглавието (картата), не икона.
     // ВНИМАНИЕ: в този шаблон картата има големи вградени SVG икони и снимката
@@ -836,7 +881,7 @@ export async function collectFromOpencart(
 
   // Служебните страници не ни трябват — от картата на сайта взимаме само категориите.
   const service =
-    /(account|information|contact|cart|checkout|wishlist|compare|manufacturer|login|register|special|search|sitemap|quick_view|route=common|route=product\/product|route=product\/quick_view|\.(jpg|jpeg|png|webp|gif|css|js|svg|xml)$|^\/cdn-cgi)/i;
+    /(account|information|contact|cart|checkout|wishlist|compare|manufacturer|login|register|special|search|sitemap|quick_view|route=common|route=product\/product|route=product\/quick_view|\.(jpg|jpeg|png|webp|gif|css|js|svg|xml)$|^\/cdn-cgi|\/(blog|news|ideas|uslugi|pages?|brochures?|shops?|pomosht|dostavka|usloviya|terms|privacy|about|za-nas)|\.html$|tel:|mailto:|fonts\.googleapis|static\/)/i;
   const candidates = [
     ...new Set(
       [...res.text.matchAll(/href=["']([^"']+)["']/gi)]
@@ -1095,7 +1140,13 @@ export async function tryProductFeed(
     try {
       const res = await politeFetch(`${origin}${path}`, opts);
       if (!res.ok || !res.text) continue;
-      if (!/<(item|entry)[\s>]/i.test(res.text)) continue;
+      // Трябва да е НАИСТИНА фийд. Магазини без фийд връщат началната си страница
+      // на всеки непознат адрес (видяно на mobilen.bg) — HTML минаваше за фийд и
+      // „продуктите“ бяха просто менюто на сайта.
+      const isXml =
+        /xml|rss|atom/i.test(res.contentType ?? '') ||
+        /^\s*(<\?xml|<rss|<feed|<urlset|<sitemapindex)/i.test(res.text);
+      if (!isXml || !/<(item|entry)[\s>]/i.test(res.text)) continue;
       const items = parseFeedItems(res.text, res.url || origin);
       if (items.length >= 3) return items.slice(0, limit);
     } catch {
@@ -2224,6 +2275,9 @@ export async function runJob(jobId: string): Promise<void> {
     let products: RawProduct[] = [];
     let strategy = '';
 
+    // Адреси, дошли от фийд без цени — по-долу се четат като страници.
+    let urlsFromFeed: string[] = [];
+
     const shopify = await tryShopify(origin, limit, fo);
     if (shopify) {
       products = shopify;
@@ -2243,8 +2297,16 @@ export async function runJob(jobId: string): Promise<void> {
     if (!products.length) {
       const feed = await tryProductFeed(origin, limit, fo);
       if (feed) {
-        products = feed;
-        strategy = 'feed';
+        const withPrice = feed.filter((x) => (x.price ?? 0) > 0).length;
+        if (withPrice >= Math.ceil(feed.length / 2)) {
+          products = feed;
+          strategy = 'feed';
+        } else {
+          // Някои фийдове (напр. WooCommerce RSS на zora.bg) нямат цени в себе си.
+          // Тогава фийдът е само списък с адреси — цените се четат от страниците.
+          urlsFromFeed = feed.map((x) => x.sourceUrl).filter((u): u is string => !!u);
+          strategy = 'feed-pages';
+        }
         await logLine(jobId, `Магазинният фийд (Google/RSS) даде ${products.length} продукта.`);
       }
     }
@@ -2261,11 +2323,11 @@ export async function runJob(jobId: string): Promise<void> {
 
     if (!products.length) {
       await setStatus(jobId, 'parsing');
-      let urls: string[] = [];
+      let urls: string[] = [...urlsFromFeed];
       let sitemapFromProducts = false;
       const isProductish = /\/(product|produkt|p|item|tovar|art)\//i.test(new URL(job.url).pathname);
 
-      if (!isProductish) {
+      if (!isProductish && !urls.length) {
         // Първо OpenCart-картата (ако е такъв магазин) — после sitemap.xml.
         const oc = await collectFromOpencart(origin, limit, fo);
         if (oc.length >= 2) {
@@ -2316,10 +2378,13 @@ export async function runJob(jobId: string): Promise<void> {
             }
           }
         }
-      } else {
+      } else if (!products.length && !urls.length) {
+        // Само ако НЕ сме дошли с готови адреси (напр. от фийд) — иначе ще ги затрием.
         urls = [job.url];
         strategy = 'single';
         await logLine(jobId, 'Това е страница на конкретен продукт.');
+      } else if (!products.length && urls.length && !strategy) {
+        strategy = 'listing';
       }
 
       if (!products.length && !urls.length) {
