@@ -799,8 +799,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
             }}
           >
             {post.userConfirmedValidToday
-              ? `Потвърдена днес (${post.verifiedValidTodayCount || 1})`
-              : `Валидна днес? (${post.verifiedValidTodayCount || 1})`}
+              ? post.sourceUrl
+                ? `Проверена в сайта днес (${post.verifiedValidTodayCount || 1})`
+                : `Потвърдена днес (${post.verifiedValidTodayCount || 1})`
+              : post.sourceUrl
+                ? `Вярна ли е цената в сайта? (${post.verifiedValidTodayCount || 1})`
+                : `Валидна днес? (${post.verifiedValidTodayCount || 1})`}
           </Text>
         </TouchableOpacity>
       </View>

@@ -32,6 +32,12 @@ interface Props {
  * сто оферти без нито една проверка.
  */
 export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
+  /**
+   * Онлайн магазин ли е офертата. Тогава думите са други: човек не „отива на
+   * място“, а отваря сайта — затова питаме „вярна ли е цената в сайта“ и
+   * пишем „потвърдена в сайта“, не „на място“.
+   */
+  const online = Boolean(post.sourceUrl);
   const { confirmPriceValidToday, reportUpdatedPrice, userProfile } = useApp();
 
   const stats = useMemo(() => computePriceStats(post), [post]);
@@ -206,7 +212,7 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
       {/* ------------------------------------------------ Хронология */}
       <View style={styles.timeline}>
         {visibleEntries.map((entry, index) => {
-          const meta = entryLabel(entry);
+          const meta = entryLabel(entry, online);
           const dotColor =
             meta.color === 'green'
               ? COLORS.greenBright
@@ -252,15 +258,21 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
         <View style={styles.contributeHead}>
           <Text style={styles.contributeTitle}>
             {neverChecked
-              ? 'Никой още не е проверил тази цена'
+              ? online
+                ? 'Никой още не е проверил цената в сайта'
+                : 'Никой още не е проверил тази цена'
               : isStale
                 ? `Никой не е проверявал от ${staleDays} дни`
-                : 'Беше ли на място?'}
+                : online
+                  ? 'Вярна ли е цената в сайта?'
+                  : 'Беше ли на място?'}
           </Text>
           <Text style={styles.contributeSub}>
-            {isStale || neverChecked
-              ? 'Ако минеш оттам — кажи ни дали още е вярна. Помагаш на всички след теб.'
-              : '10 секунди. Следващият, който отиде, ще знае вярната цена.'}
+            {online
+              ? 'Отвори продукта в сайта и кажи дали цената е същата. Помагаш на всички след теб.'
+              : isStale || neverChecked
+                ? 'Ако минеш оттам — кажи ни дали още е вярна. Помагаш на всички след теб.'
+                : '10 секунди. Следващият, който отиде, ще знае вярната цена.'}
           </Text>
         </View>
 
@@ -272,7 +284,9 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
           <View style={styles.doneBox}>
             <Ionicons name="checkmark-circle" size={16} color={COLORS.greenBright} />
             <Text style={styles.doneText}>
-              Ти провери тази цена днес. Благодарим!
+              {online
+                ? 'Ти потвърди цената в сайта днес. Благодарим!'
+                : 'Ти провери тази цена днес. Благодарим!'}
             </Text>
           </View>
         ) : isEditing ? (
@@ -282,7 +296,7 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
                 style={styles.input}
                 value={newPrice}
                 onChangeText={setNewPrice}
-                placeholder="Новата цена, напр. 6.50"
+                placeholder={online ? 'Цената в сайта сега, напр. 6.50' : 'Новата цена, напр. 6.50'}
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="decimal-pad"
                 autoFocus
@@ -301,7 +315,9 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
                 ) : (
                   <>
                     <Ionicons name="save-outline" size={15} color={COLORS.black} />
-                    <Text style={styles.primaryBtnText}>Запази новата цена</Text>
+                    <Text style={styles.primaryBtnText}>
+                      {online ? 'Запази цената от сайта' : 'Запази новата цена'}
+                    </Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -332,7 +348,9 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
                 ) : (
                   <>
                     <Ionicons name="checkmark-circle" size={17} color={COLORS.greenBright} />
-                    <Text style={styles.confirmBtnText}>Цената е същата</Text>
+                    <Text style={styles.confirmBtnText}>
+                      {online ? 'Цената в сайта е същата' : 'Цената е същата'}
+                    </Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -347,7 +365,9 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
                 activeOpacity={0.88}
               >
                 <Ionicons name="create-outline" size={17} color={COLORS.goldBright} />
-                <Text style={styles.changeBtnText}>Промени се</Text>
+                <Text style={styles.changeBtnText}>
+                  {online ? 'Друга е в сайта' : 'Промени се'}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -366,7 +386,7 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
       </View>
 
       <Text style={styles.footNote}>
-        {freshnessLabel(stats)} ·{' '}
+        {freshnessLabel(stats, online)} ·{' '}
         {stats.entries.length > 0
           ? `последно: ${formatRelativeTime(stats.entries[stats.entries.length - 1]!.recordedAt)}`
           : 'няма записи'}

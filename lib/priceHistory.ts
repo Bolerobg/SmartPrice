@@ -130,16 +130,22 @@ export function priceTrendLabel(stats: PriceStats): string | null {
   return stats.direction === 'down' ? `↓ ${abs} € по-евтино` : `↑ ${abs} € по-скъпо`;
 }
 
-/** „преди 3 дни“ / „днес“ / „никога“. */
-export function freshnessLabel(stats: PriceStats): string {
+/**
+ * „преди 3 дни“ / „днес“ / „никога“.
+ *
+ * `online` = офертата е от онлайн магазин: тогава не „проверена на място“, а
+ * „проверена в сайта“ — човек не ходи никъде, отваря продукта.
+ */
+export function freshnessLabel(stats: PriceStats, online = false): string {
   if (stats.daysSinceCheck === null) return 'още не е проверявана';
-  if (stats.daysSinceCheck === 0) return 'проверена днес';
-  if (stats.daysSinceCheck === 1) return 'проверена вчера';
-  return `проверена преди ${stats.daysSinceCheck} дни`;
+  const where = online ? ' в сайта' : ' на място';
+  if (stats.daysSinceCheck === 0) return online ? 'проверена днес в сайта' : 'проверена днес';
+  if (stats.daysSinceCheck === 1) return `проверена вчера${where}`;
+  return `проверена преди ${stats.daysSinceCheck} дни${where}`;
 }
 
 /** Описание на едно събитие в историята — човешки, с посока. */
-export function entryLabel(entry: PriceHistoryEntry): {
+export function entryLabel(entry: PriceHistoryEntry, online = false): {
   title: string;
   icon: string;
   color: 'blue' | 'green' | 'amber';
@@ -148,7 +154,11 @@ export function entryLabel(entry: PriceHistoryEntry): {
     return { title: 'Първоначална цена', icon: 'pricetag-outline', color: 'blue' };
   }
   if (entry.status === 'confirmed') {
-    return { title: 'Потвърдена на място', icon: 'checkmark-circle', color: 'green' };
+    return {
+      title: online ? 'Потвърдена в сайта' : 'Потвърдена на място',
+      icon: 'checkmark-circle',
+      color: 'green',
+    };
   }
   if (entry.delta > 0) {
     return {
