@@ -164,8 +164,41 @@ interface KnowledgeRow {
   priority: number;
 }
 
+/** Същата тема + готов индекс от думи (за търсене без да трошим процесор). */
+interface IndexedKnowledge extends KnowledgeRow {
+  /** Всички думи от заглавието+ключовите думи+тялото, сведени до „корен“. */
+  roots: Set<string>;
+}
+
+/** Думи, които не носят смисъл за търсене (иначе всяка тема съвпада с всичко). */
+const STOP_WORDS = new Set([
+  'какво', 'каква', 'какви', 'какъв', 'защо', 'кога', 'къде', 'кой', 'коя', 'кое', 'кои',
+  'искам', 'мога', 'може', 'трябва', 'има', 'няма', 'това', 'онова', 'нещо', 'всичко',
+  'как', 'дали', 'само', 'още', 'много', 'малко', 'също', 'при', 'през', 'под', 'над',
+  'или', 'ама', 'ако', 'то', 'ти', 'ми', 'си', 'мисля', 'знам', 'кажи', 'кажете',
+]);
+
+/**
+ * „Корен“ на дума: първите 5 букви за дълги думи. Така „томбола“, „томболите“ и
+ * „томболата“ се разпознават като една дума — важно за българските окончания.
+ */
+function rootOf(word: string): string {
+  const w = word.toLowerCase();
+  return w.length >= 6 ? w.slice(0, 5) : w;
+}
+
+function indexRow(row: KnowledgeRow): IndexedKnowledge {
+  const roots = new Set<string>();
+  for (const chunk of [row.title, row.keywords.join(' '), row.body]) {
+    for (const w of chunk.toLowerCase().split(/[^a-zа-я0-9]+/i)) {
+      if (w.length >= 4 && !STOP_WORDS.has(w)) roots.add(rootOf(w));
+    }
+  }
+  return { ...row, roots };
+}
+
 /** Пълним кеша за 2 минути, за да не удряме базата при всяко съобщение. */
-let knowledgeCache: { at: number; rows: KnowledgeRow[] } | null = null;
+let knowledgeCache: { at: number; rows: IndexedKnowledge[] } | null = null;
 const KNOWLEDGE_TTL_MS = 2 * 60 * 1000;
 
 /**
@@ -176,7 +209,7 @@ export function invalidateKnowledgeCache(): void {
   knowledgeCache = null;
 }
 
-async function loadAllKnowledge(): Promise<KnowledgeRow[]> {
+async function loadAllKnowledge(): Promise<IndexedKnowledge[]> {
   if (knowledgeCache && Date.now() - knowledgeCache.at < KNOWLEDGE_TTL_MS) {
     return knowledgeCache.rows;
   }
@@ -195,14 +228,16 @@ async function loadAllKnowledge(): Promise<KnowledgeRow[]> {
         order by priority asc, updated_at desc
         limit 200`
     );
-    const mapped = rows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      body: r.body,
-      keywords: r.keywords ?? [],
-      category: r.category,
-      priority: r.priority,
-    }));
+    const mapped = rows.map((r) =>
+      indexRow({
+        id: r.id,
+        title: r.title,
+        body: r.body,
+        keywords: r.keywords ?? [],
+        category: r.category,
+        priority: r.priority,
+      })
+    );
     knowledgeCache = { at: Date.now(), rows: mapped };
     return mapped;
   } catch {
@@ -214,40 +249,77 @@ async function loadAllKnowledge(): Promise<KnowledgeRow[]> {
 /**
  * Избира кои теми от наръчника да даде на модела.
  *
- * Логика:
- *   • priority 1–2 → винаги влизат (основните неща за приложението);
- *   • останалите — само ако някоя ключова дума от въпроса съвпада;
- *   • таван на дължината, за да не изяде контекста.
+ * Логика (търсене в наръчника):
+ *   • priority 1 → винаги влизат (какво е приложението, картата на екраните);
+ *   • темата се „вдига“ според думите на въпроса — сравняваме КОРЕНИТЕ на думите,
+ *     така „томбола“ намира темата „Томболи — как се участва“ и при перифраза
+ *     („как да спечеля от играта“, „как става жребият“);
+ *   • думите се търсят в заглавието, ключовите думи и ТЯЛОТО на всяка тема;
+ *   • ако нищо не съвпадне — даваме най-важните теми, за да не остане Ценко без
+ *     контекст (по-добре общ отговор, отколкото празен);
+ *   • таван на дължината, за да не изяде контекста на модела.
  */
-function pickKnowledge(rows: KnowledgeRow[], question: string | null): KnowledgeRow[] {
+function pickKnowledge(rows: IndexedKnowledge[], question: string | null): IndexedKnowledge[] {
   if (!rows.length) return [];
   const q = (question ?? '').toLowerCase();
+  const words = q
+    .split(/[^a-zа-я0-9]+/i)
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w))
+    .map(rootOf);
 
   const scored = rows.map((r) => {
     let score = 0;
-    if (r.priority <= 2) score += 100;
+    if (r.priority === 1) score += 100;
+    else if (r.priority === 2) score += 20;
 
     if (q) {
+      // 1. Ключова дума, изписана в темата, се среща буквално във въпроса.
       for (const kw of r.keywords) {
         const k = kw.toLowerCase().trim();
         if (k.length >= 3 && q.includes(k)) score += 30;
       }
-      // Заглавието също е сигнал („как се качва находка“ → „качване“).
-      const titleWords = r.title.toLowerCase().split(/[^a-zа-я0-9]+/i).filter((w) => w.length >= 4);
-      for (const w of titleWords) if (q.includes(w)) score += 12;
+      // 2. Корените на думите от въпроса — в заглавието, ключовите думи и тялото.
+      const titleRoots = new Set(
+        r.title.toLowerCase().split(/[^a-zа-я0-9]+/i).filter((w) => w.length >= 4).map(rootOf)
+      );
+      const kwRoots = new Set(
+        r.keywords.join(' ').toLowerCase().split(/[^a-zа-я0-9]+/i).filter((w) => w.length >= 4).map(rootOf)
+      );
+      let bodyHits = 0;
+      for (const w of words) {
+        if (titleRoots.has(w)) score += 26;
+        else if (kwRoots.has(w)) score += 22;
+        else if (r.roots.has(w)) score += 7;
+        if (r.roots.has(w)) bodyHits += 1;
+      }
+      // Тема, в която съвпадат няколко думи от въпроса, е почти сигурно търсената.
+      if (bodyHits >= 3) score += 15;
     }
 
     return { row: r, score };
   });
 
-  const chosen: KnowledgeRow[] = [];
+  const chosen: IndexedKnowledge[] = [];
   let chars = 0;
   for (const s of scored.sort((a, b) => b.score - a.score || a.row.priority - b.row.priority)) {
-    if (s.score <= 0) continue;
+    if (s.score < 20) continue;
     if (chars + s.row.body.length > 5000) continue;
     chosen.push(s.row);
     chars += s.row.body.length;
     if (chosen.length >= 8) break;
+  }
+
+  // Нищо не съвпадна (или съвпадна твърде малко)? Даваме най-важните теми, за да
+  // има Ценко с какво да работи, вместо да отговаря „не знам“.
+  if (chosen.length < 3) {
+    for (const r of rows) {
+      if (chosen.length >= 3) break;
+      if (chosen.some((c) => c.id === r.id)) continue;
+      if (r.priority > 4) continue;
+      if (chars + r.body.length > 5000) continue;
+      chosen.push(r);
+      chars += r.body.length;
+    }
   }
   return chosen;
 }
