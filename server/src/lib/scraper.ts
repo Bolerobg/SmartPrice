@@ -706,7 +706,7 @@ export async function collectFromSitemap(
   startUrl: string,
   limit: number,
   opts: FetchOpts
-): Promise<{ urls: string[]; usedSitemap?: string }> {
+): Promise<{ urls: string[]; usedSitemap?: string; fromProductSitemap?: boolean }> {
   const u = new URL(startUrl);
   // Първо питаме robots.txt — там доста сайтове обявяват нестандартен sitemap.
   const fromRobots: string[] = [];
@@ -738,6 +738,7 @@ export async function collectFromSitemap(
       ];
 
   const seenSitemaps = new Set<string>();
+  let fromProductSitemap = false;
   const productUrls = new Set<string>();
   const visited: string[] = [];
   const maxSitemaps = opts.maxSitemaps ?? 8;
@@ -761,13 +762,17 @@ export async function collectFromSitemap(
     }
     if (!res.ok || !res.text) return;
     visited.push(sitemapUrl);
+    if (/product|produkt|tovar|goods/i.test(sitemapUrl)) fromProductSitemap = true;
 
     const locs = [...res.text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((mm) => mm[1]!);
     const isIndex = /<sitemapindex/i.test(res.text);
     if (isIndex) {
-      const children = locs.filter((l) => /\.xml/i.test(l)).slice(0, maxSitemaps);
-      // Продуктовите sitemap-и първи.
-      children.sort((a, b) => Number(/product|produkt|tovar/i.test(b)) - Number(/product|produkt|tovar/i.test(a)));
+      const all = locs.filter((l) => /\.xml/i.test(l));
+      // ВАЖНО: първо избираме продуктовите, чак после режем. Обратният ред беше бъг:
+      // при praktiker индексът има 22 деца и Product-*.xml са ПОСЛЕДНИ, така че
+      // отрязването на първите 8 обхождаше само марки/категории/съдържание.
+      const productish = all.filter((l) => /product|produkt|tovar|goods/i.test(l));
+      const children = (productish.length ? productish : all).slice(0, maxSitemaps);
       for (const child of children) await walk(child, depth + 1);
       return;
     }
@@ -789,7 +794,7 @@ export async function collectFromSitemap(
     if (productUrls.size >= limit * 3) break;
     await walk(c, 0);
   }
-  return { urls: [...productUrls], usedSitemap: visited[0] };
+  return { urls: [...productUrls], usedSitemap: visited[0], fromProductSitemap };
 }
 
 /* ------------------------------------------------------- Shopify / Woo */
@@ -2009,12 +2014,14 @@ export async function runJob(jobId: string): Promise<void> {
     if (!products.length) {
       await setStatus(jobId, 'parsing');
       let urls: string[] = [];
+      let sitemapFromProducts = false;
       const isProductish = /\/(product|produkt|p|item|tovar|art)\//i.test(new URL(job.url).pathname);
 
       if (!isProductish) {
         const sm = await collectFromSitemap(job.url, limit, fo);
         if (sm.urls.length) {
           urls = sm.urls;
+          sitemapFromProducts = sm.fromProductSitemap === true;
           strategy = 'sitemap';
           await logLine(jobId, `Sitemap: намерих ${sm.urls.length} продуктови адреса.`);
         } else {
@@ -2098,7 +2105,12 @@ export async function runJob(jobId: string): Promise<void> {
         if (!parsed) continue;
         // Категория/марка от sitemap-а не е продукт — не влиза в обявите.
         // Приемаме страницата, ако адресът ѝ изглежда продуктов ИЛИ данните ѝ са добри.
-        if (strategy === 'sitemap' && !looksLikeProductUrl(url) && !looksLikeProductPage(parsed)) {
+        if (strategy === 'sitemap' && !sitemapFromProducts && !looksLikeProductUrl(url)) {
+          await bump(jobId, 'skipped');
+          continue;
+        }
+        // Цената е задължителна: приложението показва цени, обява без цена е шум.
+        if (strategy === 'sitemap' && !looksLikeProductPage(parsed)) {
           await bump(jobId, 'skipped');
           continue;
         }
