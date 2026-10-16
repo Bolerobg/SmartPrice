@@ -401,6 +401,26 @@ export default function FeedScreen() {
         </View>
       )}
 
+      {/* „Как работи“ — 12 екрана с примери, един след друг.
+          Стои на първия екран, защото гостът вече влиза направо в потока и
+          не вижда екрана за вход, където преди беше този бутон. */}
+      <TouchableOpacity
+        style={styles.howItWorks}
+        activeOpacity={0.88}
+        accessibilityRole="button"
+        accessibilityLabel="Как работи приложението"
+        onPress={() => router.push('/tour?review=1' as never)}
+      >
+        <Ionicons name="help-circle" size={17} color={COLORS.accentCyan} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.howItWorksTitle}>Как работи приложението?</Text>
+          <Text style={styles.howItWorksSub} numberOfLines={1}>
+            12 екрана с примери — 30 секунди
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+      </TouchableOpacity>
+
       {/* Бонусът за новодошли: първа находка в първите минути → „Основател“ */}
       <FounderBanner />
 
@@ -953,6 +973,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   codeHintText: { flex: 1, color: COLORS.textMuted, fontSize: 11.5, lineHeight: 16 },
+  howItWorks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyanBorder,
+    backgroundColor: COLORS.accentCyanSoftBg,
+    maxWidth: '100%',
+  },
+  howItWorksTitle: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '800' },
+  howItWorksSub: { color: COLORS.textMuted, fontSize: 11, marginTop: 1, flexShrink: 1 },
   codeJump: {
     flexDirection: 'row',
     alignItems: 'center',
