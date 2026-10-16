@@ -20,6 +20,9 @@ COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
+# Наръчникът на Ценко (AI съветникът) — чете се при самообучение. Ако го няма,
+# Ценко обновява само живите факти, но губи обясненията на екраните.
+COPY knowledge ./knowledge
 EXPOSE 4000
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/index.js"]

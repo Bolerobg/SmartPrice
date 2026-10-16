@@ -1959,8 +1959,10 @@ async function renderAssistant(box, force) {
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
         <button class="btn btn-primary" id="kn-add">➕ Добави нова тема</button>
+        <button class="btn btn-primary" id="kn-train" style="background:linear-gradient(135deg,#7c3aed,#06b6d4);border:none">🧠 Самообучение сега</button>
         <button class="btn btn-ghost" id="kn-reload">↻ Презареди</button>
       </div>
+      <div class="hint" id="kn-train-info" style="margin-top:10px"></div>
     </div>
 
     <div class="card" style="margin-top:14px">
@@ -2084,6 +2086,43 @@ async function renderAssistant(box, force) {
   };
 
   $('#kn-reload').onclick = () => render('assistant', true);
+
+  // САМООБУЧЕНИЕ: чете наръчника от файла + живите факти от базата и ги записва
+  // като теми. Същото се пуска само и веднъж на ден (03:30 българско време),
+  // така че този бутон е за „научи новото ВЕДНАГА“.
+  const trainBtn = $('#kn-train');
+  if (trainBtn) {
+    trainBtn.onclick = async () => {
+      trainBtn.disabled = true;
+      const old = trainBtn.textContent;
+      trainBtn.textContent = '🧠 Уча се…';
+      try {
+        const r = await api('/assistant/retrain', { method: 'POST' });
+        toast(r && r.note ? r.note : 'Ценко се самообучи ✓');
+      } catch (err) {
+        toast('Не успях да обуча Ценко: ' + (err && err.message ? err.message : err));
+      } finally {
+        trainBtn.disabled = false;
+        trainBtn.textContent = old;
+        render('assistant', true);
+      }
+    };
+  }
+
+  // Кога е станало последното самообучение и колко теми знае.
+  const info = $('#kn-train-info');
+  if (info) {
+    const lr = kn.lastRetrain;
+    if (lr && lr.at) {
+      const when = new Date(lr.at).toLocaleString('bg-BG');
+      info.innerHTML =
+        `🧠 Последно самообучение: <strong>${when}</strong> — научил <strong>${num(lr.fromManual || 0)}</strong> теми от наръчника ` +
+        `и <strong>${num(lr.liveFacts || 0)}</strong> живи факта от базата (общо ${num(lr.active || 0)} теми). ` +
+        `Пуска се и сам всяка нощ в 03:30.`;
+    } else {
+      info.textContent = '🧠 Още не се е самообучавал. Натисни „Самообучение сега“ — пуска се и сам всяка нощ в 03:30.';
+    }
+  }
 
   document.querySelectorAll('[data-kn-edit]').forEach((b) => {
     b.onclick = () => {

@@ -9,6 +9,7 @@ import { mkdir } from 'node:fs/promises';
 import { env, features, isProd } from './env.js';
 import { closePool, one } from './db.js';
 import { runMigrations } from './migrate.js';
+import { startCenkoTrainer } from './lib/cenkoScheduler.js';
 import { sendError } from './lib/errors.js';
 
 import authRoutes from './routes/auth.js';
@@ -271,6 +272,10 @@ async function main() {
   // Работи във всеки режим — иначе „пуснах задача“ щеше да виси завинаги.
   await startScraperWorker();
   app.log.info('Скрапер на магазини: работникът е включен');
+
+  // Самообучението на Ценко (AI съветникът): наръчникът от файла + живите
+  // факти от базата. Веднъж на ден в 03:30 и веднага, ако знанието е старо.
+  startCenkoTrainer((message) => app.log.info(message));
 
   const shutdown = async (signal: string) => {
     app.log.info(`Получен ${signal} — затварям...`);

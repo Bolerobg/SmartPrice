@@ -16,6 +16,7 @@ import {
 } from '../lib/admin.js';
 import { runSecurityScan, ALERT_EMAIL } from '../lib/security.js';
 import { invalidateKnowledgeCache } from './assistant.js';
+import { retrainCenko, lastRetrain, logRetrain } from '../lib/cenkoKnowledge.js';
 import { getSetting, setSetting } from '../lib/settings.js';
 import {
   sendAccountDeletedEmail,
@@ -1361,6 +1362,59 @@ export default async function adminRoutes(app: FastifyInstance) {
         isActive: r.is_active,
         source: r.source,
         updatedAt: r.updated_at,
+      })),
+      /** Кога Ценко се самообучи последно (за бутона в панела). */
+      lastRetrain: await lastRetrain(),
+    };
+  });
+
+  /**
+   * САМООБУЧЕНИЕ НА ЦЕНКО — „научи новото сега“.
+   *
+   * Чете наръчника от файла (knowledge/cenko-narachnik.md) и живите факти от
+   * базата (значки, категории, активна томбола, настройки), записва ги като теми
+   * и обявява новото на Ценко веднага. Същото се пуска и само веднъж на ден.
+   */
+  app.post('/api/admin/assistant/retrain', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const report = await retrainCenko();
+    await logRetrain(report, 'manual');
+    await audit({
+      admin,
+      action: 'assistant.retrain',
+      targetType: 'assistant_knowledge',
+      targetId: null,
+    });
+    return report;
+  });
+
+  /** История на самообучението — за да се вижда, че работи и какво е научил. */
+  app.get('/api/admin/assistant/retrain', async (req) => {
+    await requireAdminPanel(req);
+    const rows = await many<{
+      at: string;
+      trigger: string;
+      from_manual: number;
+      live_facts: number;
+      disabled: number;
+      active: number;
+      note: string | null;
+    }>(
+      `select at::text, trigger, from_manual, live_facts, disabled, active, note
+         from assistant_retrain_log
+        order by at desc
+        limit 20`
+    ).catch(() => []);
+    return {
+      last: await lastRetrain(),
+      log: rows.map((r) => ({
+        at: r.at,
+        trigger: r.trigger,
+        fromManual: r.from_manual,
+        liveFacts: r.live_facts,
+        disabled: r.disabled,
+        active: r.active,
+        note: r.note,
       })),
     };
   });
