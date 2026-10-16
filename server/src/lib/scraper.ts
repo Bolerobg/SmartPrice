@@ -1313,11 +1313,17 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
   // По-добре без цена, отколкото с грешна — приложението показва реални цени.
   if (price !== undefined && priceWeak) {
     const txt = htmlToText(html).slice(0, 60_000);
-    const num = String(price).replace('.', '[.,]');
-    const anchored =
-      new RegExp(`${num}\\s*(€|лв|EUR|BGN|£|\\$)`, 'i').test(txt) ||
-      new RegExp(`(€|лв\\.?|EUR|BGN|£|\\$)\\s*${num}`, 'i').test(txt);
-    if (!anchored) {
+    // Сравняваме числата, не текста: 2.5 и 2.50 са една цена, а „28 продукта“ не е цена.
+    const anchored: number[] = [];
+    for (const mm of txt.matchAll(/(\d[\d\s]*(?:[.,]\d{1,2})?)\s*(?:€|лв\.?|EUR|BGN|£|\$)/gi)) {
+      const v = parsePrice(mm[1]);
+      if (v !== undefined) anchored.push(v);
+    }
+    for (const mm of txt.matchAll(/(?:€|лв\.?|EUR|BGN|£|\$)\s*(\d[\d\s]*(?:[.,]\d{1,2})?)/gi)) {
+      const v = parsePrice(mm[1]);
+      if (v !== undefined) anchored.push(v);
+    }
+    if (!anchored.some((v) => Math.abs(v - price!) < 0.011)) {
       price = undefined;
       currency = undefined;
     }
@@ -2091,7 +2097,8 @@ export async function runJob(jobId: string): Promise<void> {
         }
         if (!parsed) continue;
         // Категория/марка от sitemap-а не е продукт — не влиза в обявите.
-        if (strategy === 'sitemap' && !looksLikeProductPage(parsed)) {
+        // Приемаме страницата, ако адресът ѝ изглежда продуктов ИЛИ данните ѝ са добри.
+        if (strategy === 'sitemap' && !looksLikeProductUrl(url) && !looksLikeProductPage(parsed)) {
           await bump(jobId, 'skipped');
           continue;
         }
