@@ -668,6 +668,40 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
 }
 
 /** Безплатен, но често най-точен начин: продуктовият адрес по sitemap. */
+/** Явно НЕ е продукт: категория, марка, търсене, информационна страница. */
+export function looksLikeNonProductUrl(loc: string): boolean {
+  const p = loc.toLowerCase();
+  return /\/(category|categories|kategor|katalog|catalog|brand|brands|marki|search|tag|blog|news|about|contact|kontakt|za-nas|za_nas|terms|privacy|policy|cart|checkout|account|login|register|compare|wishlist|sitemap)(\/|\.|$|\?)/.test(
+    p
+  );
+}
+
+/** Изглежда ли адресът на конкретен продукт? */
+export function looksLikeProductUrl(loc: string): boolean {
+  const p = loc.toLowerCase();
+  if (/\/(product|produkt|produkti|produkty|item|artikel|goods|tovar|p|pr|dp)\//.test(p)) return true;
+  if (/[?&](product_id|productId|pid|sku|art|id)=/i.test(p)) return true;
+  if (/-\d{3,}(\.html?)?$/.test(p)) return true; // напр. .../kashkaval-lyulin-12345
+  return false;
+}
+
+/**
+ * Истинска продуктова страница ли е разчетеното?
+ * Категориите от sitemap-а изглеждат като продукти, докато не се види цената:
+ * „Продукти 4LIVING на изгодни цени“ с цена 28 = броят продукти в категорията.
+ */
+export function looksLikeProductPage(p: { title?: string; price?: number }): boolean {
+  const t = (p.title ?? '').trim();
+  if (!t) return false;
+  if (t.length < 4) return false;
+  const categoryish =
+    /^(продукти|produkti|produktai|products|всички|all|kategor|категори|brands?|марки)\b/i.test(t) ||
+    /(категори|kategor|all products|всички продукти)/i.test(t);
+  if (categoryish) return false;
+  if (p.price === undefined || p.price <= 0) return false;
+  return true;
+}
+
 export async function collectFromSitemap(
   startUrl: string,
   limit: number,
@@ -737,8 +771,15 @@ export async function collectFromSitemap(
       for (const child of children) await walk(child, depth + 1);
       return;
     }
+    // Продуктовите адреси първи; категории/марки не се обхождат изобщо.
+    const preferred: string[] = [];
+    const fallback: string[] = [];
     for (const loc of locs) {
       if (/\.(jpg|jpeg|png|webp|gif|pdf)$/i.test(loc)) continue;
+      if (looksLikeNonProductUrl(loc)) continue;
+      (looksLikeProductUrl(loc) ? preferred : fallback).push(loc);
+    }
+    for (const loc of [...preferred, ...fallback]) {
       productUrls.add(loc);
       if (productUrls.size >= limit * 3) return;
     }
@@ -1235,8 +1276,10 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
   const priceFromMeta = parsePrice(meta['product:price:amount'] ?? meta['og:price:amount']);
   const priceFromMicro = micro.price;
   let price = priceFromSel ?? offersPrice.price ?? priceFromMeta ?? priceFromMicro;
+  // Дали цената е от структурирани данни (вярна) или от обща евристика (проверява се долу).
+  let priceWeak = false;
 
-  let currency = offersPrice.currency ?? meta['product:price:currency'] ?? meta['og:price:currency'];
+  let currency: string | undefined = offersPrice.currency ?? meta['product:price:currency'] ?? meta['og:price:currency'];
 
   // Класове, които почти винаги носят истинската цена (WooCommerce, Shopify теми,
   // стари магазини). Редът е от най-специфичния към най-общия.
@@ -1245,6 +1288,7 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
       const p = parsePrice(selectFirst(html, sel));
       if (p) {
         price = p;
+        priceWeak = true;
         break;
       }
     }
@@ -1253,6 +1297,7 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
     const generic = extractGenericPrice(html);
     price = generic.price;
     currency = currency ?? generic.currency;
+    if (generic.price !== undefined) priceWeak = true;
   }
   if (price === undefined) {
     // Последна надежда: цена в текста до валутен знак.
@@ -1261,6 +1306,20 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
     if (m) {
       price = parsePrice(m[1]);
       currency = m[2];
+    }
+  }
+
+  // Слаба цена без валутен знак до себе си почти винаги е брояч („28 продукта“).
+  // По-добре без цена, отколкото с грешна — приложението показва реални цени.
+  if (price !== undefined && priceWeak) {
+    const txt = htmlToText(html).slice(0, 60_000);
+    const num = String(price).replace('.', '[.,]');
+    const anchored =
+      new RegExp(`${num}\\s*(€|лв|EUR|BGN|£|\\$)`, 'i').test(txt) ||
+      new RegExp(`(€|лв\\.?|EUR|BGN|£|\\$)\\s*${num}`, 'i').test(txt);
+    if (!anchored) {
+      price = undefined;
+      currency = undefined;
     }
   }
 
@@ -2031,6 +2090,11 @@ export async function runJob(jobId: string): Promise<void> {
           continue;
         }
         if (!parsed) continue;
+        // Категория/марка от sitemap-а не е продукт — не влиза в обявите.
+        if (strategy === 'sitemap' && !looksLikeProductPage(parsed)) {
+          await bump(jobId, 'skipped');
+          continue;
+        }
         products.push(parsed);
         await bump(jobId, 'parsed');
         await syncVisited(jobId);
