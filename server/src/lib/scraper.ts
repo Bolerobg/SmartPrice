@@ -350,6 +350,8 @@ export interface RawProduct {
   title?: string;
   description?: string;
   price?: number;
+  /** Редовната (зачертана) цена, когато продуктът е на промоция. */
+  listPrice?: number;
   currency?: string;
   imageUrl?: string;
   breadcrumb?: string;
@@ -357,6 +359,39 @@ export interface RawProduct {
   availability?: string;
   /** Откъде сме го взели — за диагностика в панела. */
   via: string;
+}
+
+/**
+ * Редовната цена от страницата — зачертаната „беше“ цена при промоция.
+ *
+ * Защо: иначе оферта, взета по време на промоция, изглежда „сгрешена“, когато
+ * магазинът върне редовната си цена. С тази стойност показваме „платено ↔
+ * обичайна“ и обясняваме разликата с думи.
+ */
+export function extractListPrice(html: string): { price: number; currency?: string } | undefined {
+  const blobs: string[] = [];
+  // 1. Зачертани тагове: <del>, <s>, <strike>
+  for (const m of html.matchAll(/<(?:del|s|strike)\b[^>]*>([\s\S]{0,80}?)<\/(?:del|s|strike)>/gi)) {
+    blobs.push(m[1] ?? '');
+  }
+  // 2. Класове, които почти винаги носят старата цена (WooCommerce/OpenCart/Shopify).
+  for (const m of html.matchAll(
+    /class="[^"]*(?:old-price|regular-price|price-old|list-price|price_old|was-price|compare-at|price-before)[^"]*"[^>]*>([\s\S]{0,80}?)</gi
+  )) {
+    blobs.push(m[1] ?? '');
+  }
+  // 3. Структурирани данни за най-високата цена (Magento/JSON-LD).
+  for (const m of html.matchAll(/"highPrice"\s*:\s*"?([\d.,]+)/gi)) {
+    blobs.push(m[1] ?? '');
+  }
+  for (const blob of blobs) {
+    const p = parsePrice(blob);
+    if (p && p > 0 && p <= 1_000_000) {
+      const cur = /лв|bgn/i.test(blob) ? 'BGN' : /€|eur/i.test(blob) ? 'EUR' : undefined;
+      return { price: p, currency: cur };
+    }
+  }
+  return undefined;
 }
 
 /** Обръща HTML елементи в текст: маха скриптове/стилове, декодира основните знаци. */
@@ -1582,6 +1617,8 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
     extractGenericImage(html, pageUrl);
 
   const offersPrice = fromOffers(product?.offers);
+  // Редовната (зачертана) цена при промоция — за „платено ↔ обичайна“.
+  const pageListRaw = extractListPrice(html);
   const priceFromSel = parsePrice(fromSel('price'));
   const priceFromMeta = parsePrice(meta['product:price:amount'] ?? meta['og:price:amount']);
   const priceFromMicro = micro.price;
@@ -1590,6 +1627,8 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
   let priceWeak = false;
 
   let currency: string | undefined = offersPrice.currency ?? meta['product:price:currency'] ?? meta['og:price:currency'];
+  const pageList =
+    pageListRaw && price !== undefined && pageListRaw.price > price ? pageListRaw.price : undefined;
 
   // Класове, които почти винаги носят истинската цена (WooCommerce, Shopify теми,
   // стари магазини). Редът е от най-специфичния към най-общия.
@@ -1653,6 +1692,7 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
           : 'heuristics';
 
   return {
+    listPrice: pageList,
     sourceUrl: canonical,
     title: title ? htmlToText(title).slice(0, 200) : undefined,
     description: rawDesc ? htmlToText(rawDesc).slice(0, 3000) : undefined,
@@ -2684,6 +2724,8 @@ export async function runJob(jobId: string): Promise<void> {
         polarity = cmp.polarity;
         reference = cmp.reference;
       }
+      // Ако страницата обявява редовна цена (промоция) — тя е най-точната „обичайна“.
+      if (p.listPrice && p.listPrice > priceEur) reference = p.listPrice;
 
       const tags = [
         ...(o.addShopTag ? [shopLabel] : []),
