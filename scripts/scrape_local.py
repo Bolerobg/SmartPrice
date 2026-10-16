@@ -323,6 +323,118 @@ def try_magento(base, limit, verbose=False):
     return items
 
 
+def magento_price(base, url_key, verbose=False):
+    """Цена на един продукт в Magento по неговия url_key (най-надеждно)."""
+    query = (
+        '{products(filter:{url_key:{eq:"%s"}}){items{name '
+        "price_range{minimum_price{final_price{value currency} regular_price{value}}}}}}"
+        % url_key.replace('"', "")
+    )
+    proc = subprocess.run(
+        [
+            "curl", "-s", "-X", "POST", base.rstrip("/") + "/graphql",
+            "-H", "Content-Type: application/json", "-A", UA,
+            "--data-binary", "@-",
+        ],
+        input=json.dumps({"query": query}, ensure_ascii=False).encode("utf-8"),
+        capture_output=True, timeout=60,
+    )
+    try:
+        items = ((json.loads(proc.stdout.decode("utf-8", "replace")).get("data") or {}).get("products") or {}).get("items") or []
+        first = items[0]
+        mp = ((first.get("price_range") or {}).get("minimum_price") or {})
+        final = mp.get("final_price") or {}
+        regular = mp.get("regular_price") or {}
+        if final.get("value") is None:
+            return None
+        return {
+            "price": round(float(final["value"]), 2),
+            "currency": final.get("currency") or "EUR",
+            "listPrice": round(float(regular["value"]), 2)
+            if regular.get("value") and float(regular["value"]) > float(final["value"])
+            else None,
+        }
+    except Exception:
+        return None
+
+
+def to_eur(price, currency):
+    """В евро (1 € = 1.95583 лв.), както е в приложението."""
+    if price is None:
+        return None
+    if currency and re.search(r"bgn|лв", str(currency), re.I):
+        return round(price / 1.95583, 2)
+    return round(float(price), 2)
+
+
+def refresh_prices(api, token, limit, verbose=False):
+    """Проверява „цената сега“ на внесените оферти ОТ ТАЗИ машина и я записва.
+
+    Нужно е за магазините, които блокират нашия сървър (Cloudflare 403):
+    сървърът не може да провери, но домашният IP може.
+    """
+    proc = subprocess.run(
+        ["curl", "-s", "%s/api/posts?limit=%d" % (api, limit), "-A", UA],
+        capture_output=True, timeout=120,
+    )
+    try:
+        posts = json.loads(proc.stdout.decode("utf-8", "replace")).get("items") or []
+    except Exception:
+        print("  не успях да прочета офертите от приложението")
+        return 0, 0
+
+    targets = [p for p in posts if (p.get("sourceUrl") or p.get("source_url"))]
+    print("  оферти с линк към магазин: %d" % len(targets))
+    updates, failed = [], 0
+
+    for post in targets:
+        url = post.get("sourceUrl") or post.get("source_url")
+        post_id = post.get("id")
+        domain = re.sub(r"^www\.", "", url.split("//")[-1].split("/")[0])
+        base = "https://" + domain
+        url_key = url.rstrip("/").rsplit("/", 1)[-1]
+        fresh = None
+
+        # 1) Magento магазин (remedium.bg и подобни) — питаме GraphQL-а.
+        if "/product/" not in url:
+            fresh = magento_price(base, url_key, verbose)
+        # 2) Всички останали — четем продуктовата страница.
+        if not fresh:
+            status, page, final_url = fetch(url, verbose)
+            if status == "200":
+                got = extract_product(page, final_url)
+                if got["price"]:
+                    fresh = {"price": got["price"], "currency": got["currency"], "listPrice": None}
+        if not fresh:
+            failed += 1
+            log("  не успях: %s" % url[:90], verbose)
+            continue
+
+        price_eur = to_eur(fresh["price"], fresh["currency"])
+        list_eur = to_eur(fresh["listPrice"], fresh["currency"])
+        item = {"postId": post_id, "priceEur": price_eur}
+        if list_eur and list_eur > price_eur:
+            item["listPriceEur"] = list_eur
+        updates.append(item)
+        print("  ✓ %s %s → %.2f € — %s" % (fresh["price"], fresh["currency"], price_eur, (post.get("title") or "")[:45]))
+        time.sleep(0.7)
+
+    saved = 0
+    if updates:
+        proc = subprocess.run(
+            ["curl", "-s", "-X", "POST", api + "/api/admin/posts/shop-prices",
+             "-H", "Content-Type: application/json", "-H", "Authorization: Bearer " + token,
+             "--data-binary", "@-"],
+            input=json.dumps({"items": updates}, ensure_ascii=False).encode("utf-8"),
+            capture_output=True, timeout=180,
+        )
+        try:
+            saved = json.loads(proc.stdout.decode("utf-8", "replace")).get("saved") or 0
+        except Exception:
+            saved = 0
+    return saved, failed
+
+
 def login(api, email, password):
     body = json.dumps({"email": email, "password": password})
     out = subprocess.run(
@@ -368,6 +480,7 @@ def main():
     ap = argparse.ArgumentParser(description="Локален скрапер за сайтове зад Cloudflare")
     ap.add_argument("--site", action="append", help="адрес на магазин (може няколко пъти)")
     ap.add_argument("--count", type=int, default=10, help="колко продукта на сайт (по подразбиране 10)")
+    ap.add_argument("--limit", type=int, default=200, help="колко оферти да обходи при --refresh (по подразбиране 200)")
     ap.add_argument(
         "--mode",
         choices=["auto", "magento", "sitemap"],
@@ -378,12 +491,17 @@ def main():
     ap.add_argument("--email", default=os.environ.get("SMARTPRICE_ADMIN_EMAIL", "kolyo.hristov@gmail.com"))
     ap.add_argument("--password", default=None)
     ap.add_argument("--dry-run", action="store_true", help="само показва намереното, не внася")
+    ap.add_argument(
+        "--refresh",
+        action="store_true",
+        help="провери наново „цената сега“ на внесените оферти (за магазини, които блокират сървъра)",
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
     sites = args.site or DEFAULT_SITES
     token = None
-    if not args.dry_run:
+    if args.refresh or not args.dry_run:
         password = read_password(args)
         if not password:
             print("Липсва админ парола. Подай --password или SMARTPRICE_ADMIN_PASSWORD "
@@ -393,6 +511,12 @@ def main():
         if not token:
             print("Не успях да вляза като админ — провери имейла/паролата.")
             return 2
+
+    if args.refresh:
+        print("Проверявам цените на внесените оферти от тази машина…")
+        saved, failed = refresh_prices(args.api, token, args.limit or 200, args.verbose)
+        print("\nОбщо: записани %d нови проверки, неуспешни %d" % (saved, failed))
+        return 0
 
     total = {"imported": 0, "skipped": 0}
     for base in sites:

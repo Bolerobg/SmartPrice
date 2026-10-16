@@ -532,6 +532,18 @@ export interface ShopPriceCheck {
   checkedAt: string;
   reason?: string;
   cached?: boolean;
+  /**
+   * Магазинът блокира автоматични проверки от нашия сървър (Cloudflare).
+   * Тогава `stored` носи последната РЕАЛНО проверена цена.
+   */
+  blocked?: boolean;
+  stored?: {
+    priceEur: number;
+    listPriceEur?: number;
+    checkedAt: string;
+    /** 'server' = проверил сървърът; 'local' = проверил нашият робот от домашен IP. */
+    checkedBy: string;
+  };
   ourPriceEur: number;
   shopName: string;
   postTitle: string;

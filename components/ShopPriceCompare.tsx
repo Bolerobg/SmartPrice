@@ -26,9 +26,31 @@ interface Props {
   onRequireAuth?: () => void;
 }
 
+/** Дата и час, четени от човек: „16.10.2026, 22:41“. */
+function fmtWhen(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('bg-BG', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
 /** Какво да кажем под двете числа. */
 function verdict(c: ShopPriceCheck | null): string {
   if (!c) return 'Провери с едно натискане — четем цената от сайта на магазина в момента.';
+  // Магазинът блокира автоматични проверки (Cloudflare) — не показваме грешка,
+  // а обясняваме честно и сочим последната реално проверена цена.
+  if (c.blocked) {
+    return c.stored
+      ? 'Този магазин не позволява автоматична проверка от нашия сървър. Показваме последната РЕАЛНО проверена цена — за да видиш текущата, отвори продукта в магазина.'
+      : 'Този магазин не позволява автоматична проверка от нашия сървър — отвори продукта в магазина, за да видиш текущата цена.';
+  }
   if (!c.ok || c.diffEur === null) return c.reason ?? 'Не успях да проверя цената в магазина.';
   const d = c.diffEur;
   if (Math.abs(d) < 0.01) return 'Същата цена — офертата е валидна ✓';
@@ -49,6 +71,7 @@ function verdict(c: ShopPriceCheck | null): string {
 
 /** Цвят: по-скъпо в магазина = добре за нас; по-евтино = лошо. */
 function verdictColor(c: ShopPriceCheck | null): string {
+  if (c?.blocked) return COLORS.goldBright;
   if (!c || !c.ok || c.diffEur === null) return COLORS.textSecondary;
   if (Math.abs(c.diffEur) < 0.01) return COLORS.greenBright;
   return c.diffEur > 0 ? COLORS.greenBright : COLORS.redBright;
@@ -63,6 +86,12 @@ export const ShopPriceCompare: React.FC<Props> = ({
 }) => {
   const [check, setCheck] = useState<ShopPriceCheck | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Кога проверката не минава (магазинът блокира сървъра), показваме последната
+  // реално проверена цена — с ясна бележка откъде е и кога.
+  const stored = check?.stored;
+  const shopPrice = check?.ok ? check.priceEur : stored?.priceEur;
+  const fromStored = !check?.ok && stored !== undefined;
 
   const run = async () => {
     setBusy(true);
@@ -113,15 +142,28 @@ export const ShopPriceCompare: React.FC<Props> = ({
           >
             В МАГАЗИНА СЕГА
           </Text>
-          {check?.ok && check.priceEur !== undefined ? (
-            <Text style={{ color: verdictColor(check), fontSize: 18, fontWeight: '900' }}>
-              {check.priceEur.toFixed(2)} €
+          {shopPrice !== undefined ? (
+            <Text
+              style={{
+                color: check?.ok ? verdictColor(check) : COLORS.goldBright,
+                fontSize: 18,
+                fontWeight: '900',
+                opacity: fromStored ? 0.85 : 1,
+              }}
+            >
+              {shopPrice.toFixed(2)} €
             </Text>
           ) : (
             <Text style={{ color: COLORS.textSecondary, fontSize: 15, fontWeight: '800' }}>
               {busy ? '…' : '— €'}
             </Text>
           )}
+          {fromStored && stored ? (
+            <Text style={{ color: COLORS.textMuted, fontSize: 9.5 }}>
+              проверено {fmtWhen(stored.checkedAt)}
+              {stored.checkedBy === 'local' ? ' · от нашия робот' : ' · от сървъра'}
+            </Text>
+          ) : null}
           {check?.ok && check.listPriceEur !== undefined ? (
             <Text style={{ color: COLORS.textMuted, fontSize: 10 }}>
               редовна {check.listPriceEur.toFixed(2)} €

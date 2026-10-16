@@ -4,6 +4,7 @@ import { many, one, query } from '../db.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { audit, requireAdminPanel } from '../lib/admin.js';
 import { importExternalProducts } from '../lib/externalImport.js';
+import { saveLocalShopPrices } from '../lib/shopPrice.js';
 import {
   alreadyImported,
   downloadImage,
@@ -191,6 +192,35 @@ export default async function scraperRoutes(app: FastifyInstance) {
 
     const result = await importExternalProducts(input.domain, input.items);
     return { ok: true, ...result };
+  });
+
+  /**
+   * Проверки на цените, направени от локалния робот (домашен IP).
+   *
+   * За магазините, които блокират сървъра (Cloudflare 403), цената се проверява
+   * от машината на потребителя със `scripts/scrape_local.py --refresh` и се
+   * записва тук — после приложението я показва като „проверена от нашия робот“,
+   * вместо да дава грешка.
+   */
+  app.post('/api/admin/posts/shop-prices', async (req) => {
+    await requireAdminPanel(req);
+    const input = z
+      .object({
+        items: z
+          .array(
+            z.object({
+              postId: z.string().uuid(),
+              priceEur: z.coerce.number().min(0).max(1_000_000),
+              listPriceEur: z.coerce.number().min(0).max(1_000_000).optional(),
+            })
+          )
+          .min(1)
+          .max(300),
+      })
+      .parse(req.body ?? {});
+
+    const saved = await saveLocalShopPrices(input.items);
+    return { ok: true, saved };
   });
 
   app.post('/api/admin/scraper/jobs', async (req) => {
