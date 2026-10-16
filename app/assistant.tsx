@@ -921,7 +921,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     minWidth: 0,
-    maxHeight: 110,
+    maxHeight: 130,
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
@@ -929,7 +929,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10.5,
     color: COLORS.textPrimary,
-    fontSize: 14,
+    // 16px е ЗАДЪЛЖИТЕЛНО на телефон: Safari на iPhone зуумва сам при
+    // докосване на полето и страницата „излиза" от екрана, докато пишеш.
+    fontSize: 16,
+    lineHeight: 22,
   },
   sendBtn: {
     width: 44,
