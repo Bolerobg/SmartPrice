@@ -188,10 +188,12 @@ export const MarkdownText: React.FC<Props> = ({ text, style }) => {
   });
 
   // Ако текстът свърши, а блок кодът е отворен — показваме каквото имаме.
-  if (codeBuffer && codeBuffer.length) {
+  // (TypeScript не вижда записите в затварящата функция по-горе — затова cast.)
+  const tail = codeBuffer as string[] | null;
+  if (tail && tail.length) {
     blocks.push(
       <View key="code-tail" style={styles.codeBlock}>
-        <Text style={styles.codeBlockText}>{codeBuffer.join('\n')}</Text>
+        <Text style={styles.codeBlockText}>{tail.join('\n')}</Text>
       </View>
     );
   }
