@@ -22,6 +22,7 @@ import { COLORS } from '@/constants/theme';
 import { api, ApiError, AssistantAction, AssistantSuggestion, AssistantTopic } from '@/src/api/client';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
+import { MarkdownText } from '@/components/MarkdownText';
 
 /**
  * „Ценко“ — AI съветникът на SmartPrice.
@@ -190,26 +191,9 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   return parts;
 }
 
-const RichText: React.FC<{ text: string; style?: object }> = ({ text, style }) => {
-  const lines = text.split('\n').filter((l) => l.trim().length > 0);
-  return (
-    <View>
-      {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        const isBullet = /^[•\-*]\s+/.test(trimmed);
-        const body = isBullet ? trimmed.replace(/^[•\-*]\s+/, '') : trimmed;
-        return (
-          <View key={idx} style={isBullet ? styles.bulletRow : undefined}>
-            {isBullet && <Text style={[styles.richBase, style]}>• </Text>}
-            <Text style={[styles.richBase, style, isBullet && styles.bulletText]}>
-              {renderInline(body, `l${idx}`)}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-};
+const RichText: React.FC<{ text: string; style?: object }> = ({ text, style }) => (
+  <MarkdownText text={text} style={style} />
+);
 
 /* --------------------------------------------------------------- екран */
 
