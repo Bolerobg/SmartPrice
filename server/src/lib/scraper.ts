@@ -659,7 +659,7 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
   const seenUrl = new Set<string>();
   const seenName = new Set<string>();
   return out.filter((p) => {
-    const nameKey = `${p.title.toLowerCase().replace(/\s+/g, ' ').trim()}|${p.price}`;
+    const nameKey = `${(p.title ?? '').toLowerCase().replace(/\s+/g, ' ').trim()}|${p.price}`;
     if (seenUrl.has(p.sourceUrl) || seenName.has(nameKey)) return false;
     seenUrl.add(p.sourceUrl);
     seenName.add(nameKey);
@@ -1836,6 +1836,9 @@ export async function runJob(jobId: string): Promise<void> {
     /* ------------------------------------------------------- 3) записване */
     await setStatus(jobId, o.mode === 'import' ? 'importing' : 'parsing');
     let stored = 0;
+    // Един и същ продукт в два варианта (цвят/размер) не бива да влиза два пъти:
+    // за приложението това е един продукт с една цена.
+    const seenNames = new Set<string>();
 
     for (let i = 0; i < products.length; i++) {
       if (await isCancelled(jobId)) {
@@ -1892,6 +1895,14 @@ export async function runJob(jobId: string): Promise<void> {
             : guessCategory(blob);
 
       const { priceEur } = normalizeCurrency(p.price, p.currency, `${title} ${p.breadcrumb ?? ''}`);
+
+      const nameKey = `${title.toLowerCase().replace(/\s+/g, ' ').trim()}|${priceEur}`;
+      if (seenNames.has(nameKey)) {
+        await insertItem(jobId, p, ai, null, 'skipped', 'Същият продукт вече е в списъка (друг вариант)');
+        await bump(jobId, 'skipped');
+        continue;
+      }
+      seenNames.add(nameKey);
       const unitFromAi =
         ai?.unitQuantity && ai?.unitType ? { quantity: ai.unitQuantity, unit: ai.unitType as 'g' | 'kg' | 'ml' | 'l' | 'pcs' } : undefined;
       const unit = unitFromAi ?? parseUnit(`${title} ${p.breadcrumb ?? ''}`);
