@@ -298,6 +298,8 @@ export interface FeatureFlags {
   ocr: boolean;
   payments: boolean;
   mail: boolean;
+  /** AI съветникът „Ценко“ (чат в приложението) — включен ли е на сървъра. */
+  assistant?: boolean;
   ocrModel: string | null;
   /** Бонус за новодошли: първа находка до N минути → значка + точки. */
   founderBonus?: { windowMin: number; points: number } | null;
@@ -558,6 +560,50 @@ export interface FeedQuery {
 }
 
 // ---------------------------------------------------------------- API
+
+// ------------------------------------------------- AI съветник „Ценко“
+
+/** Какво може да „натисне“ човекът след отговора на Ценко. */
+export type AssistantAction =
+  | 'check_price'
+  | 'add_post'
+  | 'radar'
+  | 'invite'
+  | 'leaderboard'
+  | 'tour'
+  | 'donate'
+  | 'nearby'
+  | 'none';
+
+export interface AssistantSuggestion {
+  label: string;
+  action: AssistantAction;
+}
+
+export interface AssistantReply {
+  reply: string;
+  /** Простите стъпки (когато Ценко обяснява „как се прави“). Иначе — празно. */
+  steps: string[];
+  /** Настроението на Ценко — за малък бадж/иконка в чата. */
+  mood: string;
+  suggestions: AssistantSuggestion[];
+  model: string;
+  latencyMs: number;
+}
+
+export interface AssistantTopic {
+  id: string;
+  title: string;
+  question: string;
+  category: string;
+}
+
+export interface AssistantQuota {
+  enabled: boolean;
+  limit: number;
+  used: number;
+  left: number;
+}
 
 export const api = {
   health: () => rawRequest<{ status: string; database: boolean }>('/api/health', { auth: false }),
@@ -856,6 +902,38 @@ export const api = {
     rawRequest<{ ok: true; inviterName: string; points: number }>('/api/referrals/claim', {
       method: 'POST',
       body: { code },
+    }),
+
+  // ------------------------------------------------------------- AI съветник „Ценко“
+  /**
+   * Пита Ценко. Пращаме цялата история (тя е кратка — сървърът я реже до
+   * ASSISTANT_HISTORY съобщения). Работи и за гости, но с по-малък лимит.
+   * timeoutMs е по-голям: моделът „мисли“ преди да отговори.
+   */
+  assistantChat: (input: {
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    /** true = само „поздрави ме“ (когато чатът се отваря за пръв път). */
+    greeting?: boolean;
+    /** От кой екран е отворен чатът — за да е уместна подканата. */
+    screen?: string;
+  }) =>
+    rawRequest<AssistantReply>('/api/assistant/chat', {
+      method: 'POST',
+      body: input,
+      auth: true,
+      timeoutMs: 60000,
+    }),
+
+  /** Колко въпроса са останали в текущия час (за тиха индикация в чата). */
+  assistantQuota: () => rawRequest<AssistantQuota>('/api/assistant/quota'),
+
+  /**
+   * Готови въпроси за стартовите бутончета. Идват от наръчника в базата —
+   * значи щом се добави нова тема в панела, тук се появява нов бутон сам.
+   */
+  assistantTopics: () =>
+    rawRequest<{ enabled: boolean; items: AssistantTopic[] }>('/api/assistant/topics', {
+      auth: false,
     }),
 };
 

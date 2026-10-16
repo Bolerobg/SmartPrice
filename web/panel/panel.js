@@ -149,6 +149,7 @@ const PAGES = {
   comments: ['Коментари', 'Преглед и модерация на коментарите'],
   reports: ['Сигнали', 'Какво сигнализират потребителите'],
   categories: ['Категории', 'Етикети и думи за търсене'],
+  assistant: ['Ценко (AI съветник)', 'Какво знае Ценко и какво питат хората'],
   referrals: ['Покани', 'Кой кого е поканил и кой е получил точки'],
   favorites: ['Любими', 'Кои оферти хората пазят най-често'],
   security: ['Сигурност', 'Ненормална активност и аларми по имейл'],
@@ -236,6 +237,7 @@ async function render(page, force = false) {
     if (page === 'comments') return await renderComments(box, force);
     if (page === 'reports') return await renderReports(box, force);
     if (page === 'categories') return await renderCategories(box, force);
+    if (page === 'assistant') return await renderAssistant(box, force);
     if (page === 'referrals') return await renderReferrals(box, force);
     if (page === 'favorites') return await renderFavorites(box, force);
     if (page === 'security') return await renderSecurity(box, force);
@@ -1750,6 +1752,227 @@ async function renderCategories(box) {
         toast(e.message, 'error');
       }
     };
+  });
+}
+
+/* ------------------------------------------------- Ценко (AI съветник) */
+
+/**
+ * Какво знае Ценко и какво питат хората.
+ *
+ * Идеята: Ценко чете наръчника (assistant_knowledge) при ВСЕКИ въпрос. Значи
+ * щом добавим тук нова тема, Ценко започва да я обяснява веднага — без нов
+ * билд, без програмист. Затова тази страница е „работното място“ на нашия
+ * цифров служител: тук му се дава знание и тук се вижда какво питат хората.
+ */
+const KNOWLEDGE_CATEGORIES = [
+  ['basics', 'Основи'],
+  ['points', 'Точки и значки'],
+  ['receipts', 'Касова бележка'],
+  ['raffles', 'Томболи'],
+  ['safety', 'Правила и сигурност'],
+  ['news', 'Новости'],
+];
+
+async function renderAssistant(box, force) {
+  const [kn, qs] = await Promise.all([api('/assistant/knowledge'), api('/assistant/questions')]);
+  const st = qs.stats || {};
+  const items = kn.items || [];
+
+  const prioPill = (p) =>
+    p <= 2
+      ? `<span class="pill" style="background:rgba(34,197,94,.16);color:#34D399">винаги</span>`
+      : p <= 5
+        ? `<span class="pill pill-dim">при въпрос</span>`
+        : `<span class="pill pill-dim" style="opacity:.7">рядко</span>`;
+
+  box.innerHTML = `
+    <div class="grid grid-3" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Въпроси към Ценко</div><div class="kpi-value cyan">${num(st.total || 0)}</div><div class="kpi-sub">за последните 24 ч: ${num(st.today || 0)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Средна скорост на отговор</div><div class="kpi-value">${num(st.avg_ms || 0)} мс</div><div class="kpi-sub">${num(st.users || 0)} профила • ${num(st.guests || 0)} гости</div></div>
+      <div class="card kpi"><div class="kpi-label">Теми в наръчника</div><div class="kpi-value gold">${num(items.length)}</div><div class="kpi-sub">${num((items.filter((i) => i.isActive)).length)} активни</div></div>
+    </div>
+
+    <div class="card" style="border-color:rgba(6,182,212,.45)">
+      <div class="card-title">🤖 Как работи Ценко</div>
+      <div class="hint" style="margin:8px 0 0">
+        Преди всеки отговор Ценко чете <strong>живите данни</strong> от базата (колко находки има, кое е качено последно,
+        кои градове и категории съществуват, коя томбола е активна, включен ли е бонусът „Основател“) и
+        <strong>наръчника по-долу</strong>. Затова: добави ли се ново нещо в приложението — напиши го тук и Ценко веднага
+        започва да го обяснява на хората. Обяснява с прости стъпки, като на 10-годишно дете.
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn btn-primary" id="kn-add">➕ Добави нова тема</button>
+        <button class="btn btn-ghost" id="kn-reload">↻ Презареди</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">📚 Наръчник на Ценко <span class="pill pill-dim">${num(items.length)} теми</span></div>
+      <div class="hint" style="margin:6px 0 12px">
+        „винаги“ = темата влиза при всеки въпрос (основните неща). „при въпрос“ = само когато думите на човека съвпадат с ключовите думи.
+      </div>
+      <div id="kn-list">
+        ${items
+          .map(
+            (k) => `
+          <div class="card" style="background:var(--card-2,rgba(148,163,184,.06));margin-bottom:10px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <strong style="font-size:14px">${esc(k.title)}</strong>
+              ${prioPill(k.priority)}
+              <span class="pill pill-dim">${esc(KNOWLEDGE_CATEGORIES.find((c) => c[0] === k.category)?.[1] || k.category)}</span>
+              ${k.source === 'seed' ? '<span class="pill pill-dim">от системата</span>' : '<span class="pill pill-dim">написана от нас</span>'}
+              ${k.isActive ? '' : '<span class="pill" style="background:rgba(244,63,94,.16);color:#FB7185">изключена</span>'}
+            </div>
+            <div class="hint" style="white-space:pre-wrap;margin:8px 0 10px">${esc(k.body.slice(0, 320))}${k.body.length > 320 ? '…' : ''}</div>
+            <div class="hint" style="margin-bottom:10px">🔑 ${esc((k.keywords || []).join(', ') || 'няма ключови думи')}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-sm btn-primary" data-kn-edit="${esc(k.id)}">Редактирай</button>
+              <button class="btn btn-sm btn-ghost" data-kn-toggle="${esc(k.id)}" data-on="${k.isActive ? '1' : '0'}">${k.isActive ? 'Изключи' : 'Включи'}</button>
+              <button class="btn btn-sm btn-danger" data-kn-del="${esc(k.id)}" data-title="${esc(k.title)}">Изтрий</button>
+            </div>
+          </div>`
+          )
+          .join('')}
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:14px">
+      <div class="card">
+        <div class="card-title">🏆 Най-чести въпроси</div>
+        <div class="hint" style="margin:6px 0 10px">Питано повече от веднъж. Ако нещо се повтаря — напиши тема за него в наръчника.</div>
+        ${
+          (qs.top || []).length
+            ? barList(qs.top.map((t) => ({ label: t.question, value: t.n })), 'label', 'value')
+            : '<div class="hint">Още никой не е питал два пъти едно и също.</div>'
+        }
+      </div>
+      <div class="card">
+        <div class="card-title">🕐 Последни въпроси</div>
+        <div class="table-wrap" style="margin-top:10px;max-height:340px;overflow-y:auto">
+          <table>
+            <thead><tr><th>Кой</th><th>Въпрос</th><th>Скорост</th><th>Кога</th></tr></thead>
+            <tbody>
+              ${
+                (qs.recent || []).length
+                  ? qs.recent
+                      .map(
+                        (r) => `<tr>
+                  <td>${esc(r.user_name || 'гост')}</td>
+                  <td>${esc(String(r.question || '').slice(0, 90))}</td>
+                  <td>${num(r.latency_ms || 0)} мс</td>
+                  <td>${ago(r.created_at)}</td>
+                </tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="4" class="hint">Още няма въпроси.</td></tr>'
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  const formHtml = (k) => `
+    <label class="field full"><span>Заглавие (въпросът на човека)</span>
+      <input id="kn-title" value="${esc(k?.title || '')}" placeholder="Как се качва находка?"></label>
+    <label class="field full"><span>Обяснение — пиши го ПРОСТО, с номерирани стъпки (като на 10-годишно)</span>
+      <textarea id="kn-body" rows="10" placeholder="1. Натисни „Сподели“…&#10;2. Снимай…&#10;3. Публикувай.">${esc(k?.body || '')}</textarea></label>
+    <div class="form-grid">
+      <label class="field"><span>Група</span>
+        <select id="kn-cat">
+          ${KNOWLEDGE_CATEGORIES.map(
+            (c) => `<option value="${c[0]}" ${k?.category === c[0] ? 'selected' : ''}>${esc(c[1])}</option>`
+          ).join('')}
+        </select></label>
+      <label class="field"><span>Колко често да влиза</span>
+        <select id="kn-prio">
+          <option value="1" ${k?.priority === 1 ? 'selected' : ''}>1 — винаги (основно)</option>
+          <option value="3" ${k?.priority === 3 ? 'selected' : ''}>3 — винаги, по-надолу</option>
+          <option value="5" ${(!k || k?.priority === 5) ? 'selected' : ''}>5 — само при съвпадение</option>
+          <option value="8" ${k?.priority === 8 ? 'selected' : ''}>8 — рядко</option>
+        </select></label>
+      <label class="field full"><span>Ключови думи (със запетаи) — по тях Ценко разпознава въпроса</span>
+        <input id="kn-kw" value="${esc((k?.keywords || []).join(', '))}" placeholder="качване, находка, публикувам, сподели"></label>
+    </div>`;
+
+  async function saveKnowledge(id) {
+    const title = $('#kn-title').value.trim();
+    const body = $('#kn-body').value.trim();
+    if (title.length < 3) return toast('Напиши заглавие', 'warn');
+    if (body.length < 3) return toast('Напиши обяснение', 'warn');
+    const payload = {
+      title,
+      body,
+      keywords: $('#kn-kw').value,
+      category: $('#kn-cat').value,
+      priority: Number($('#kn-prio').value),
+      isActive: true,
+    };
+    try {
+      if (id) await api(`/assistant/knowledge/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+      else await api('/assistant/knowledge', { method: 'POST', body: payload });
+      toast(id ? 'Темата е обновена — Ценко вече я знае' : 'Темата е добавена — Ценко вече я знае');
+      closeModal();
+      render('assistant', true);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  $('#kn-add').onclick = () => {
+    openModal('Нова тема за Ценко', formHtml(null), [
+      { id: 'kn-save', label: 'Запази', cls: 'btn-primary', onClick: () => saveKnowledge(null) },
+      { id: 'kn-cancel', label: 'Отказ', cls: 'btn-ghost', onClick: closeModal },
+    ], true);
+  };
+
+  $('#kn-reload').onclick = () => render('assistant', true);
+
+  document.querySelectorAll('[data-kn-edit]').forEach((b) => {
+    b.onclick = () => {
+      const k = items.find((x) => String(x.id) === b.dataset.knEdit);
+      if (!k) return;
+      openModal('Редакция на тема', formHtml(k), [
+        { id: 'kn-save', label: 'Запази', cls: 'btn-primary', onClick: () => saveKnowledge(k.id) },
+        { id: 'kn-cancel', label: 'Отказ', cls: 'btn-ghost', onClick: closeModal },
+      ], true);
+    };
+  });
+
+  document.querySelectorAll('[data-kn-toggle]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api(`/assistant/knowledge/${encodeURIComponent(b.dataset.knToggle)}`, {
+          method: 'PATCH',
+          body: { isActive: b.dataset.on !== '1' },
+        });
+        toast(b.dataset.on === '1' ? 'Темата е изключена' : 'Темата е включена');
+        render('assistant', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-kn-del]').forEach((b) => {
+    b.onclick = () =>
+      confirmAction({
+        title: 'Изтриване на тема',
+        message: `Сигурен ли си, че искаш да изтриеш „${esc(b.dataset.title)}“?`,
+        details: ['Ценко ще спре да знае това обяснение.', 'Ако само искаш да го скриеш — ползвай „Изключи“ вместо изтриване.'],
+        confirmLabel: 'Изтрий',
+        onConfirm: async () => {
+          try {
+            await api(`/assistant/knowledge/${encodeURIComponent(b.dataset.knDel)}`, { method: 'DELETE' });
+            toast('Темата е изтрита');
+            closeModal();
+            render('assistant', true);
+          } catch (e) {
+            toast(e.message, 'error');
+          }
+        },
+      });
   });
 }
 

@@ -42,6 +42,23 @@ const schema = z.object({
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
   OCR_MODEL: z.string().default('google/gemini-2.5-flash'),
 
+  // --- AI съветникът в приложението („Ценко“) -------------------------
+  // Ползва DeepSeek API директно (не OpenRouter), защото моделът е тяхен.
+  // Ако ключът липсва, съветникът просто не се показва (features.assistant).
+  DEEPSEEK_API_KEY: z.string().optional().default(''),
+  DEEPSEEK_BASE_URL: z.string().url().default('https://api.deepseek.com/v1'),
+  // 'deepseek-flash' = DeepSeek-V4.1-Flash: бърз, евтин и разбира шеги.
+  ASSISTANT_MODEL: z.string().default('deepseek-flash'),
+  // Колко да „мисли“ моделът: low | high | max. За чат low е достатъчно и
+  // отговаря за ~2 секунди; high/max стават за по-сложни въпроси.
+  ASSISTANT_EFFORT: z.enum(['low', 'high', 'max']).default('low'),
+  // Колко съобщения от историята пращаме (пази паметта и разхода).
+  ASSISTANT_HISTORY: z.coerce.number().int().min(2).max(30).default(12),
+  // Максимум отговори на час (на профил / на IP за гостите).
+  ASSISTANT_MAX_PER_HOUR: z.coerce.number().int().min(3).max(200).default(40),
+  // Твърд таван на разхода на отговор (вкл. „мислене“).
+  ASSISTANT_MAX_TOKENS: z.coerce.number().int().min(200).max(4000).default(900),
+
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
   STRIPE_CURRENCY: z.string().default('eur'),
@@ -112,6 +129,8 @@ export const features = {
   ocr: Boolean(env.OPENROUTER_API_KEY),
   payments: Boolean(env.STRIPE_SECRET_KEY),
   mail: Boolean(env.RESEND_API_KEY),
+  // AI съветникът работи само ако има ключ за DeepSeek.
+  assistant: Boolean(env.DEEPSEEK_API_KEY),
 } as const;
 
 export const isProd = env.NODE_ENV === 'production';

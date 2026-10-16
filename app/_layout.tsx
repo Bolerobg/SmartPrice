@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -261,6 +261,16 @@ export default function RootLayout() {
               <Stack.Screen
                 name="post/[id]"
                 options={{ headerShown: false, presentation: 'card' }}
+              />
+              {/* AI съветникът „Ценко“ — отваря се като лист отдолу (модал),
+                  за да не се губи контекстът на екрана, от който е отворен. */}
+              <Stack.Screen
+                name="assistant"
+                options={{
+                  headerShown: false,
+                  presentation: Platform.OS === 'web' ? 'card' : 'modal',
+                  animation: 'slide_from_bottom',
+                }}
               />
             </Stack>
                         <DonationModal />

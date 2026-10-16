@@ -44,6 +44,11 @@ services:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       OPENROUTER_BASE_URL: "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}"
       OCR_MODEL: "${OCR_MODEL:-google/gemini-2.5-flash}"
+      # AI съветникът в приложението („Ценко“) — DeepSeek API
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}"
+      ASSISTANT_MODEL: "${ASSISTANT_MODEL:-deepseek-flash}"
+      ASSISTANT_EFFORT: "${ASSISTANT_EFFORT:-low}"
       STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
       STRIPE_CURRENCY: "${STRIPE_CURRENCY:-eur}"

@@ -1,10 +1,11 @@
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
-import { Tabs } from 'expo-router';
+import { Tabs, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
+import { AssistantFab } from '@/components/AssistantFab';
 
 export default function TabsLayout() {
   const { isAuthenticated } = useAuth();
@@ -19,7 +20,20 @@ export default function TabsLayout() {
     openAuthPrompt(reason);
   };
 
+  // Кой таб е отворен — подаваме го на Ценко, за да е уместна подканата му.
+  const pathname = usePathname();
+  const assistantScreen = pathname.includes('radar')
+    ? 'radar'
+    : pathname.includes('add')
+      ? 'add'
+      : pathname.includes('community')
+        ? 'community'
+        : pathname.includes('profile')
+          ? 'profile'
+          : 'feed';
+
   return (
+    <View style={{ flex: 1 }}>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -84,6 +98,11 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+
+    {/* „Ценко“ — плаващ бутон на всеки таб. Вижда се над таб-бара и подканва
+        човека да пита, когато нещо не му е ясно. */}
+    <AssistantFab screen={assistantScreen} />
+    </View>
   );
 }
 
