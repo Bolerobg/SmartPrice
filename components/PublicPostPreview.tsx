@@ -16,6 +16,7 @@ import { COLORS } from '@/constants/theme';
 import { api } from '@/src/api/client';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAtLong } from '@/src/lib/format';
+import { ShopPriceCompare } from '@/components/ShopPriceCompare';
 import { postVerdict, shareViaSystem, hasSystemShare, buildShareMessage } from '@/lib/share';
 import type { PostItem } from '@/types';
 
@@ -163,6 +164,11 @@ export const PublicPostPreview: React.FC<Props> = ({ id }) => {
             </View>
           ) : null}
         </View>
+
+        {/* Сверка с магазина — същият блок като в приложението, и за гости. */}
+        {post.sourceUrl ? (
+          <ShopPriceCompare postId={post.id} ourPriceEur={post.pricePaid} />
+        ) : null}
 
         {post.sourceUrl ? (
           <TouchableOpacity

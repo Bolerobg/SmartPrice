@@ -526,6 +526,8 @@ export interface AdminRaffleInput {
 export interface ShopPriceCheck {
   ok: boolean;
   priceEur?: number;
+  /** Редовната цена в магазина (когато страницата показва и промо цена). */
+  listPriceEur?: number;
   title?: string;
   checkedAt: string;
   reason?: string;

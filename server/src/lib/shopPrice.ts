@@ -11,16 +11,51 @@
  * Резултатът се кешира 10 минути, за да не удряме магазина при всяко отваряне
  * на офертата (и за да е бързо за потребителя).
  */
-import { politeFetch, parseProductPage, normalizeCurrency } from './scraper.js';
+import { politeFetch, parseProductPage, normalizeCurrency, parsePrice } from './scraper.js';
 
 export interface ShopPriceResult {
   ok: boolean;
   priceEur?: number;
+  /** Редовната (зачертана) цена, когато продуктът е на промоция. */
+  listPriceEur?: number;
   title?: string;
   checkedAt: string;
   reason?: string;
   /** Резултатът е от кеша (по-малко от 10 минути). */
   cached?: boolean;
+}
+
+/**
+ * Редовната цена от страницата — зачертаната „беше“ цена при промоция.
+ *
+ * Взимаме я, за да НЕ изглежда голяма разлика като наша грешка: ако магазинът
+ * вече е спрял промоцията, казваме „сега е редовната цена X €, а ние сме я
+ * видели за Y € (промо)“.
+ */
+function extractListPrice(html: string): { price: number; currency?: string } | undefined {
+  const blobs: string[] = [];
+  // 1. Зачертани тагове: <del>, <s>, <strike>
+  for (const m of html.matchAll(/<(?:del|s|strike)\b[^>]*>([\s\S]{0,80}?)<\/(?:del|s|strike)>/gi)) {
+    blobs.push(m[1] ?? '');
+  }
+  // 2. Класове, които почти винаги носят старата цена (WooCommerce, OpenCart, Shopify).
+  for (const m of html.matchAll(
+    /class="[^"]*(?:old-price|regular-price|price-old|list-price|price_old|was-price|compare-at|price-before)[^"]*"[^>]*>([\s\S]{0,80}?)</gi
+  )) {
+    blobs.push(m[1] ?? '');
+  }
+  // 3. Структурирани данни за най-високата цена (Magento/JSON-LD).
+  for (const m of html.matchAll(/"highPrice"\s*:\s*"?([\d.,]+)/gi)) {
+    blobs.push(m[1] ?? '');
+  }
+  for (const blob of blobs) {
+    const p = parsePrice(blob);
+    if (p && p > 0 && p <= 1_000_000) {
+      const cur = /лв|bgn/i.test(blob) ? 'BGN' : /€|eur/i.test(blob) ? 'EUR' : undefined;
+      return { price: p, currency: cur };
+    }
+  }
+  return undefined;
 }
 
 const TTL_MS = 10 * 60 * 1000;
@@ -60,9 +95,25 @@ export async function checkShopPrice(url: string, force = false): Promise<ShopPr
         };
       } else {
         const { priceEur } = normalizeCurrency(Number(raw), parsed.currency, res.text.slice(0, 4000));
+        // Редовната цена, ако продуктът е на промоция — за да обясним разликата
+        // с думи („промоцията е свършила, сега е редовната цена“).
+        const listRaw = extractListPrice(res.text);
+        const listEur = listRaw
+          ? normalizeCurrency(listRaw.price, listRaw.currency, res.text.slice(0, 4000)).priceEur
+          : undefined;
+        const listPriceEur =
+          listEur && listEur > priceEur + 0.001 && listEur <= 1_000_000
+            ? Number(listEur.toFixed(2))
+            : undefined;
         value =
           priceEur > 0 && priceEur <= 1_000_000
-            ? { ok: true, priceEur: Number(priceEur.toFixed(2)), title: parsed.title, checkedAt }
+            ? {
+                ok: true,
+                priceEur: Number(priceEur.toFixed(2)),
+                listPriceEur,
+                title: parsed.title,
+                checkedAt,
+              }
             : { ok: false, checkedAt, reason: 'Цената в страницата изглежда невалидна.' };
       }
     }
