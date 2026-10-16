@@ -1627,8 +1627,6 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
   let priceWeak = false;
 
   let currency: string | undefined = offersPrice.currency ?? meta['product:price:currency'] ?? meta['og:price:currency'];
-  const pageList =
-    pageListRaw && price !== undefined && pageListRaw.price > price ? pageListRaw.price : undefined;
 
   // Класове, които почти винаги носят истинската цена (WooCommerce, Shopify теми,
   // стари магазини). Редът е от най-специфичния към най-общия.
@@ -1692,7 +1690,9 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
           : 'heuristics';
 
   return {
-    listPrice: pageList,
+    // Сравняваме ЧАК ТУК: цената се доизчислява и след горните редове.
+    listPrice:
+      pageListRaw && price !== undefined && pageListRaw.price > price ? pageListRaw.price : undefined,
     sourceUrl: canonical,
     title: title ? htmlToText(title).slice(0, 200) : undefined,
     description: rawDesc ? htmlToText(rawDesc).slice(0, 3000) : undefined,
