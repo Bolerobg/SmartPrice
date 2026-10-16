@@ -209,6 +209,38 @@ export default function AssistantScreen() {
   const [busy, setBusy] = useState(false);
   const [booted, setBooted] = useState(false);
   const [quotaLeft, setQuotaLeft] = useState<number | null>(null);
+
+  /**
+   * Височината на ВИДИМАТА част от екрана (visualViewport).
+   *
+   * На телефон браузърът има лента с адрес, а щом пишем — и клавиатура. „100%“
+   * от височината на страницата е по-голямо от това, което човек наистина вижда,
+   * затова полето за писане оставаше зад лентата/клавиатурата и изглеждаше
+   * „скрито“. Следим видимата височина и я даваме на екрана.
+   */
+  const [viewHeight, setViewHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const vv = (
+      window as unknown as {
+        visualViewport?: {
+          height: number;
+          addEventListener: (type: string, fn: () => void) => void;
+          removeEventListener: (type: string, fn: () => void) => void;
+        };
+      }
+    ).visualViewport;
+    if (!vv) return;
+    const apply = () => setViewHeight(Math.round(vv.height));
+    apply();
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    return () => {
+      vv.removeEventListener('resize', apply);
+      vv.removeEventListener('scroll', apply);
+    };
+  }, []);
   const [topics, setTopics] = useState<AssistantTopic[]>([]);
 
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -378,7 +410,15 @@ export default function AssistantScreen() {
   const isEmpty = messages.length === 0;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView
+      style={[
+        styles.safeArea,
+        // Точно колкото се вижда на телефона (иначе полето за писане остава
+        // зад лентата на браузъра или зад клавиатурата).
+        viewHeight ? { height: viewHeight } : null,
+        !viewHeight && Platform.OS === 'web' ? ({ height: '100dvh' } as never) : null,
+      ]}
+    >
       {/* ---------------------------------------------------------- Хедър */}
       <View style={styles.header}>
         <AssistantAvatar size={38} pulse />
@@ -528,6 +568,11 @@ export default function AssistantScreen() {
             onChangeText={setInput}
             onSubmitEditing={() => send()}
             returnKeyType="send"
+            onFocus={() => {
+              // Клавиатурата покрива долната част — придърпваме разговора надолу,
+              // за да остане полето за писане пред очите.
+              if (Platform.OS === 'web') setTimeout(scrollToEnd, 320);
+            }}
             multiline
             maxLength={1000}
             editable={!busy}
@@ -559,7 +604,6 @@ export default function AssistantScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    height: '100%',
     maxWidth: '100%',
     overflow: 'hidden',
     backgroundColor: COLORS.bgPrimary,
