@@ -1,0 +1,24 @@
+# Допълнение към docker-compose.yml за VPS (193.46.243.232).
+#
+# Защо: на VPS-а сайтът се проксира от Nginx Proxy Manager (NPM), който върви
+# в собствен Docker контейнер. За да стигне NPM до web контейнера, без да
+# отваряме порт 3030 за целия интернет, включваме web в мрежата на NPM и
+# сочим forward_host към вътрешния му IP в тази мрежа.
+#
+# Пускане:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.vps.yml up -d --build
+#
+# Вътрешният IP се взима с:
+#   docker inspect smart --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}} {{end}}'
+
+services:
+  web:
+    networks:
+      - default
+      - npm
+
+networks:
+  npm:
+    external: true
+    # Името на мрежата на NPM на този сървър (проверено: my-n8n_proxy).
+    name: ${NPM_NETWORK:-my-n8n_proxy}
