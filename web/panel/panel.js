@@ -150,6 +150,7 @@ const PAGES = {
   reports: ['Сигнали', 'Какво сигнализират потребителите'],
   categories: ['Категории', 'Етикети и думи за търсене'],
   assistant: ['Ценко (AI съветник)', 'Какво знае Ценко и какво питат хората'],
+  scraper: ['Скрапер на магазини', 'Даваш линк и брой продукти — системата вади снимки, цени и описания'],
   referrals: ['Покани', 'Кой кого е поканил и кой е получил точки'],
   favorites: ['Любими', 'Кои оферти хората пазят най-често'],
   security: ['Сигурност', 'Ненормална активност и аларми по имейл'],
@@ -238,6 +239,7 @@ async function render(page, force = false) {
     if (page === 'reports') return await renderReports(box, force);
     if (page === 'categories') return await renderCategories(box, force);
     if (page === 'assistant') return await renderAssistant(box, force);
+    if (page === 'scraper') return await renderScraper(box, force);
     if (page === 'referrals') return await renderReferrals(box, force);
     if (page === 'favorites') return await renderFavorites(box, force);
     if (page === 'security') return await renderSecurity(box, force);
@@ -1974,6 +1976,889 @@ async function renderAssistant(box, force) {
         },
       });
   });
+}
+
+/* -------------------------------------------------- Скрапер на магазини */
+
+/**
+ * Професионален скрапер: даваш линк и брой продукти, системата обикаля,
+ * вади снимки/цени/описания, разчита категорията, пише си описанието и
+ * внася продуктите в SmartPrice.
+ *
+ * Работният поток е направен така, че НИЩО да не влиза без човешко решение:
+ *   1. „Пусни“ → задачата работи във фона;
+ *   2. панелът показва какво е извадено (снимка, цена, категория, описание);
+ *   3. махаш боклука и внасяш избраното.
+ * Има и режим „внасяй директно“ за сигурни сайтове.
+ */
+const SCRAPE_CAT_LABELS = {
+  restaurants: 'Ресторанти',
+  hotels_airbnb: 'Хотели и Airbnb',
+  supermarket: 'Магазини',
+  cafes_bars: 'Кафе и барове',
+  services_tech: 'Услуги и техника',
+  other: 'Други',
+};
+
+const SCRAPE_STATUS_LABELS = {
+  queued: 'на опашка',
+  discovering: 'обикаля сайта',
+  parsing: 'чете продуктите',
+  enriching: 'AI обработва',
+  importing: 'внася',
+  done: 'готово',
+  failed: 'счупи се',
+  cancelled: 'спряно',
+  parsed: 'чака преглед',
+  imported: 'внесен',
+  skipped: 'пропуснат',
+};
+
+let scraperSelected = new Set();
+let scraperPoll = null;
+let scraperJobId = null;
+let scraperLastForm = null;
+
+function scraperStopPoll() {
+  if (scraperPoll) {
+    clearInterval(scraperPoll);
+    scraperPoll = null;
+  }
+}
+
+async function renderScraper(box) {
+  scraperStopPoll();
+  const info = await api('/scraper/info');
+
+  // Ако има работеща задача, отваряме нея — за да не се чуди човекът къде е.
+  if (!scraperJobId && info.jobs.running > 0) {
+    const list = await api('/scraper/jobs?limit=1');
+    const j = (list.items || [])[0];
+    if (j && !['done', 'failed', 'cancelled'].includes(j.status)) scraperJobId = j.id;
+  }
+
+  const jobs = await api('/scraper/jobs?limit=15');
+  const schedules = await api('/scraper/schedules');
+  const runningList = await api('/scraper/running');
+  const running = (jobs.items || []).find((j) =>
+    ['queued', 'discovering', 'parsing', 'enriching', 'importing'].includes(j.status)
+  );
+
+  box.innerHTML = `
+    <div class="grid grid-3" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Задачи общо</div><div class="kpi-value cyan">${num(info.jobs.total)}</div><div class="kpi-sub">${num(info.jobs.done)} завършени</div></div>
+      <div class="card kpi"><div class="kpi-label">Научени сайтове</div><div class="kpi-value gold">${num(info.sites)}</div><div class="kpi-sub">стратегията се помни</div></div>
+      <div class="card kpi"><div class="kpi-label">AI обработка</div><div class="kpi-value">${info.aiAvailable ? 'включена' : 'изключена'}</div><div class="kpi-sub">${esc(info.model)}</div></div>
+    </div>
+
+    <div class="card" style="border-color:rgba(6,182,212,.45)">
+      <div class="card-title">🕸️ Нова обиколка</div>
+      <div class="hint" style="margin:6px 0 12px">
+        Дай адрес на <strong>магазин, категория или отделен продукт</strong>. Системата сама разбира как е устроен сайтът
+        (Shopify каталог, WooCommerce, sitemap, JSON-LD, OpenGraph, микро-данни) и ако не успее — ползва ръчните селектори, които ѝ дадеш.
+      </div>
+      <div class="form-grid">
+        <label class="field full"><span>Адрес на магазина</span>
+          <input id="sc-url" placeholder="https://magazin.bg/kategoriya/producti" value="${esc(scraperLastForm?.url || '')}"></label>
+        <label class="field" style="max-width:180px"><span>Колко продукта</span>
+          <input id="sc-count" type="number" min="1" max="2000" value="${Number(scraperLastForm?.count || 20)}"></label>
+        <label class="field" style="max-width:260px"><span>Какво да направи</span>
+          <select id="sc-mode">
+            <option value="preview"${(scraperLastForm?.mode || 'preview') === 'preview' ? ' selected' : ''}>Първо ми покажи (препоръчано)</option>
+            <option value="import"${scraperLastForm?.mode === 'import' ? ' selected' : ''}>Внасяй директно</option>
+          </select></label>
+      </div>
+
+      <details style="margin-top:12px"${scraperLastForm ? ' open' : ''}>
+        <summary style="cursor:pointer;color:var(--muted);font-size:13.5px;padding:6px 0">⚙️ Още опции (категория, цена, снимки, селектори…)</summary>
+
+        <div class="form-grid" style="margin-top:10px">
+          <label class="field"><span>AI описания и категория</span>
+            <select id="sc-ai"${info.aiAvailable ? '' : ' disabled'}>
+              <option value="1"${scraperLastForm?.useAi !== false ? ' selected' : ''}>Да — превежда, избира категория, пише описание</option>
+              <option value="0"${scraperLastForm?.useAi === false ? ' selected' : ''}>Не — ползвай само каквото е на сайта</option>
+            </select></label>
+          <label class="field"><span>Откъде да вземе категорията</span>
+            <select id="sc-catmode">
+              <option value="ai"${(scraperLastForm?.categoryMode || 'ai') === 'ai' ? ' selected' : ''}>AI решава (най-точно)</option>
+              <option value="breadcrumb"${scraperLastForm?.categoryMode === 'breadcrumb' ? ' selected' : ''}>От пътя на сайта (хляб)</option>
+              <option value="fixed"${scraperLastForm?.categoryMode === 'fixed' ? ' selected' : ''}>Винаги една и съща</option>
+            </select></label>
+          <label class="field"><span>Фиксирана категория</span>
+            <select id="sc-catfixed">
+              ${Object.entries(SCRAPE_CAT_LABELS)
+                .map(([v, l]) => `<option value="${v}"${scraperLastForm?.fixedCategory === v ? ' selected' : ''}>${esc(l)}</option>`)
+                .join('')}
+            </select></label>
+          <label class="field"><span>Как да влезе цената</span>
+            <select id="sc-polarity">
+              <option value="compare"${(scraperLastForm?.polarityMode || 'compare') === 'compare' ? ' selected' : ''}>Сравни с наличното (🟢/🔴)</option>
+              <option value="offer"${scraperLastForm?.polarityMode === 'offer' ? ' selected' : ''}>Винаги оферта 🟢 (без сравнение)</option>
+              <option value="trap"${scraperLastForm?.polarityMode === 'trap' ? ' selected' : ''}>Винаги червен флаг 🔴</option>
+            </select></label>
+          <label class="field"><span>Снимките</span>
+            <select id="sc-img">
+              <option value="1"${scraperLastForm?.downloadImages !== false ? ' selected' : ''}>Свали ги при нас (не зависим от магазина)</option>
+              <option value="0"${scraperLastForm?.downloadImages === false ? ' selected' : ''}>Остави линка към магазина</option>
+            </select></label>
+          <label class="field"><span>Град / място</span>
+            <input id="sc-city" list="sc-cities" placeholder="Онлайн" value="${esc(scraperLastForm?.city || '')}">
+            <datalist id="sc-cities">${(info.cities || []).map((c) => `<option value="${esc(c)}"></option>`).join('')}</datalist></label>
+          <label class="field"><span>Пауза между заявките (ms)</span>
+            <input id="sc-delay" type="number" min="0" max="5000" step="50" value="${Number(scraperLastForm?.delayMs ?? 350)}"></label>
+          <label class="field"><span>Макс. страници за обикаляне</span>
+            <input id="sc-pages" type="number" min="1" max="60" value="${Number(scraperLastForm?.maxPages ?? 12)}"></label>
+          <label class="field"><span>Цена от (€)</span>
+            <input id="sc-min" type="number" min="0" step="0.5" value="${scraperLastForm?.minPrice ?? ''}"></label>
+          <label class="field"><span>Цена до (€)</span>
+            <input id="sc-max" type="number" min="0" step="0.5" value="${scraperLastForm?.maxPrice ?? ''}"></label>
+          <label class="field"><span>Дубликати</span>
+            <select id="sc-dedupe">
+              <option value="url"${(scraperLastForm?.dedupe || 'url') === 'url' ? ' selected' : ''}>Пропусни, ако вече е внесен</option>
+              <option value="title"${scraperLastForm?.dedupe === 'title' ? ' selected' : ''}>Само по заглавие</option>
+              <option value="off"${scraperLastForm?.dedupe === 'off' ? ' selected' : ''}>Без проверка</option>
+            </select></label>
+          <label class="field"><span>Учтивост</span>
+            <select id="sc-robots">
+              <option value="1"${scraperLastForm?.respectRobots !== false ? ' selected' : ''}>Спазвай robots.txt (правилното)</option>
+              <option value="0"${scraperLastForm?.respectRobots === false ? ' selected' : ''}>Пренебрегни robots.txt</option>
+            </select></label>
+          <label class="field"><span>Ако няма снимка</span>
+            <select id="sc-noimg">
+              <option value="1"${scraperLastForm?.skipWithoutImage !== false ? ' selected' : ''}>Пропусни продукта</option>
+              <option value="0"${scraperLastForm?.skipWithoutImage === false ? ' selected' : ''}>Внеси го и без снимка</option>
+            </select></label>
+          <label class="field full"><span>Ръчни селектори (само за трудни сайтове) — по един на ред: <code>title: h1</code>, <code>price: .price@text</code>, <code>image: img.main@src</code>, <code>list: a.product@href</code></span>
+            <textarea id="sc-sel" rows="3" placeholder="title: h1&#10;price: .price@text">${esc(
+              Object.entries(scraperLastForm?.selectors || {})
+                .map(([k, v]) => `${k}: ${v}`)
+                .join('\n')
+            )}</textarea></label>
+        </div>
+      </details>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
+        <button class="btn btn-primary" id="sc-run">▶ Пусни обиколката</button>
+        <button class="btn btn-ghost" id="sc-probe">🔍 Проба на един адрес</button>
+        <span class="hint" id="sc-note" style="margin:0"></span>
+      </div>
+      <div id="sc-probe-out" style="margin-top:12px"></div>
+    </div>
+
+    <div id="sc-running" style="margin-top:14px">${scraperRunningHtml(runningList.items || [])}</div>
+    <div id="sc-job" style="margin-top:14px"></div>
+    <div id="sc-schedules" style="margin-top:14px">${scraperSchedulesHtml(schedules.items || [])}</div>
+    <div id="sc-history" style="margin-top:14px">${scraperHistoryHtml(jobs.items || [])}</div>
+    <div id="sc-sites" style="margin-top:14px">${scraperSitesHtml(info.sites || [])}</div>`;
+
+  /* ------------------------------------------------------------ бутони */
+
+  const readForm = () => {
+    const selText = ($('#sc-sel').value || '').trim();
+    const selectors = {};
+    selText.split('\n').forEach((line) => {
+      const i = line.indexOf(':');
+      if (i > 0) selectors[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    });
+    return {
+      url: $('#sc-url').value.trim(),
+      count: Number($('#sc-count').value) || 20,
+      mode: $('#sc-mode').value,
+      useAi: $('#sc-ai').value === '1',
+      downloadImages: $('#sc-img').value === '1',
+      categoryMode: $('#sc-catmode').value,
+      fixedCategory: $('#sc-catfixed').value,
+      polarityMode: $('#sc-polarity').value,
+      city: $('#sc-city').value.trim(),
+      delayMs: Number($('#sc-delay').value) || 0,
+      maxPages: Number($('#sc-pages').value) || 12,
+      minPrice: $('#sc-min').value ? Number($('#sc-min').value) : undefined,
+      maxPrice: $('#sc-max').value ? Number($('#sc-max').value) : undefined,
+      dedupe: $('#sc-dedupe').value,
+      respectRobots: $('#sc-robots').value === '1',
+      skipWithoutImage: $('#sc-noimg').value === '1',
+      selectors,
+      saveProfile: true,
+    };
+  };
+
+  $('#sc-run').onclick = async () => {
+    const form = readForm();
+    if (!/^https?:\/\//i.test(form.url)) return toast('Адресът трябва да започва с https://', 'warn');
+    const { url, count, ...options } = form;
+    const btn = $('#sc-run');
+    btn.disabled = true;
+    btn.textContent = 'Пущам…';
+    try {
+      scraperLastForm = form;
+      const res = await api('/scraper/jobs', { method: 'POST', body: { url, count, options } });
+      scraperJobId = res.jobId;
+      scraperSelected = new Set();
+      toast(res.mode === 'import' ? 'Обиколката тръгна — ще внася директно' : 'Обиколката тръгна — ще ти покажа какво е намерила');
+      await render('scraper', true);
+    } catch (e) {
+      toast(e.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '▶ Пусни обиколката';
+    }
+  };
+
+  $('#sc-probe').onclick = async () => {
+    const form = readForm();
+    if (!/^https?:\/\//i.test(form.url)) return toast('Дай адрес за проба', 'warn');
+    scraperLastForm = form;
+    const out = $('#sc-probe-out');
+    out.innerHTML = '<div class="hint"><span class="spinner"></span> Гледам страницата…</div>';
+    try {
+      const r = await api('/scraper/probe', { method: 'POST', body: { url: form.url, selectors: form.selectors } });
+      out.innerHTML = `
+        <div class="card" style="border-color:rgba(148,163,184,.35)">
+          <div class="card-title">Резултат от пробата <span class="pill pill-dim">HTTP ${num(r.status)}</span></div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:8px">
+            ${r.found?.imageUrl ? `<img src="${esc(r.found.imageUrl)}" style="width:120px;height:120px;object-fit:cover;border-radius:10px" loading="lazy">` : ''}
+            <div style="flex:1;min-width:240px">
+              <div style="font-weight:800;font-size:15px">${esc(r.found?.title || '(няма заглавие)')}</div>
+              <div style="color:var(--muted);font-size:13.5px;margin:4px 0">
+                Цена: <strong>${r.found?.price ? money(r.found.price) : '—'}</strong>
+                · открито чрез: <strong>${esc(r.found?.via || '—')}</strong>
+                ${r.found?.breadcrumb ? ' · ' + esc(r.found.breadcrumb) : ''}
+              </div>
+              <div class="hint" style="margin:6px 0 0">${esc((r.found?.description || '').slice(0, 300))}</div>
+              <div class="hint" style="margin-top:8px">
+                JSON-LD: ${r.hasJsonLd ? '✅' : '—'} · OpenGraph: ${r.hasOpenGraph ? '✅' : '—'} · Микро-данни: ${r.hasMicrodata ? '✅' : '—'}
+                · ${esc(r.hint)}
+              </div>
+            </div>
+          </div>
+        </div>`;
+    } catch (e) {
+      out.innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
+    }
+  };
+
+  bindScraperHistory();
+  bindScraperSites();
+  bindScraperSchedules();
+
+  if (scraperJobId) await scraperLoadJob();
+  else if (running) {
+    $('#sc-job').innerHTML = `<div class="card"><div class="hint"><span class="spinner"></span> Има работеща задача — отвори я от историята.</div></div>`;
+  }
+}
+
+/** Едновременно вървящите задачи — може да има няколко, за различни сайтове. */
+function scraperRunningHtml(items) {
+  if (!items.length) return '';
+  return `
+    <div class="card" style="border-color:rgba(6,182,212,.45)">
+      <div class="card-title"><span class="spinner"></span> Вървят сега <span class="pill pill-dim">${num(items.length)}</span></div>
+      <div class="table-wrap" style="margin-top:8px">
+        <table>
+          <thead><tr><th>Сайт</th><th>Състояние</th><th>От</th><th>Прочетени</th><th>Внесени</th><th>Обходени</th><th></th></tr></thead>
+          <tbody>
+            ${items
+              .map(
+                (j) => `<tr>
+              <td><strong>${esc(j.domain)}</strong><div class="hint" style="margin:0">${j.source_kind === 'schedule' ? 'по разписание' : 'ръчно'} · ${esc(SCRAPE_STATUS_LABELS[j.status] || j.status)}</div></td>
+              <td>${j.mode === 'import' ? 'внася' : 'преглед'}${j.strategy ? ` · ${esc(j.strategy)}` : ''}</td>
+              <td>${ago(j.created_at)}</td>
+              <td>${num(j.parsed)}/${num(j.target_count)}</td>
+              <td>${num(j.imported)}</td>
+              <td>${num(j.pages_visited)}</td>
+              <td class="actions"><button class="btn btn-sm btn-ghost" data-sc-open="${esc(j.id)}">Отвори</button></td>
+            </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/**
+ * Разписанията — сърцето на „да не заливаме сайта“.
+ *
+ * Пример: 20 продукта на ден, групи по 3–6, активни 8–22 ч. Системата сама
+ * избира случаен момент за всяко пускане, така че 20-те продукта се разпределят
+ * на 4–6 посещения през деня, а не 20 заявки за две минути.
+ */
+function scraperSchedulesHtml(items) {
+  const form = `
+    <div class="hint" style="margin:6px 0 12px">
+      Разписанието пуска само̀ обиколки през деня, за да не заливаме магазина.
+      Дай <strong>дневна квота</strong> (напр. 20 продукта), <strong>групи по</strong> 3–6 и
+      <strong>активни часове</strong> — моментите се избират случайно вътре в тях.
+    </div>`;
+
+  if (!items.length) {
+    return `<div class="card">${`<div class="card-title">📅 Разписания и дневен лимит</div>`}${form}
+      <div class="hint">Още няма разписание. Добави едно и сайтът ще се пълни сам, без да пречи.</div>
+      <div style="margin-top:12px"><button class="btn btn-primary" id="sc-sched-add">+ Ново разписание</button></div>
+    </div>`;
+  }
+
+  return `
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <span>📅 Разписания и дневен лимит <span class="pill pill-dim">${num(items.length)}</span></span>
+        <button class="btn btn-sm btn-primary" id="sc-sched-add">+ Ново разписание</button>
+      </div>
+      ${form}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Сайт</th><th>Квота/ден</th><th>Група</th><th>Активни часове</th><th>Днес</th><th>Следващо пускане</th><th>Общо внесени</th><th>Обходени</th><th>Състояние</th><th></th></tr></thead>
+          <tbody>
+            ${items
+              .map(
+                (s) => `<tr>
+              <td><strong>${esc(s.label || s.domain)}</strong><div class="hint" style="margin:0">${esc(s.domain)}</div></td>
+              <td><strong>${num(s.daily_quota)}</strong></td>
+              <td>${num(s.burst_min)}–${num(s.burst_max)}</td>
+              <td>${String(s.hour_from).padStart(2, '0')}:00–${String(s.hour_to).padStart(2, '0')}:00<div class="hint" style="margin:0">пауза ≥ ${num(s.min_gap_min)} мин</div></td>
+              <td><strong>${num(s.used_today)}</strong>/${num(s.daily_quota)}<div class="hint" style="margin:0">${num(s.runs_today)} пускания</div></td>
+              <td>${s.enabled ? (s.running > 0 ? '<span class="spinner"></span> върви сега' : s.next_run_at ? ago(s.next_run_at) === 'сега' ? 'сега' : 'след ' + ago(s.next_run_at) : '—') : '<span class="pill pill-dim">спряно</span>'}</td>
+              <td>${num(s.total_imported)}<div class="hint" style="margin:0">${num(s.total_jobs)} обиколки</div></td>
+              <td>${num(s.total_crawled)} стр.</td>
+              <td>${s.enabled ? `<span class="pill" style="background:rgba(34,197,94,.16);color:#34D399">включено</span>` : '<span class="pill pill-dim">пауза</span>'}</td>
+              <td class="actions">
+                <button class="btn btn-sm btn-ok" data-sc-sched-run="${esc(s.id)}">Пусни сега</button>
+                <button class="btn btn-sm btn-ghost" data-sc-sched-edit="${esc(s.id)}">Редакция</button>
+                <button class="btn btn-sm btn-ghost" data-sc-sched-stats="${esc(s.domain)}">Статистика</button>
+                <button class="btn btn-sm btn-ghost" data-sc-sched-toggle="${esc(s.id)}" data-on="${s.enabled ? '1' : '0'}">${s.enabled ? '⏸ Пауза' : '▶ Пусни'}</button>
+                <button class="btn btn-sm btn-danger" data-sc-sched-del="${esc(s.id)}">Изтрий</button>
+              </td>
+            </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function bindScraperSchedules() {
+  const openSchedForm = (s) =>
+    openModal(
+      s ? 'Редакция на разписание' : 'Ново разписание',
+      `
+      <div class="hint" style="margin-bottom:10px">Квотата се разпределя на групи през активните часове, на случаен интервал. Така сайтът вижда нормален трафик, а не 20 заявки за минута.</div>
+      <label class="field full"><span>Адрес на магазина / категорията</span>
+        <input id="sch-url" placeholder="https://magazin.bg/kategoriya" value="${esc(s?.url || '')}"></label>
+      <div class="form-grid" style="margin-top:8px">
+        <label class="field"><span>Име (за теб)</span><input id="sch-label" value="${esc(s?.label || '')}"></label>
+        <label class="field"><span>Колко продукта на ден</span><input id="sch-quota" type="number" min="1" max="2000" value="${Number(s?.daily_quota ?? 20)}"></label>
+        <label class="field"><span>Група от</span><input id="sch-bmin" type="number" min="1" max="200" value="${Number(s?.burst_min ?? 3)}"></label>
+        <label class="field"><span>Група до</span><input id="sch-bmax" type="number" min="1" max="200" value="${Number(s?.burst_max ?? 6)}"></label>
+        <label class="field"><span>Активен от (час)</span><input id="sch-hf" type="number" min="0" max="23" value="${Number(s?.hour_from ?? 8)}"></label>
+        <label class="field"><span>Активен до (час)</span><input id="sch-ht" type="number" min="1" max="24" value="${Number(s?.hour_to ?? 22)}"></label>
+        <label class="field"><span>Мин. пауза между пускания (мин)</span><input id="sch-gap" type="number" min="0" max="1440" value="${Number(s?.min_gap_min ?? 20)}"></label>
+        <label class="field"><span>Какво да прави</span>
+          <select id="sch-mode">
+            <option value="import"${(s?.mode || 'import') === 'import' ? ' selected' : ''}>Внасяй директно</option>
+            <option value="preview"${s?.mode === 'preview' ? ' selected' : ''}>Само показвай (преглед)</option>
+          </select></label>
+        <label class="field"><span>Състояние</span>
+          <select id="sch-enabled">
+            <option value="1"${s?.enabled !== false ? ' selected' : ''}>Включено</option>
+            <option value="0"${s?.enabled === false ? ' selected' : ''}>Изключено</option>
+          </select></label>
+      </div>`,
+      [
+        {
+          id: 'sch-save',
+          label: s ? 'Запази' : 'Създай',
+          cls: 'btn-primary',
+          onClick: async () => {
+            const body = {
+              url: $('#sch-url').value.trim(),
+              label: $('#sch-label').value.trim() || undefined,
+              dailyQuota: Number($('#sch-quota').value),
+              burstMin: Number($('#sch-bmin').value),
+              burstMax: Number($('#sch-bmax').value),
+              hourFrom: Number($('#sch-hf').value),
+              hourTo: Number($('#sch-ht').value),
+              minGapMin: Number($('#sch-gap').value),
+              mode: $('#sch-mode').value,
+              enabled: $('#sch-enabled').value === '1',
+            };
+            try {
+              if (s) await api(`/scraper/schedules/${s.id}`, { method: 'PATCH', body });
+              else await api('/scraper/schedules', { method: 'POST', body });
+              toast(s ? 'Разписанието е обновено' : 'Разписанието е създадено — ще тръгне само, на случаен момент');
+              closeModal();
+              render('scraper', true);
+            } catch (e) {
+              toast(e.message, 'error');
+            }
+          },
+        },
+        { id: 'sch-cancel', label: 'Отказ', cls: 'btn-ghost', onClick: closeModal },
+      ],
+      true
+    );
+
+  $('#sc-sched-add')?.addEventListener('click', async () => {
+    openSchedForm(null);
+  });
+
+  document.querySelectorAll('[data-sc-sched-edit]').forEach((b) => {
+    b.onclick = async () => {
+      const all = await api('/scraper/schedules');
+      const s = (all.items || []).find((x) => x.id === b.dataset.scSchedEdit);
+      openSchedForm(s || null);
+    };
+  });
+
+  document.querySelectorAll('[data-sc-sched-run]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api(`/scraper/schedules/${b.dataset.scSchedRun}/run`, { method: 'POST', body: { force: true } });
+        toast('Пуснато');
+        scraperJobId = r.jobId;
+        await render('scraper', true);
+      } catch (e) {
+        toast(e.message, 'error');
+        b.disabled = false;
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-sc-sched-toggle]').forEach((b) => {
+    b.onclick = async () => {
+      const on = b.dataset.on === '1';
+      await api(`/scraper/schedules/${b.dataset.scSchedToggle}`, { method: 'PATCH', body: { enabled: !on } });
+      toast(on ? 'Разписанието е на пауза' : 'Разписанието е включено');
+      render('scraper', true);
+    };
+  });
+
+  document.querySelectorAll('[data-sc-sched-del]').forEach((b) => {
+    b.onclick = () =>
+      confirmAction({
+        title: 'Изтриване на разписание',
+        message: 'Да изтрия ли разписанието? Вече внесените продукти остават.',
+        confirmLabel: 'Изтрий',
+        onConfirm: async () => {
+          await api(`/scraper/schedules/${b.dataset.scSchedDel}`, { method: 'DELETE' });
+          toast('Изтрито');
+          closeModal();
+          render('scraper', true);
+        },
+      });
+  });
+
+  document.querySelectorAll('[data-sc-sched-stats]').forEach((b) => {
+    b.onclick = async () => {
+      const domain = b.dataset.scSchedStats;
+      openModal(
+        `Статистика: ${domain}`,
+        '<div id="sc-stats-body"><div class="hint"><span class="spinner"></span> Смятам…</div></div>',
+        [{ id: 'sc-stats-close', label: 'Затвори', cls: 'btn-ghost', onClick: closeModal }],
+        true
+      );
+      try {
+        const d = await api(`/scraper/sites/${encodeURIComponent(domain)}/stats`);
+        const t = d.totals || {};
+        $('#sc-stats-body').innerHTML = `
+          <div class="grid grid-3" style="gap:10px;margin-bottom:12px">
+            <div class="card kpi"><div class="kpi-label">Внесени продукти</div><div class="kpi-value cyan">${num(t.imported)}</div></div>
+            <div class="card kpi"><div class="kpi-label">Обходени страници</div><div class="kpi-value gold">${num(t.crawled)}</div><div class="kpi-sub">${num(t.jobs)} обиколки</div></div>
+            <div class="card kpi"><div class="kpi-label">Прочетени / пропуснати</div><div class="kpi-value">${num(t.parsed)} / ${num(t.skipped)}</div><div class="kpi-sub">грешки: ${num(t.failed)}</div></div>
+          </div>
+          <div class="hint" style="margin-bottom:10px">Първа обиколка: ${t.first_run ? dt(t.first_run) : '—'} · Последна: ${t.last_run ? dt(t.last_run) : '—'}
+            ${d.site?.strategy ? ` · стратегия: <strong>${esc(d.site.strategy)}</strong>` : ''}</div>
+          <div class="card-title" style="margin-top:8px">По дни</div>
+          <div class="table-wrap" style="max-height:220px;overflow:auto">
+            <table><thead><tr><th>Ден</th><th>Обиколки</th><th>Внесени</th><th>Прочетени</th><th>Обходени стр.</th></tr></thead><tbody>
+              ${(d.perDay || [])
+                .map((r) => `<tr><td>${esc(r.day)}</td><td>${num(r.jobs)}</td><td><strong>${num(r.imported)}</strong></td><td>${num(r.parsed)}</td><td>${num(r.crawled)}</td></tr>`)
+                .join('') || '<tr><td colspan="5" class="hint">още няма</td></tr>'}
+            </tbody></table>
+          </div>
+          <div class="card-title" style="margin-top:12px">Последни обиколки</div>
+          <div class="table-wrap" style="max-height:220px;overflow:auto">
+            <table><thead><tr><th>Кога</th><th>Вид</th><th>Състояние</th><th>Прочетени</th><th>Внесени</th><th>Обходени</th></tr></thead><tbody>
+              ${(d.runs || [])
+                .map(
+                  (r) => `<tr><td>${dt(r.created_at)}</td><td>${r.source_kind === 'schedule' ? 'разписание' : 'ръчно'}</td>
+                  <td>${esc(SCRAPE_STATUS_LABELS[r.status] || r.status)}</td><td>${num(r.parsed)}</td>
+                  <td><strong>${num(r.imported)}</strong></td><td>${num(r.pages_visited)}</td></tr>`
+                )
+                .join('') || '<tr><td colspan="6" class="hint">още няма</td></tr>'}
+            </tbody></table>
+          </div>`;
+      } catch (e) {
+        $('#sc-stats-body').innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
+      }
+    };
+  });
+}
+
+function scraperHistoryHtml(items) {
+  if (!items.length) return '';
+  return `
+    <div class="card">
+      <div class="card-title">🕐 История на обиколките</div>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead><tr><th>Магазин</th><th>Вид</th><th>Режим</th><th>Състояние</th><th>Открити</th><th>Прочетени</th><th>Обходени</th><th>Внесени</th><th>Пропуснати</th><th>Кога</th><th></th></tr></thead>
+          <tbody>
+            ${items
+              .map(
+                (j) => `<tr>
+              <td><strong>${esc(j.domain)}</strong><div class="hint" style="margin:0">${esc(String(j.url).slice(0, 46))}</div></td>
+              <td>${j.source_kind === 'schedule' ? '<span class="pill pill-dim">разписание</span>' : 'ръчно'}</td>
+              <td>${j.mode === 'import' ? 'директно' : 'преглед'}</td>
+              <td>${
+                ['done'].includes(j.status)
+                  ? `<span class="pill" style="background:rgba(34,197,94,.16);color:#34D399">${esc(SCRAPE_STATUS_LABELS[j.status] || j.status)}</span>`
+                  : j.status === 'failed'
+                    ? `<span class="pill" style="background:rgba(244,63,94,.16);color:#FB7185">счупи се</span>`
+                    : `<span class="pill pill-dim">${esc(SCRAPE_STATUS_LABELS[j.status] || j.status)}</span>`
+              }</td>
+              <td>${num(j.discovered)}</td>
+              <td>${num(j.parsed)}</td>
+              <td>${num(j.pages_visited)}</td>
+              <td>${num(j.imported)}</td>
+              <td>${num(j.skipped)}</td>
+              <td>${ago(j.created_at)}</td>
+              <td class="actions"><button class="btn btn-sm btn-ghost" data-sc-open="${esc(j.id)}">Отвори</button></td>
+            </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function bindScraperHistory() {
+  document.querySelectorAll('[data-sc-open]').forEach((b) => {
+    b.onclick = async () => {
+      scraperSelected = new Set();
+      scraperJobId = b.dataset.scOpen;
+      await scraperLoadJob();
+    };
+  });
+}
+
+function scraperSitesHtml(sites) {
+  if (!sites.length) {
+    return `<div class="card"><div class="card-title">🧠 Научени сайтове</div><div class="hint" style="margin-top:8px">Още нищо не е научено. След първата успешна обиколка тук ще видиш коя стратегия работи за всеки магазин.</div></div>`;
+  }
+  return `
+    <div class="card">
+      <div class="card-title">🧠 Научени сайтове <span class="pill pill-dim">${num(sites.length)}</span></div>
+      <div class="hint" style="margin:6px 0 10px">Стратегията се помни — вторият път за същия магазин е един клик. Можеш да добавиш ръчни селектори за упорит сайт.</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Домейн</th><th>Стратегия</th><th>Пускания</th><th>Последно успешно</th><th></th></tr></thead>
+          <tbody>
+            ${sites
+              .map(
+                (s) => `<tr>
+              <td><strong>${esc(s.domain)}</strong></td>
+              <td>${esc(s.strategy || '—')}</td>
+              <td>${num(s.runs)}</td>
+              <td>${s.last_ok_at ? ago(s.last_ok_at) : '—'}</td>
+              <td class="actions">
+                <button class="btn btn-sm btn-ghost" data-sc-site="${esc(s.domain)}">Селектори</button>
+                <button class="btn btn-sm btn-danger" data-sc-site-del="${esc(s.domain)}">Изтрий</button>
+              </td>
+            </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function bindScraperSites() {
+  document.querySelectorAll('[data-sc-site]').forEach((b) => {
+    b.onclick = async () => {
+      const domain = b.dataset.scSite;
+      const all = await api('/scraper/sites');
+      const site = (all.items || []).find((s) => s.domain === domain) || {};
+      const sel = site.selectors || {};
+      openModal(
+        `Селектори за ${domain}`,
+        `<div class="hint" style="margin-bottom:10px">Ползват се само ако автоматичните стратегии не стигнат. Формат: <code>title: h1</code>, <code>price: .price@text</code>, <code>image: img@src</code>, <code>list: a.product@href</code>.</div>
+         <label class="field full"><span>Селектори (по един на ред)</span>
+           <textarea id="sc-site-sel" rows="6">${esc(Object.entries(sel).map(([k, v]) => `${k}: ${v}`).join('\n'))}</textarea></label>
+         <label class="field full"><span>Бележки</span>
+           <textarea id="sc-site-notes" rows="3">${esc(site.notes || '')}</textarea></label>`,
+        [
+          {
+            id: 'sc-site-save',
+            label: 'Запази',
+            cls: 'btn-primary',
+            onClick: async () => {
+              const selectors = {};
+              ($('#sc-site-sel').value || '').split('\n').forEach((line) => {
+                const i = line.indexOf(':');
+                if (i > 0) selectors[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+              });
+              try {
+                await api(`/scraper/sites/${encodeURIComponent(domain)}`, {
+                  method: 'PATCH',
+                  body: { selectors, notes: $('#sc-site-notes').value.trim() },
+                });
+                toast('Селекторите са записани');
+                closeModal();
+                render('scraper', true);
+              } catch (e) {
+                toast(e.message, 'error');
+              }
+            },
+          },
+          { id: 'sc-site-cancel', label: 'Отказ', cls: 'btn-ghost', onClick: closeModal },
+        ],
+        true
+      );
+    };
+  });
+
+  document.querySelectorAll('[data-sc-site-del]').forEach((b) => {
+    b.onclick = () =>
+      confirmAction({
+        title: 'Изтриване на наученото',
+        message: `Да изтрия ли наученото за „${esc(b.dataset.scSiteDel)}“?`,
+        details: ['Следващият път системата ще проучва сайта отначало.'],
+        confirmLabel: 'Изтрий',
+        onConfirm: async () => {
+          await api(`/scraper/sites/${encodeURIComponent(b.dataset.scSiteDel)}`, { method: 'DELETE' });
+          toast('Изтрито');
+          closeModal();
+          render('scraper', true);
+        },
+      });
+  });
+}
+
+/** Зарежда задачата и рисува прогреса + таблицата с продукти. */
+async function scraperLoadJob() {
+  const id = scraperJobId;
+  const data = await api(`/scraper/jobs/${id}`);
+  const job = data.job;
+  const items = data.items || [];
+  const counts = data.counts || {};
+  const bar = $('#sc-job');
+  if (!bar) return;
+
+  const active = ['queued', 'discovering', 'parsing', 'enriching', 'importing'].includes(job.status);
+  const total = Math.max(1, job.target_count || 1);
+  const donePct = Math.min(100, Math.round(((Number(job.parsed) || 0) / total) * 100));
+
+  bar.innerHTML = `
+    <div class="card" style="border-color:${active ? 'rgba(6,182,212,.55)' : job.status === 'failed' ? 'rgba(244,63,94,.5)' : 'rgba(34,197,94,.5)'}">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <span>${active ? '<span class="spinner"></span>' : job.status === 'done' ? '✅' : '⚠️'} Обиколка на ${esc(job.domain)}
+          <span class="pill pill-dim">${esc(SCRAPE_STATUS_LABELS[job.status] || job.status)}</span>
+          ${job.strategy ? `<span class="pill pill-dim">стратегия: ${esc(job.strategy)}</span>` : ''}
+          <span class="pill pill-dim">${job.mode === 'import' ? 'директен запис' : 'преглед преди внасяне'}</span></span>
+        <span style="display:flex;gap:8px">
+          ${active ? '<button class="btn btn-sm btn-danger" id="sc-cancel">⏹ Спри</button>' : `<button class="btn btn-sm btn-ghost" id="sc-retry">↻ Пусни пак</button>`}
+          <button class="btn btn-sm btn-ghost" id="sc-refresh">↻ Обнови</button>
+        </span>
+      </div>
+
+      <div class="bar-track" style="margin:10px 0 6px"><div class="bar-fill" id="sc-fill" style="width:${donePct}%"></div></div>
+      <div class="hint" id="sc-counts">
+        Открити: <strong>${num(job.discovered)}</strong> · Прочетени: <strong>${num(job.parsed)}</strong> ·
+        Внесени: <strong>${num(job.imported)}</strong> · Пропуснати: <strong>${num(job.skipped)}</strong> ·
+        Грешки: <strong>${num(job.failed)}</strong> · Чакат преглед: <strong>${num(counts.parsed || 0)}</strong>
+        ${job.error ? `<br><span style="color:#FB7185">${esc(job.error)}</span>` : ''}
+      </div>
+      <details style="margin-top:8px"${active ? ' open' : ''}>
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;padding:4px 0">Дневник на обиколката</summary>
+        <pre id="sc-log" style="max-height:190px;overflow:auto;background:rgba(148,163,184,.08);border-radius:10px;padding:10px;font-size:12px;line-height:1.6;margin:6px 0 0">${esc((job.log || []).join('\n'))}</pre>
+      </details>
+
+      ${
+        counts.parsed > 0
+          ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">
+               <button class="btn btn-ok" id="sc-import">⬇ Внеси избраните (<span id="sc-sel-count">${scraperSelected.size}</span>)</button>
+               <button class="btn btn-primary" id="sc-import-all">Внеси всички (${num(counts.parsed)})</button>
+               <button class="btn btn-ghost" id="sc-discard">✕ Отхвърли избраните</button>
+               <button class="btn btn-ghost" id="sc-selall">Избери всички</button>
+               <button class="btn btn-ghost" id="sc-selnone">Изчисти избора</button>
+             </div>`
+          : ''
+      }
+    </div>
+
+    ${
+      items.length
+        ? `<div class="card" style="margin-top:12px">
+             <div class="card-title">📦 Какво е извадено <span class="pill pill-dim">${num(items.length)}</span></div>
+             <div class="hint" style="margin:6px 0 10px">Това е истината от сайта — заглавие, цена, снимка, категория и описание. Нищо не влиза в приложението, докато не го одобриш.</div>
+             <div class="table-wrap" style="max-height:560px;overflow:auto">
+               <table>
+                 <thead><tr><th style="width:34px"></th><th style="width:72px">Снимка</th><th>Продукт</th><th>Цена</th><th>Категория</th><th>Състояние</th></tr></thead>
+                 <tbody>
+                   ${items
+                     .map(
+                       (it) => `<tr>
+                     <td>${it.status === 'parsed' ? `<input type="checkbox" data-sc-item="${esc(it.id)}"${scraperSelected.has(String(it.id)) ? ' checked' : ''}>` : ''}</td>
+                     <td>${it.local_image_url || it.image_url ? `<img src="${esc(it.local_image_url || it.image_url)}" loading="lazy" style="width:60px;height:60px;object-fit:cover;border-radius:8px">` : '<span class="hint">—</span>'}</td>
+                     <td>
+                       <div style="font-weight:700">${esc(it.title || '(без заглавие)')}</div>
+                       <div class="hint" style="margin:2px 0 0">${esc(String(it.description || '').slice(0, 190))}</div>
+                       <div class="hint" style="margin:2px 0 0"><a href="${esc(it.source_url)}" target="_blank" rel="noopener">източник ↗</a>${it.breadcrumb ? ' · ' + esc(it.breadcrumb) : ''}</div>
+                     </td>
+                     <td><strong>${it.price ? money(it.price) : '—'}</strong>${it.reference_price ? `<div class="hint" style="margin:0">за сравнение: ${money(it.reference_price)}</div>` : ''}</td>
+                     <td>${esc(SCRAPE_CAT_LABELS[it.category] || it.category || '—')}${it.polarity ? ` ${it.polarity === 'green' ? '🟢' : '🔴'}` : ''}</td>
+                     <td>${
+                       it.status === 'imported'
+                         ? `<span class="pill" style="background:rgba(34,197,94,.16);color:#34D399">внесен</span>`
+                         : it.status === 'skipped'
+                           ? `<span class="pill pill-dim">пропуснат</span><div class="hint" style="margin:2px 0 0">${esc(it.reason || '')}</div>`
+                           : it.status === 'failed'
+                             ? `<span class="pill" style="background:rgba(244,63,94,.16);color:#FB7185">грешка</span><div class="hint" style="margin:2px 0 0">${esc(it.reason || '')}</div>`
+                             : '<span class="pill pill-dim">чака преглед</span>'
+                     }</td>
+                   </tr>`
+                     )
+                     .join('')}
+                 </tbody>
+               </table>
+             </div>
+           </div>`
+        : ''
+    }`;
+
+  /* ------------------------------------------------------- събития */
+
+  $('#sc-refresh')?.addEventListener('click', () => scraperLoadJob());
+  $('#sc-cancel')?.addEventListener('click', () =>
+    confirmAction({
+      title: 'Спиране на обиколката',
+      message: 'Да спра ли задачата? Вече внесеното остава.',
+      confirmLabel: 'Спри',
+      onConfirm: async () => {
+        await api(`/scraper/jobs/${job.id}/cancel`, { method: 'POST' });
+        toast('Спряно');
+        closeModal();
+        await scraperLoadJob();
+      },
+    })
+  );
+  $('#sc-retry')?.addEventListener('click', async () => {
+    await api(`/scraper/jobs/${job.id}/retry`, { method: 'POST' });
+    toast('Пусната отново');
+    await scraperLoadJob();
+  });
+
+  document.querySelectorAll('[data-sc-item]').forEach((cb) => {
+    cb.onchange = () => {
+      const id = String(cb.dataset.scItem);
+      if (cb.checked) scraperSelected.add(id);
+      else scraperSelected.delete(id);
+      const el = $('#sc-sel-count');
+      if (el) el.textContent = String(scraperSelected.size);
+    };
+  });
+
+  $('#sc-selall')?.addEventListener('click', () => {
+    document.querySelectorAll('[data-sc-item]').forEach((cb) => {
+      cb.checked = true;
+      scraperSelected.add(String(cb.dataset.scItem));
+    });
+    const el = $('#sc-sel-count');
+    if (el) el.textContent = String(scraperSelected.size);
+  });
+  $('#sc-selnone')?.addEventListener('click', () => {
+    scraperSelected = new Set();
+    document.querySelectorAll('[data-sc-item]').forEach((cb) => {
+      cb.checked = false;
+    });
+    const el = $('#sc-sel-count');
+    if (el) el.textContent = '0';
+  });
+
+  $('#sc-import')?.addEventListener('click', async () => {
+    if (scraperSelected.size === 0) return toast('Избери продукти с чекчетата', 'warn');
+    const btn = $('#sc-import');
+    btn.disabled = true;
+    btn.textContent = 'Внасям…';
+    try {
+      const res = await api(`/scraper/jobs/${job.id}/import`, {
+        method: 'POST',
+        body: { ids: [...scraperSelected].map(Number) },
+      });
+      toast(`Внесени: ${res.imported}${res.skipped ? `, пропуснати: ${res.skipped}` : ''}`);
+      if (res.failed?.length) toast(`Не минаха: ${res.failed.length}`, 'warn');
+      scraperSelected = new Set();
+      await scraperLoadJob();
+    } catch (e) {
+      toast(e.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '⬇ Внеси избраните';
+    }
+  });
+
+  $('#sc-import-all')?.addEventListener('click', () =>
+    confirmAction({
+      title: 'Внасяне на всичко',
+      message: `Да внеса ли всичките ${num(counts.parsed)} продукта от прегледа?`,
+      details: ['Влизат под профила „SmartPrice Редакция“ с етикет „ОТ МАГАЗИН“.', 'Снимките се свалят при нас.'],
+      confirmLabel: 'Внеси всички',
+      danger: false,
+      onConfirm: async () => {
+        const res = await api(`/scraper/jobs/${job.id}/import`, { method: 'POST', body: { all: true } });
+        toast(`Внесени: ${res.imported}${res.skipped ? `, пропуснати: ${res.skipped}` : ''}`);
+        closeModal();
+        await scraperLoadJob();
+      },
+    })
+  );
+
+  $('#sc-discard')?.addEventListener('click', async () => {
+    if (scraperSelected.size === 0) return toast('Избери какво да отхвърля', 'warn');
+    await api(`/scraper/jobs/${job.id}/discard`, {
+      method: 'POST',
+      body: { ids: [...scraperSelected].map(Number) },
+    });
+    toast('Отхвърлени');
+    scraperSelected = new Set();
+    await scraperLoadJob();
+  });
+
+  /* --------------------------------------------------- следене на прогреса */
+  if (active) {
+    scraperStopPoll();
+    scraperPoll = setInterval(async () => {
+      if (state.page !== 'scraper') return scraperStopPoll();
+      try {
+        const fresh = await api(`/scraper/jobs/${id}`);
+        const j = fresh.job;
+        const c = fresh.counts || {};
+        const fill = $('#sc-fill');
+        if (fill) fill.style.width = `${Math.min(100, Math.round(((Number(j.parsed) || 0) / Math.max(1, j.target_count || 1)) * 100))}%`;
+        const countsEl = $('#sc-counts');
+        if (countsEl) {
+          countsEl.innerHTML = `Открити: <strong>${num(j.discovered)}</strong> · Прочетени: <strong>${num(j.parsed)}</strong> ·
+            Внесени: <strong>${num(j.imported)}</strong> · Пропуснати: <strong>${num(j.skipped)}</strong> ·
+            Грешки: <strong>${num(j.failed)}</strong> · Чакат преглед: <strong>${num(c.parsed || 0)}</strong>
+            ${j.error ? `<br><span style="color:#FB7185">${esc(j.error)}</span>` : ''}`;
+        }
+        const logEl = $('#sc-log');
+        if (logEl) {
+          const wasBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 24;
+          logEl.textContent = (j.log || []).join('\n');
+          if (wasBottom) logEl.scrollTop = logEl.scrollHeight;
+        }
+        if (!['queued', 'discovering', 'parsing', 'enriching', 'importing'].includes(j.status)) {
+          scraperStopPoll();
+          await scraperLoadJob();
+        }
+      } catch {
+        scraperStopPoll();
+      }
+    }, 2500);
+  }
 }
 
 /* ------------------------------------------------------------ покани */

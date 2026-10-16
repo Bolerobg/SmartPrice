@@ -34,6 +34,7 @@ const SOURCE_LABEL: Record<string, { text: string; icon: string; hint: string }>
   brochure: { text: 'ОТ БРОШУРА', icon: 'document-outline', hint: 'Официална брошура/каталог' },
   tiktok_signal: { text: 'СИГНАЛ', icon: 'megaphone-outline', hint: 'Сигнал, споделен с разрешение' },
   import: { text: 'ВНЕСЕНО', icon: 'cloud-download-outline', hint: 'Внесено от редакцията' },
+  scraper: { text: 'ОТ МАГАЗИН', icon: 'storefront-outline', hint: 'Цена от онлайн магазин' },
 };
 
 interface PostCardProps {
@@ -58,6 +59,13 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
   const accentBorder = isGreen ? COLORS.greenBorder : COLORS.redBorder;
 
   const categoryObj = CATEGORIES.find((c) => c.id === post.category);
+
+  // Кой е сайтът, ако цената е дошла от онлайн магазин. Бележката на внесените
+  // оферти е „Онлайн магазин <домейн>: <адрес на продукта>“ — вадим домейна.
+  const shopWhere = (() => {
+    const m = /Онлайн магазин\s+([^\s:]+)/.exec(post.sourceNote || '');
+    return m ? m[1]! : '';
+  })();
 
   // Изчисляване на % спестяване или % надценка
   const priceDiffPercent =
@@ -230,6 +238,27 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
               <Text style={styles.placeNameText} numberOfLines={1}>
                 {post.placeName} • {post.city}
               </Text>
+              {/* Онлайн или физически магазин — ясно, преди човек да тръгне натам.
+                  За онлайн показваме и сайта; за физически — адреса. */}
+              {post.source === 'scraper' || post.platformTag === 'Онлайн магазин' ? (
+                <View style={styles.shopKindRow}>
+                  <Ionicons name="globe-outline" size={11} color={COLORS.accentCyan} />
+                  <Text style={styles.shopKindOnline}>ОНЛАЙН МАГАЗИН</Text>
+                  {shopWhere ? (
+                    <Text style={styles.shopKindWhere} numberOfLines={1}>
+                      · {shopWhere}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : post.address || post.googleMapsUrl ? (
+                <View style={styles.shopKindRow}>
+                  <Ionicons name="location-outline" size={11} color={COLORS.goldPrimary} />
+                  <Text style={styles.shopKindPhysical}>ФИЗИЧЕСКИ МАГАЗИН</Text>
+                  <Text style={styles.shopKindWhere} numberOfLines={1}>
+                    · {post.address || post.city}
+                  </Text>
+                </View>
+              ) : null}
             </View>
             {/* Кога е сложена офертата — точната дата, не само „преди N дни“ */}
             <View style={styles.postedAtRow}>
@@ -921,6 +950,32 @@ const styles = StyleSheet.create({
   placeNameText: {
     color: COLORS.textSecondary,
     fontSize: 12,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  /* Онлайн / физически магазин */
+  shopKindRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+    flexWrap: 'nowrap',
+  },
+  shopKindOnline: {
+    color: COLORS.accentCyan,
+    fontSize: 9.5,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  shopKindPhysical: {
+    color: COLORS.goldPrimary,
+    fontSize: 9.5,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  shopKindWhere: {
+    color: COLORS.textMuted,
+    fontSize: 10.5,
     fontWeight: '600',
     flexShrink: 1,
   },
