@@ -758,8 +758,13 @@ function parseAnswer(raw: string): ModelAnswer {
     };
   } catch {
     // Не сме в състояние да парснем → даваме текста както е, без бутони.
+    // Ако и текст няма — по-добре честно „моментна претовареност“, отколкото
+    // загадъчно „Млъкнах“: човекът да знае, че е до сървъра, не до него.
+    const salvaged = text.replace(/^[\s{]*"?(reply)"?\s*:\s*"?/i, '').replace(/"?,?\s*$/, '');
     return {
-      reply: text.slice(0, 2000) || 'Млъкнах за момент 😅 Питай пак?',
+      reply:
+        (salvaged.length > 3 ? salvaged.slice(0, 2000) : '') ||
+        'Моментна претовареност — не успях да подредя отговора. Питай пак след секунда 🙏',
       steps: [],
       mood: 'заинтригуван',
       suggestions: [],
@@ -775,40 +780,75 @@ async function callDeepSeek(
   const kb = knowledgeBlock(knowledge);
   const system = [PERSONA, groundingBlock(grounding), kb].filter(Boolean).join('\n\n---\n\n');
 
-  const response = await fetch(`${env.DEEPSEEK_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: env.ASSISTANT_MODEL,
-      // Колко да „мисли“ моделът. За чат low = бърз отговор (~2 сек).
-      effort: env.ASSISTANT_EFFORT,
-      max_tokens: env.ASSISTANT_MAX_TOKENS,
-      temperature: 1.1,
-      response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: system }, ...turns],
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
+  /**
+   * Едно извикване към DeepSeek.
+   *
+   * Връща и `content`, и `reasoning` — при моделите с „мислене“ целият бюджет
+   * понякога отива в мисленето и видимият отговор идва ПРАЗЕН. Точно това
+   * караше Ценко да казва „Млъкнах за момент“ на по-дългите въпроси.
+   */
+  const once = async (maxTokens: number) => {
+    const response = await fetch(`${env.DEEPSEEK_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: env.ASSISTANT_MODEL,
+        // Колко да „мисли“ моделът. За чат low = бърз отговор (~2 сек).
+        effort: env.ASSISTANT_EFFORT,
+        max_tokens: maxTokens,
+        temperature: 1.1,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: system }, ...turns],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
 
-  if (!response.ok) {
-    const detail = (await response.text().catch(() => '')).slice(0, 400);
-    throw new Error(`DeepSeek ${response.status}: ${detail}`);
-  }
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => '')).slice(0, 400);
+      throw new Error(`DeepSeek ${response.status}: ${detail}`);
+    }
 
-  const data = (await response.json()) as {
-    model?: string;
-    choices?: Array<{ message?: { content?: string } }>;
-    usage?: Record<string, number>;
+    const data = (await response.json()) as {
+      model?: string;
+      choices?: Array<{
+        message?: { content?: string; reasoning_content?: string };
+        finish_reason?: string;
+      }>;
+      usage?: Record<string, number>;
+    };
+
+    const msg = data.choices?.[0]?.message;
+    return {
+      content: (msg?.content ?? '').trim(),
+      reasoning: (msg?.reasoning_content ?? '').trim(),
+      finish: data.choices?.[0]?.finish_reason ?? '',
+      usage: data.usage ?? {},
+      model: data.model ?? env.ASSISTANT_MODEL,
+    };
   };
 
-  const content = data.choices?.[0]?.message?.content ?? '';
+  let first = await once(env.ASSISTANT_MAX_TOKENS);
+
+  // Ако отговорът е празен (или е само мислене), опитваме пак с двойно повече
+  // място. Второто извикване обикновено минава — първото е изяло бюджета.
+  if (!first.content) {
+    first = await once(Math.max(1200, env.ASSISTANT_MAX_TOKENS * 2));
+  }
+
+  if (!first.content) {
+    // Честно: по-добре ясна грешка, отколкото „Млъкнах“ без причина.
+    throw new Error(
+      `DeepSeek върна празен отговор (finish=${first.finish || '?'}, мислене ${first.reasoning.length} знака)`
+    );
+  }
+
   return {
-    answer: parseAnswer(content),
-    usage: data.usage ?? {},
-    model: data.model ?? env.ASSISTANT_MODEL,
+    answer: parseAnswer(first.content),
+    usage: first.usage,
+    model: first.model,
   };
 }
 
