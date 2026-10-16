@@ -28,7 +28,7 @@ import { COLORS } from '@/constants/theme';
 const APP_DISPLAY_HOST = (process.env.EXPO_PUBLIC_API_URL || 'https://smartprice.bg')
   .replace(/^https?:\/\//, '')
   .replace(/\/+$/, '');
-const MIN_SPLASH_MS = 3200;
+const MIN_SPLASH_MS = 5600;
 
 /** Трите обещания, които се появяват едно след друго на сплаша. */
 const SPLASH_FEATURES: { icon: string; text: string }[] = [
