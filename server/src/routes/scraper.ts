@@ -72,6 +72,8 @@ export default async function scraperRoutes(app: FastifyInstance) {
       imported: number;
       skipped: number;
       failed: number;
+      pages_visited: number;
+      source_kind: string;
       strategy: string | null;
       log: string[] | null;
       error: string | null;
@@ -80,7 +82,8 @@ export default async function scraperRoutes(app: FastifyInstance) {
       finished_at: string | null;
     }>(
       `select id, url, domain, status, mode, options, target_count,
-              discovered, parsed, imported, skipped, failed, strategy, log, error,
+              discovered, parsed, imported, skipped, failed, pages_visited, source_kind,
+              strategy, log, error,
               created_at::text, started_at::text, finished_at::text
          from scrape_jobs where id = $1`,
       [id]
