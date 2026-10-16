@@ -92,6 +92,16 @@ export const SCRAPE_CATEGORIES = [
 const UA =
   'Mozilla/5.0 (compatible; SmartPriceBot/1.0; +https://smartprice.bg; product-prices)';
 
+/**
+ * Какво приемаме по подразбиране — само страници.
+ *
+ * ВАЖНО: тук НЕ бива да има „application/json“. Магазини с AJAX модули
+ * (PrestaShop) връщат JSON-парче вместо цялата страница, ако клиентът каже,
+ * че приема JSON — видяно на живо на iskambg.com. Затова JSON се иска
+ * изрично, само там, където наистина чакаме JSON.
+ */
+const DEFAULT_ACCEPT = 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8';
+
 /* ================================================================ мрежа */
 
 function isPrivateHost(host: string): boolean {
@@ -232,13 +242,17 @@ export async function politeFetch(url: string, opts: FetchOpts = {}): Promise<Fe
   await politeDelay(url0.host, Math.max(0, Math.min(5000, opts.delayMs ?? DEFAULTS.delayMs)));
 
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Ако не сме искали JSON изрично, а сървърът върне JSON, опитваме пак само с
+  // HTML. Иначе PrestaShop и подобни връщат AJAX-парче вместо страницата —
+  // точно заради „application/json“ в Accept (видяно на iskambg.com).
+  let htmlOnly = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
     countVisit(opts.jobId);
     try {
       const res = await fetch(url0.toString(), {
         headers: {
           'User-Agent': UA,
-          Accept: opts.accept ?? 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+          Accept: opts.accept ?? (htmlOnly ? 'text/html,application/xhtml+xml' : DEFAULT_ACCEPT),
           'Accept-Language': 'bg,en;q=0.8',
         },
         redirect: 'follow',
@@ -247,6 +261,12 @@ export async function politeFetch(url: string, opts: FetchOpts = {}): Promise<Fe
       const contentType = res.headers.get('content-type') ?? '';
       const isText = /json|html|xml|text/i.test(contentType);
       const text = isText ? (await res.text()).slice(0, 1_500_000) : '';
+
+      if (!opts.accept && /json/i.test(contentType) && !htmlOnly) {
+        htmlOnly = true;
+        await sleep(200);
+        continue;
+      }
       return { ok: res.ok, status: res.status, url: res.url || url0.toString(), contentType, text };
     } catch (err) {
       lastErr = err;
@@ -511,12 +531,47 @@ export function selectFirst(html: string, selector: string): string | undefined 
   return undefined;
 }
 
-/** Всички връзки към продукти от листинг страница. */
+/** Пътища, които никога не са продукт (количка, вход, блог, търсене…). */
+const NOT_A_PRODUCT =
+  /(cart|checkout|login|logowanie|my-account|account|contact|kontakt|wishlist|compare|register|password|order|basket|koshnitsa|koshnic|favorites|loyalty|blog|news|prices-drop|new-products|best-sales|sitemap|manufacturer|supplier|search|404|gdpr|cookie|privacy|terms|delivery|payment)/i;
+
+/** PrestaShop-стил продуктов адрес: `/12345-ime-na-produkt.html`. */
+const PRODUCT_HTML = /\/\d+[-a-zа-я0-9_]*\.html?$/i;
+/** PrestaShop/други: `?id_product=123`. */
+const PRODUCT_QUERY = /[?&](id_product|product_id|pid)=\d+/i;
+/** Думи, които почти винаги значат „това е продукт“. */
+const PRODUCT_WORD =
+  /\/(product|produkt|produkti|продукт|p|item|art|tovar|stoka|shop|catalog|katalog)\//i;
+
+const IMG_EXT = /\.(jpg|jpeg|png|webp|gif|svg|pdf|zip|css|js)$/i;
+
+function hrefLooksLikeProduct(href: string, inner: string): boolean {
+  if (!href || IMG_EXT.test(href)) return false;
+  if (/^(javascript:|mailto:|tel:|#)/i.test(href)) return false;
+  let path: string;
+  try {
+    const u = new URL(href, 'https://x.local');
+    path = u.pathname + u.search;
+  } catch {
+    return false;
+  }
+  if (NOT_A_PRODUCT.test(path)) return false;
+  if (PRODUCT_WORD.test(path) || PRODUCT_HTML.test(path) || PRODUCT_QUERY.test(path)) return true;
+  // Последна надежда: връзка със снимка вътре и число в адреса (много магазини
+  // слагат ID-то в адреса, без да е в „/product/“).
+  return /<img/i.test(inner) && /\d/.test(path);
+}
+
+/**
+ * Всички връзки към продукти от листинг страница.
+ *
+ * Първо връща СИГУРНИТЕ продуктови адреси (PrestaShop `.html` с ID, `/product/`,
+ * `?id_product=`), а ако те са малко — и по-хлабавите. Така при голям листинг не
+ * хабим лимита по категории и страници.
+ */
 export function extractProductLinks(html: string, baseUrl: string, listSelector?: string): string[] {
   const links = new Set<string>();
   const base = new URL(baseUrl);
-  const productish = /\/(product|produkt|produkti|продукт|p|item|art|tovar|shop|catalog|katalog)\//i;
-  const bad = /\.(jpg|jpeg|png|webp|gif|svg|pdf|zip|css|js)$/i;
 
   if (listSelector) {
     const attr = /@([\w-]+)$/.exec(listSelector)?.[1] ?? 'href';
@@ -525,8 +580,7 @@ export function extractProductLinks(html: string, baseUrl: string, listSelector?
     const re = new RegExp(`<(${tag})([^>]*)>`, 'gi');
     let m: RegExpExecArray | null;
     while ((m = re.exec(html)) !== null) {
-      const attrs = m[2] ?? '';
-      const href = new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'i').exec(attrs)?.[1];
+      const href = new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'i').exec(m[2] ?? '')?.[1];
       if (href) {
         try {
           links.add(new URL(href, base).toString());
@@ -536,15 +590,12 @@ export function extractProductLinks(html: string, baseUrl: string, listSelector?
     return [...links];
   }
 
-  const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]{0,400}?)<\/a>/gi;
+  const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]{0,600}?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const href = m[1]!;
     const inner = m[2] ?? '';
-    if (bad.test(href)) continue;
-    // Продуктова връзка обикновено съдържа и снимка, или е в „/product/“ път.
-    const looksProduct = productish.test(href) || (/<img/i.test(inner) && /\d/.test(href));
-    if (!looksProduct) continue;
+    if (!hrefLooksLikeProduct(href, inner)) continue;
     try {
       const u = new URL(href, base);
       if (u.host !== base.host) continue;
@@ -552,7 +603,68 @@ export function extractProductLinks(html: string, baseUrl: string, listSelector?
       links.add(u.toString());
     } catch { /* ignore */ }
   }
-  return [...links];
+
+  const all = [...links];
+  const strong = all.filter((l) => {
+    const path = new URL(l).pathname;
+    return PRODUCT_HTML.test(path) || PRODUCT_WORD.test(path) || PRODUCT_QUERY.test(l);
+  });
+  return strong.length >= 3 ? [...strong, ...all.filter((l) => !strong.includes(l))] : all;
+}
+
+/**
+ * Вади продуктите НАПРАВО от картите в листинга — без да отваря всяка страница.
+ *
+ * Защо е важно: PrestaShop и половината магазини нямат нито sitemap, нито API.
+ * Но листингът им съдържа всичко нужно — снимка, име и цена до всяка връзка.
+ * Една заявка вместо тридесет, а и сайтовете ни харесват повече така.
+ */
+export function extractListingProducts(html: string, pageUrl: string): RawProduct[] {
+  const links = extractProductLinks(html, pageUrl);
+  if (!links.length) return [];
+
+  const out: RawProduct[] = [];
+  for (const link of links) {
+    const idx = html.indexOf(link.replace(/^https?:\/\/[^/]+/, ''));
+    const bare = link.split('?')[0]!.split('/').pop() ?? '';
+    const at = idx >= 0 ? idx : bare ? html.indexOf(bare) : -1;
+    if (at < 0) continue;
+    const window = html.slice(Math.max(0, at - 1200), at + 2600);
+
+    const imgTag = /<img\b([^>]*)>/i.exec(window)?.[1] ?? '';
+    const alt = /alt=["']([^"']{3,})["']/i.exec(imgTag)?.[1];
+    const titleAttr =
+      /title=["']([^"']{3,})["']/i.exec(window)?.[1] ?? /aria-label=["']([^"']{3,})["']/i.exec(window)?.[1];
+    const { price, currency } = extractGenericPrice(window);
+    const image = extractGenericImage(window, pageUrl);
+
+    const title = htmlToText(alt || titleAttr || '');
+    if (!title || title.length < 3) continue;
+    if (!price) continue;
+    if (!image) continue;
+
+    out.push({
+      sourceUrl: link,
+      title,
+      description: undefined,
+      price,
+      currency,
+      imageUrl: image,
+      via: 'listing-cards',
+    });
+  }
+  // Махаме повторенията: по адрес И по (име + цена). Магазините често показват
+  // един продукт няколко пъти (различни разфасовки/цветове на същата карта) —
+  // за приложението това е един и същ продукт и не бива да влиза два пъти.
+  const seenUrl = new Set<string>();
+  const seenName = new Set<string>();
+  return out.filter((p) => {
+    const nameKey = `${p.title.toLowerCase().replace(/\s+/g, ' ').trim()}|${p.price}`;
+    if (seenUrl.has(p.sourceUrl) || seenName.has(nameKey)) return false;
+    seenUrl.add(p.sourceUrl);
+    seenName.add(nameKey);
+    return true;
+  });
 }
 
 /** Безплатен, но често най-точен начин: продуктовият адрес по sitemap. */
@@ -1572,12 +1684,25 @@ export async function runJob(jobId: string): Promise<void> {
         if (sm.urls.length) {
           urls = sm.urls;
           strategy = 'sitemap';
-          await logLine(jobId, `Намерих sitemap — ${sm.urls.length} продуктови адреса.`);
+          await logLine(jobId, `Sitemap: намерих ${sm.urls.length} продуктови адреса.`);
         } else {
+          await logLine(jobId, 'Няма sitemap — гледам листинга.');
           const home = await politeFetch(job.url, fo);
-          urls = extractProductLinks(home.text, home.url, o.selectors?.list);
-          strategy = 'listing';
-          await logLine(jobId, `Обикалям листинга — намерих ${urls.length} връзки към продукти.`);
+          // Първо най-бързото: продуктите, изброени в самия листинг. За
+          // PrestaShop и повечето магазини това стига — една заявка вместо 30.
+          const cards = extractListingProducts(home.text, home.url);
+          if (cards.length >= 2) {
+            products = cards.slice(0, limit);
+            strategy = 'listing-cards';
+            await logLine(
+              jobId,
+              `Листингът съдържа ${cards.length} продукта в картите — взимам ги направо, без да отварям всяка страница.`
+            );
+          } else {
+            urls = extractProductLinks(home.text, home.url, o.selectors?.list);
+            strategy = 'listing';
+            await logLine(jobId, `Листингът даде ${urls.length} връзки към продукти.`);
+          }
         }
       } else {
         urls = [job.url];
@@ -1585,17 +1710,27 @@ export async function runJob(jobId: string): Promise<void> {
         await logLine(jobId, 'Това е страница на конкретен продукт.');
       }
 
-      if (!urls.length) {
+      if (!products.length && !urls.length) {
+        await syncVisited(jobId);
         await setStatus(jobId, 'failed', {
-          error: 'Не намерих продукти. Провери дали адресът е на категория или на магазин (не на начална страница без продукти).',
+          error:
+            `Не намерих продукти в ${job.domain}. Пробвах: Shopify каталог, WooCommerce, sitemap, ` +
+            `връзки в листинга и карти в листинга. Най-честата причина: сайтът е с JavaScript ` +
+            `(съдържанието идва чак след зареждане), или е нестандартен. Тогава дай ръчни селектори ` +
+            `(list: a.product@href, price: .price@text, image: img@src).`,
           finished_at: new Date(),
         });
         await logLine(jobId, 'Спирам: няма намерени продукти.');
         return;
       }
 
-      await query(`update scrape_jobs set discovered = $2 where id = $1`, [jobId, urls.length]);
+      await query(`update scrape_jobs set discovered = $2 where id = $1`, [
+        jobId,
+        Math.max(urls.length, products.length),
+      ]);
 
+      // Ако картите в листинга вече ни дадоха продуктите, не отваряме нищо друго.
+      if (!products.length) {
       const maxRead = Math.min(urls.length, limit * 2, o.maxPages * 60);
       for (const url of urls.slice(0, maxRead)) {
         if (await isCancelled(jobId)) {
@@ -1620,6 +1755,7 @@ export async function runJob(jobId: string): Promise<void> {
         await bump(jobId, 'parsed');
         await syncVisited(jobId);
       }
+      } // край на „ако картите от листинга не са ни дали продуктите“
     } else {
       await query(`update scrape_jobs set discovered = $2, parsed = $2 where id = $1`, [jobId, products.length]);
       await setStatus(jobId, 'parsing');
