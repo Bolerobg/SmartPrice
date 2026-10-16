@@ -20,6 +20,10 @@ interface Props {
   ourPriceEur: number;
   /** Начало на проверките — за да не питаме празно, ако родителят иска друго. */
   compact?: boolean;
+  /** Гост (без профил): сверката се вижда, но магазинът иска регистрация. */
+  guest?: boolean;
+  /** Какво да направим, когато гост натисне „Регистрирай се“. */
+  onRequireAuth?: () => void;
 }
 
 /** Какво да кажем под двете числа. */
@@ -50,7 +54,13 @@ function verdictColor(c: ShopPriceCheck | null): string {
   return c.diffEur > 0 ? COLORS.greenBright : COLORS.redBright;
 }
 
-export const ShopPriceCompare: React.FC<Props> = ({ postId, ourPriceEur, compact }) => {
+export const ShopPriceCompare: React.FC<Props> = ({
+  postId,
+  ourPriceEur,
+  compact,
+  guest,
+  onRequireAuth,
+}) => {
   const [check, setCheck] = useState<ShopPriceCheck | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -154,6 +164,48 @@ export const ShopPriceCompare: React.FC<Props> = ({ postId, ourPriceEur, compact
         <Text style={{ color: COLORS.textMuted, fontSize: 10 }}>
           Проверката чете публичната страница на продукта — не променя офертата.
         </Text>
+      ) : null}
+
+      {/* Гост: сверката е позволена, но магазинът се отваря само с профил. */}
+      {guest ? (
+        <View
+          style={{
+            gap: 7,
+            padding: 9,
+            borderRadius: 10,
+            backgroundColor: 'rgba(245, 158, 11, 0.10)',
+            borderWidth: 1,
+            borderColor: 'rgba(245, 158, 11, 0.35)',
+          }}
+        >
+          <Text style={{ color: COLORS.goldBright, fontSize: 11.5, fontWeight: '800' }}>
+            {check?.ok
+              ? '🔒 Цената е сверена. За да отвориш продукта в магазина, трябва профил.'
+              : '🔒 Отварянето на онлайн магазина е само за регистрирани.'}
+          </Text>
+          <Text style={{ color: COLORS.textSecondary, fontSize: 11 }}>
+            Профилът е безплатен и отнема 30 секунди — после отваряш магазина с едно натискане,
+            пазиш находки и участваш в томболата.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={onRequireAuth}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              paddingVertical: 9,
+              borderRadius: 10,
+              backgroundColor: COLORS.goldPrimary,
+            }}
+          >
+            <Ionicons name="rocket" size={14} color={COLORS.black} />
+            <Text style={{ color: COLORS.black, fontSize: 12, fontWeight: '900' }}>
+              Регистрирай се, за да продължиш
+            </Text>
+          </TouchableOpacity>
+        </View>
       ) : null}
     </View>
   );

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Linking,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -31,8 +30,14 @@ interface Props {
  * нямат профил. Без него линкът водеше до екран за вход и получателят
  * не виждаше самата оферта („споделяне навсякъде“ не работеше).
  */
-export const PublicPostPreview: React.FC<Props> = ({ id }) => {
+export const PublicPostPreview: React.FC<Props> = ({ id, onLogin }) => {
   const router = useRouter();
+  /**
+   * Гостът е в публичния преглед (по споделен линк) — без профил.
+   * Онлайн магазинът се отваря САМО след регистрация, затова тук водим към
+   * поканата за вход, а не към сайта на магазина.
+   */
+  const goRegister = onLogin ?? (() => router.replace('/(auth)/register' as never));
   const [post, setPost] = useState<PostItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -165,21 +170,24 @@ export const PublicPostPreview: React.FC<Props> = ({ id }) => {
           ) : null}
         </View>
 
-        {/* Сверка с магазина — същият блок като в приложението, и за гости. */}
+        {/* Сверка с магазина: гостът може да провери цената, но магазинът иска профил. */}
         {post.sourceUrl ? (
-          <ShopPriceCompare postId={post.id} ourPriceEur={post.pricePaid} />
+          <ShopPriceCompare
+            postId={post.id}
+            ourPriceEur={post.pricePaid}
+            guest
+            onRequireAuth={goRegister}
+          />
         ) : null}
 
         {post.sourceUrl ? (
           <TouchableOpacity
             style={styles.mapRow}
-            onPress={() =>
-              void Linking.openURL(post.sourceUrl as string).catch(() => undefined)
-            }
+            onPress={goRegister}
             activeOpacity={0.85}
           >
-            <Ionicons name="cart-outline" size={16} color="#60A5FA" />
-            <Text style={styles.mapText}>Отвори продукта в магазина</Text>
+            <Ionicons name="lock-closed" size={16} color={COLORS.goldBright} />
+            <Text style={styles.mapText}>Отвори продукта в магазина (само с профил)</Text>
             <Ionicons name="chevron-forward" size={15} color={COLORS.textMuted} />
           </TouchableOpacity>
         ) : null}
