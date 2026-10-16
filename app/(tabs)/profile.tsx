@@ -165,16 +165,18 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.raffleRow}>
-          <TouchableOpacity
-            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.goldBorder }]}
-            onPress={() => router.push('/admin/raffles' as never)}
-            activeOpacity={0.88}
-          >
-            <Ionicons name="settings" size={16} color={COLORS.goldBright} />
-            <Text style={[styles.storyCardBtnText, { color: COLORS.goldBright }]}>Админ</Text>
-          </TouchableOpacity>
-        </View>
+        {(userProfile.isAdmin || userProfile.role === 'admin') && (
+          <View style={styles.raffleRow}>
+            <TouchableOpacity
+              style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.goldBorder }]}
+              onPress={() => router.push('/admin/raffles' as never)}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="settings" size={16} color={COLORS.goldBright} />
+              <Text style={[styles.storyCardBtnText, { color: COLORS.goldBright }]}>Админ панел (Томболи)</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {userProfile.personalSavedBgn > 0 ? (
           <TouchableOpacity
@@ -551,9 +553,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: COLORS.greenBright,
-    borderRadius: 14,
-    paddingVertical: 13,
+    borderRadius: 16,
+    paddingVertical: 13.5,
     marginTop: 12,
+    shadowColor: COLORS.greenPrimary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 5,
   },
   storyCardBtnText: { color: COLORS.black, fontSize: 13.5, fontWeight: '900' },
   safeArea: {
@@ -567,21 +574,26 @@ const styles = StyleSheet.create({
   },
   profileCard: {
     backgroundColor: COLORS.bgCard,
-    borderRadius: 22,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
-    padding: 16,
+    padding: 18,
     marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 6,
   },
   profileTop: {
     flexDirection: 'row',
     gap: 14,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   avatar: {
     width: 68,
     height: 68,
-    borderRadius: 34,
+    borderRadius: 22,
     borderWidth: 2,
     borderColor: COLORS.goldBright,
   },
@@ -593,17 +605,18 @@ const styles = StyleSheet.create({
   },
   name: {
     color: COLORS.textPrimary,
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '900',
+    letterSpacing: -0.3,
   },
   vipBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 3.5,
     backgroundColor: COLORS.goldBright,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 999,
   },
   vipBadgeText: {
     color: COLORS.black,
@@ -618,14 +631,16 @@ const styles = StyleSheet.create({
   bio: {
     color: COLORS.textPrimary,
     fontSize: 12.5,
-    lineHeight: 18,
+    lineHeight: 18.5,
     marginTop: 6,
   },
   statsGrid: {
     flexDirection: 'row',
     backgroundColor: COLORS.bgSecondary,
-    borderRadius: 14,
-    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 16,
+    paddingVertical: 12,
   },
   statBox: {
     flex: 1,
@@ -633,52 +648,58 @@ const styles = StyleSheet.create({
   },
   statVal: {
     color: COLORS.textPrimary,
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '900',
+    letterSpacing: -0.3,
   },
   statLbl: {
     color: COLORS.textMuted,
     fontSize: 11,
-    marginTop: 2,
+    fontWeight: '600',
+    marginTop: 2.5,
   },
   monetizationCard: {
     backgroundColor: COLORS.bgCard,
-    borderRadius: 20,
-    borderWidth: 1.5,
+    borderRadius: 24,
+    borderWidth: 1,
     borderColor: COLORS.goldBorder,
-    padding: 15,
+    padding: 16,
     marginBottom: 16,
   },
   monetizationHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
-    marginBottom: 12,
+    gap: 11,
+    marginBottom: 14,
   },
   monetizationTitle: {
     color: COLORS.textPrimary,
-    fontSize: 14,
+    fontSize: 14.5,
     fontWeight: '800',
+    letterSpacing: -0.2,
   },
   monetizationSub: {
     color: COLORS.textSecondary,
     fontSize: 12,
-    lineHeight: 17,
+    lineHeight: 17.5,
     marginTop: 3,
   },
   monetizationActions: {
     flexDirection: 'row',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 9,
   },
   stripePrimaryBtn: {
     flex: 1,
+    minWidth: '46%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     backgroundColor: COLORS.goldBright,
-    paddingVertical: 11,
-    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 14,
   },
   stripePrimaryBtnText: {
     color: COLORS.black,
@@ -687,16 +708,17 @@ const styles = StyleSheet.create({
   },
   testNudgeBtn: {
     flex: 1,
+    minWidth: '46%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 6,
     backgroundColor: COLORS.bgSecondary,
     borderWidth: 1,
-    borderColor: COLORS.goldBorder,
-    paddingVertical: 11,
-    paddingHorizontal: 8,
-    borderRadius: 12,
+    borderColor: COLORS.borderStrong,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 14,
   },
   testNudgeBtnText: {
     color: COLORS.goldBright,
@@ -706,19 +728,19 @@ const styles = StyleSheet.create({
   installRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
+    gap: 12,
     backgroundColor: COLORS.bgCard,
-    borderRadius: 15,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.accentCyanBorder,
-    paddingHorizontal: 13,
+    paddingHorizontal: 14,
     paddingVertical: 13,
     marginBottom: 14,
   },
   installIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 13,
     backgroundColor: COLORS.accentCyanSoftBg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -733,23 +755,27 @@ const styles = StyleSheet.create({
   subTabsRow: {
     flexDirection: 'row',
     backgroundColor: COLORS.bgCard,
-    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 16,
     padding: 4,
     marginBottom: 14,
   },
   subTab: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 9,
     alignItems: 'center',
-    borderRadius: 10,
+    borderRadius: 12,
   },
   subTabActive: {
     backgroundColor: COLORS.bgCardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
   },
   subTabText: {
     color: COLORS.textSecondary,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   subTabTextActive: {
     color: COLORS.textPrimary,
@@ -761,14 +787,14 @@ const styles = StyleSheet.create({
   nextBadgeCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 9,
     backgroundColor: COLORS.goldSoftBg,
     borderWidth: 1,
     borderColor: COLORS.goldBorder,
-    borderRadius: 14,
-    padding: 11,
+    borderRadius: 16,
+    padding: 12,
   },
-  nextBadgeText: { flex: 1, color: COLORS.textSecondary, fontSize: 11.5, lineHeight: 16 },
+  nextBadgeText: { flex: 1, color: COLORS.textSecondary, fontSize: 11.5, lineHeight: 16.5 },
   nextBadgeStrong: { color: COLORS.goldBright, fontWeight: '900' },
   badgeCardLocked: {
     opacity: 0.75,
@@ -788,13 +814,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    borderRadius: 16,
-    padding: 13,
+    borderRadius: 18,
+    padding: 14,
   },
   badgeIconCircle: {
     width: 46,
     height: 46,
-    borderRadius: 23,
+    borderRadius: 15,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
@@ -821,8 +847,10 @@ const styles = StyleSheet.create({
   emptyBox: {
     alignItems: 'center',
     backgroundColor: COLORS.bgCard,
-    borderRadius: 18,
-    padding: 26,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderRadius: 20,
+    padding: 28,
     gap: 10,
   },
   emptyText: {
@@ -841,8 +869,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.goldBorder,
-    borderRadius: 15,
-    padding: 14,
+    borderRadius: 18,
+    padding: 15,
   },
   donTierTitle: {
     color: COLORS.textPrimary,
@@ -856,7 +884,7 @@ const styles = StyleSheet.create({
   },
   donAmount: {
     color: COLORS.goldBright,
-    fontSize: 16,
+    fontSize: 16.5,
     fontWeight: '900',
   },
 });

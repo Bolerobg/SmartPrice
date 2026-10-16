@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   SafeAreaView,
   StyleSheet,
@@ -18,7 +19,14 @@ import { matchesUniversalSearch } from '@/lib/smartSearch';
 import { CategoryId } from '@/types';
 
 export default function RadarScreen() {
-  const { posts } = useApp();
+  const {
+    posts,
+    isRefreshing,
+    refreshAll,
+    isLoadingMore,
+    hasMorePosts,
+    loadMorePosts,
+  } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [radarMode, setRadarMode] = useState<'red_hall' | 'green_gems'>('red_hall');
   const [activeCategory, setActiveCategory] = useState<CategoryId>('all');
@@ -110,6 +118,21 @@ export default function RadarScreen() {
         renderItem={({ item }) => <PostCard post={item} />}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        refreshing={isRefreshing}
+        onRefresh={() => void refreshAll()}
+        onEndReached={() => {
+          if (hasMorePosts) {
+            void loadMorePosts();
+          }
+        }}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View style={{ paddingVertical: 18, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={COLORS.greenBright} />
+            </View>
+          ) : null
+        }
         ListHeaderComponent={
           <View style={styles.header}>
             <View style={{ marginBottom: 10 }}>
@@ -435,16 +458,17 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: 14,
-    paddingBottom: 32,
+    paddingBottom: 36,
   },
   header: {
     paddingTop: 12,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   screenTitle: {
     color: COLORS.textPrimary,
-    fontSize: 22,
+    fontSize: 23,
     fontWeight: '900',
+    letterSpacing: -0.5,
   },
   screenSub: {
     color: COLORS.textSecondary,
@@ -458,7 +482,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
-    borderRadius: 16,
+    borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 11,
     gap: 10,
@@ -477,24 +501,24 @@ const styles = StyleSheet.create({
   modeCard: {
     flex: 1,
     backgroundColor: COLORS.bgCard,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    borderRadius: 18,
-    padding: 13,
+    borderRadius: 22,
+    padding: 15,
   },
   modeCardRedActive: {
     backgroundColor: COLORS.redSoftBg,
-    borderColor: COLORS.redPrimary,
+    borderColor: COLORS.redBorder,
   },
   modeCardGreenActive: {
     backgroundColor: COLORS.greenSoftBg,
-    borderColor: COLORS.greenPrimary,
+    borderColor: COLORS.greenBorder,
   },
   modeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    marginBottom: 7,
   },
   modeCount: {
     color: COLORS.textMuted,
@@ -504,14 +528,15 @@ const styles = StyleSheet.create({
   },
   modeTitle: {
     color: COLORS.textPrimary,
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 15.5,
+    fontWeight: '900',
+    letterSpacing: -0.2,
     marginBottom: 4,
   },
   modeDesc: {
     color: COLORS.textSecondary,
     fontSize: 11.5,
-    lineHeight: 16,
+    lineHeight: 16.5,
   },
   categoryGrid: {
     flexDirection: 'row',
@@ -522,18 +547,18 @@ const styles = StyleSheet.create({
   catPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 5.5,
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7.5,
+    borderRadius: 999,
   },
   catPillText: {
     color: COLORS.textSecondary,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   resultsHeader: {
     flexDirection: 'row',
@@ -543,7 +568,7 @@ const styles = StyleSheet.create({
   },
   resultsTitle: {
     color: COLORS.textPrimary,
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '800',
   },
   resultsCount: {

@@ -106,6 +106,9 @@ interface AppContextValue {
   features: FeatureFlags | null;
   isLoading: boolean;
   isRefreshing: boolean;
+  isLoadingMore: boolean;
+  hasMorePosts: boolean;
+  loadMorePosts: () => Promise<void>;
   error: string | null;
   clearError: () => void;
   refreshAll: () => Promise<void>;
@@ -204,6 +207,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [features, setFeatures] = useState<FeatureFlags | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedPolarityFilter, setSelectedPolarityFilter] = useState<'all' | PostPolarity>('all');
@@ -298,21 +303,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       limit: 60,
     });
     setPosts(feed.items);
+    setHasMorePosts(Boolean(feed.hasMore));
   }, [selectedPolarityFilter, selectedCategoryFilter, selectedCityFilter]);
+
+  const loadMorePosts = useCallback(async () => {
+    if (!hasMorePosts || isLoadingMore || isLoading) return;
+    setIsLoadingMore(true);
+    try {
+      const feed = await api.feed({
+        polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
+        category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
+        city: selectedCityFilter,
+        offset: posts.length,
+        limit: 60,
+      });
+      setPosts((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        const added = feed.items.filter((p) => !seen.has(p.id));
+        return [...prev, ...added];
+      });
+      setHasMorePosts(Boolean(feed.hasMore));
+    } catch {
+      // тихо при грешка на следваща страница
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMorePosts, isLoadingMore, isLoading, posts.length, selectedPolarityFilter, selectedCategoryFilter, selectedCityFilter]);
 
   const loadSideData = useCallback(async () => {
     const [board, stats, alerts] = await Promise.all([
       api.leaderboard(50).catch(() => ({ items: [] as LeaderboardUser[] })),
       api.communityStats().catch(() => null),
-      api.alerts().catch(() => ({ items: [] as AlertWithMatches[] })),
+      isAuthenticated
+        ? api.alerts().catch(() => ({ items: [] as AlertWithMatches[] }))
+        : Promise.resolve({ items: [] as AlertWithMatches[] }),
     ]);
     setLeaderboard(board.items);
     setCommunityStats(stats);
     setPriceAlerts(alerts.items);
-  }, []);
+  }, [isAuthenticated]);
 
   const refreshAll = useCallback(async () => {
-    if (!isAuthenticated) return;
     setIsRefreshing(true);
     try {
       await Promise.all([loadFeed(), loadSideData()]);
@@ -322,7 +353,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } finally {
       setIsRefreshing(false);
     }
-  }, [isAuthenticated, loadFeed, loadSideData]);
+  }, [loadFeed, loadSideData]);
 
   // Първоначално зареждане
   useEffect(() => {
@@ -335,6 +366,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const feed = await api.feed({ limit: 60 });
         if (cancelled) return;
         setPosts(feed.items);
+        setHasMorePosts(Boolean(feed.hasMore));
         setError(null);
 
         const [board, stats, flags] = await Promise.all([
@@ -749,6 +781,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       features,
       isLoading,
       isRefreshing,
+      isLoadingMore,
+      hasMorePosts,
+      loadMorePosts,
       error,
       clearError: () => setError(null),
       refreshAll,
@@ -810,6 +845,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       features,
       isLoading,
       isRefreshing,
+      isLoadingMore,
+      hasMorePosts,
+      loadMorePosts,
       error,
       refreshAll,
       selectedPolarityFilter,

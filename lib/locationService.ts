@@ -611,3 +611,51 @@ export function calculateDistanceKm(
   return Math.round(R * c * 10) / 10;
 }
 
+const CITY_COORDINATES_MAP: Record<string, { latitude: number; longitude: number }> = {
+  'софия': { latitude: 42.6977, longitude: 23.3219 },
+  'пловдив': { latitude: 42.1354, longitude: 24.7453 },
+  'варна': { latitude: 43.2141, longitude: 27.9147 },
+  'бургас': { latitude: 42.5048, longitude: 27.4626 },
+  'русе': { latitude: 43.8356, longitude: 25.9657 },
+  'стара загора': { latitude: 42.4258, longitude: 25.6345 },
+  'плевен': { latitude: 43.417, longitude: 24.6067 },
+  'сливен': { latitude: 42.6817, longitude: 26.3229 },
+  'добрич': { latitude: 43.5726, longitude: 27.8273 },
+  'шумен': { latitude: 43.2712, longitude: 26.9361 },
+  'перник': { latitude: 42.6052, longitude: 23.0378 },
+  'хасково': { latitude: 41.9344, longitude: 25.5556 },
+  'ямбол': { latitude: 42.4842, longitude: 26.5035 },
+  'пазарджик': { latitude: 42.1887, longitude: 24.3332 },
+  'благоевград': { latitude: 42.0209, longitude: 23.0943 },
+  'велико търново': { latitude: 43.0757, longitude: 25.6172 },
+  'враца': { latitude: 43.21, longitude: 23.5528 },
+  'габрово': { latitude: 42.8742, longitude: 25.3189 },
+  'асеновград': { latitude: 42.0167, longitude: 24.8667 },
+  'видин': { latitude: 43.9962, longitude: 22.8679 },
+  'казанлък': { latitude: 42.6194, longitude: 25.393 },
+  'кюстендил': { latitude: 42.2869, longitude: 22.6939 },
+  'кърджали': { latitude: 41.6338, longitude: 25.3777 },
+  'монтана': { latitude: 43.4085, longitude: 23.2257 },
+  'димитровград': { latitude: 42.05, longitude: 25.6 },
+  'търговище': { latitude: 43.2512, longitude: 26.5722 },
+  'ловеч': { latitude: 43.137, longitude: 24.7142 },
+  'силистра': { latitude: 44.1147, longitude: 27.2672 },
+  'разград': { latitude: 43.5333, longitude: 26.5167 },
+  'смолян': { latitude: 41.5774, longitude: 24.7011 },
+};
+
+/**
+ * Връща централните координати за избран български град (ако потребителят не е пуснал GPS).
+ */
+export function getCityCoordinates(
+  cityName?: string | null
+): { latitude: number; longitude: number } | null {
+  if (!cityName || cityName === 'Всички градове') return null;
+  const clean = cityName.trim().toLowerCase();
+  if (CITY_COORDINATES_MAP[clean]) return CITY_COORDINATES_MAP[clean];
+  const preset = CITY_PRESET_LOCATIONS[cityName];
+  if (preset) return { latitude: preset.latitude, longitude: preset.longitude };
+  return null;
+}
+
+

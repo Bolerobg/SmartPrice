@@ -267,6 +267,7 @@ export function mapProfile(p: {
   avatar_url: string | null;
   bio: string;
   city: string;
+  role?: string | null;
   is_supporter: boolean;
   supporter_since: Date | string | null;
   supporter_tier: string | null;
@@ -309,6 +310,8 @@ export function mapProfile(p: {
     avatar: p.avatar_url ?? '',
     bio: p.bio,
     city: p.city,
+    role: (p.role as 'user' | 'admin' | null) ?? 'user',
+    isAdmin: p.role === 'admin',
     isSupporter: p.is_supporter,
     supporterSince: p.supporter_since ? iso(p.supporter_since) : undefined,
     supporterTier: (p.supporter_tier as 'coffee' | 'guardian' | 'legend' | null) ?? undefined,

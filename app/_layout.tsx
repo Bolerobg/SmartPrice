@@ -103,13 +103,13 @@ const Splash: React.FC = () => {
   }, [barWidth, featAnims, glow, logoOpacity, logoScale, textOpacity]);
 
   return (
-    <LinearGradient colors={['#0F172A', '#0B0F1A', '#0B0F1A']} style={styles.splash}>
+    <LinearGradient colors={['#0C1222', '#060911', '#060911']} style={styles.splash}>
       <Animated.View
         style={[
           styles.glow,
           {
-            opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.7] }),
-            transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] }) }],
+            opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.52] }),
+            transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1.18] }) }],
           },
         ]}
       />
@@ -121,7 +121,7 @@ const Splash: React.FC = () => {
         ]}
       >
         <LinearGradient
-          colors={['#6366F1', '#06B6D4']}
+          colors={['#10B981', '#22D3EE', '#6366F1']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.logoGradient}
@@ -143,14 +143,20 @@ const Splash: React.FC = () => {
       </Animated.View>
 
       {/* Какво получава човекът — три реда, които се появяват един след друг */}
-      <View style={{ marginTop: 22, gap: 10, width: '100%', maxWidth: 330 }}>
+      <View style={{ marginTop: 26, gap: 10, width: '100%', maxWidth: 340 }}>
         {SPLASH_FEATURES.map((f, i) => (
           <Animated.View
             key={f.text}
             style={{
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 10,
+              gap: 12,
+              backgroundColor: 'rgba(17, 23, 40, 0.72)',
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.08)',
+              borderRadius: 16,
+              paddingHorizontal: 14,
+              paddingVertical: 10,
               opacity: featAnims[i],
               transform: [
                 {
@@ -164,19 +170,19 @@ const Splash: React.FC = () => {
           >
             <View
               style={{
-                width: 30,
-                height: 30,
-                borderRadius: 10,
+                width: 34,
+                height: 34,
+                borderRadius: 11,
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: 'rgba(148,163,184,0.14)',
+                backgroundColor: 'rgba(16, 185, 129, 0.14)',
                 borderWidth: 1,
-                borderColor: 'rgba(148,163,184,0.22)',
+                borderColor: 'rgba(52, 211, 153, 0.28)',
               }}
             >
-              <Ionicons name={f.icon as never} size={15} color={COLORS.greenBright} />
+              <Ionicons name={f.icon as never} size={16} color={COLORS.greenBright} />
             </View>
-            <Text style={{ color: COLORS.textSecondary, fontSize: 13.5, fontWeight: '700' }}>
+            <Text style={{ color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '700', letterSpacing: -0.2 }}>
               {f.text}
             </Text>
           </Animated.View>

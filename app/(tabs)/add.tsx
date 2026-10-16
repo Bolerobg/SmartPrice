@@ -209,43 +209,50 @@ export default function AddPostScreen() {
     }
   };
 
-  const handleScanReceipt = async (mode: 'demo' | 'camera' | 'gallery') => {
-    let selectedReceiptUri =
-      'https://images.unsplash.com/photo-1554415707-c18c60fe62a0?w=700&auto=format&fit=crop&q=80';
-    let base64: string | undefined;
+  const handleScanReceipt = async (mode: 'camera' | 'gallery') => {
+    let selectedReceiptUri: string | null = null;
 
-    if (mode === 'camera' || mode === 'gallery') {
-      try {
-        if (mode === 'camera') {
-          const perm = await ImagePicker.requestCameraPermissionsAsync();
-          if (!perm.granted) return;
-        } else {
-          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (!perm.granted) return;
-        }
-
-        const res =
-          mode === 'camera'
-            ? await ImagePicker.launchCameraAsync({
-                mediaTypes: ['images'],
-                quality: 0.75,
-                base64: true,
-              })
-            : await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ['images'],
-                quality: 0.75,
-                base64: true,
-              });
-
-        if (res.canceled || !res.assets[0]) {
+    try {
+      if (mode === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert(
+            'Достъп до камерата',
+            'Моля, разреши достъпа до камерата от настройките, за да снимаш касовата бележка.'
+          );
           return;
         }
+        const res = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          quality: 0.8,
+        });
+        if (res.canceled || !res.assets[0]?.uri) return;
         selectedReceiptUri = res.assets[0].uri;
-        base64 = res.assets[0].base64 || undefined;
-      } catch {
-        // Продължаваме с демо касовата бележка
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert(
+            'Достъп до галерията',
+            'Моля, разреши достъпа до снимките от настройките, за да избереш касова бележка.'
+          );
+          return;
+        }
+        const res = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 0.8,
+        });
+        if (res.canceled || !res.assets[0]?.uri) return;
+        selectedReceiptUri = res.assets[0].uri;
       }
+    } catch {
+      Alert.alert(
+        'Грешка при избиране на снимка',
+        'Не успяхме да отворим камерата или галерията. Опитай отново.'
+      );
+      return;
     }
+
+    if (!selectedReceiptUri) return;
 
     setIsScanningReceipt(true);
     try {
@@ -258,13 +265,12 @@ export default function AddPostScreen() {
       setScannedReceipt(extracted);
 
       // Автоматично попълване на полетата от касовата бележка
-      if (!placeName.trim()) {
+      if (!placeName.trim() && extracted.merchantName) {
         setPlaceName(extracted.merchantName);
       }
-      setPricePaid(String(extracted.totalAmount));
-      // ВАЖНО: не измисляме „стара/обичайна цена“. Преди кодът слагаше
-      // totalAmount × 1.65 и после показваше фалшива оценка на спестяване.
-      // Референсната цена се попълва само от потребителя.
+      if (extracted.totalAmount > 0) {
+        setPricePaid(String(extracted.totalAmount));
+      }
       if (!title.trim()) {
         const firstItem = extracted.items[0]?.name || 'Продукт';
         setTitle(
@@ -273,7 +279,7 @@ export default function AddPostScreen() {
             : `Внимание в ${extracted.merchantName}: ${extracted.totalAmount.toFixed(2)} € сметка!`
         );
       }
-      if (!description.trim()) {
+      if (!description.trim() && extracted.items.length > 0) {
         const summaryLines = extracted.items
           .map((i) => `${i.name} (${i.totalPrice.toFixed(2)} €)`)
           .join(', ');
@@ -283,6 +289,13 @@ export default function AddPostScreen() {
             : `Споделям касовата бележка, за да предпазя други потребители. Начислени артикули: ${summaryLines}.`
         );
       }
+    } catch (err) {
+      Alert.alert(
+        'Не успяхме да разчетем бележката',
+        err instanceof Error && err.message
+          ? err.message
+          : 'Моля, опитай с по-ясна снимка на касовата бележка или попълни полетата ръчно.'
+      );
     } finally {
       setIsScanningReceipt(false);
     }
@@ -864,35 +877,33 @@ export default function AddPostScreen() {
           <View style={styles.aiButtonsRow}>
             <TouchableOpacity
               style={styles.aiScanPrimaryBtn}
-              onPress={() => handleScanReceipt('demo')}
+              onPress={() => void handleScanReceipt('camera')}
               disabled={isScanningReceipt}
             >
               {isScanningReceipt ? (
                 <ActivityIndicator color={COLORS.black} size="small" />
               ) : (
                 <>
-                  <Ionicons name="sparkles" size={15} color={COLORS.black} />
+                  <Ionicons name="camera" size={16} color={COLORS.black} />
                   <Text style={styles.aiScanPrimaryBtnText} numberOfLines={1}>
-                    Авто-попълване от бележка
+                    Снимай касова бележка
                   </Text>
                 </>
               )}
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.aiScanSecondaryBtn}
-              onPress={() => handleScanReceipt('camera')}
+              style={[
+                styles.aiScanSecondaryBtn,
+                { width: 'auto', paddingHorizontal: 14, flexDirection: 'row', gap: 6 },
+              ]}
+              onPress={() => void handleScanReceipt('gallery')}
               disabled={isScanningReceipt}
             >
-              <Ionicons name="camera-outline" size={18} color={COLORS.goldBright} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.aiScanSecondaryBtn}
-              onPress={() => handleScanReceipt('gallery')}
-              disabled={isScanningReceipt}
-            >
-              <Ionicons name="images-outline" size={18} color={COLORS.goldBright} />
+              <Ionicons name="images-outline" size={17} color={COLORS.goldBright} />
+              <Text style={{ color: COLORS.goldBright, fontSize: 12.5, fontWeight: '800' }}>
+                От галерия
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -1378,71 +1389,73 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 115,
+    paddingTop: 12,
+    paddingBottom: 118,
   },
   screenTitle: {
     color: COLORS.textPrimary,
-    fontSize: 21,
+    fontSize: 22,
     fontWeight: '900',
+    letterSpacing: -0.5,
   },
   screenSub: {
     color: COLORS.textSecondary,
-    fontSize: 12.5,
+    fontSize: 12.8,
     marginTop: 3,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   polaritySelector: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
     marginBottom: 14,
   },
   polarityBox: {
     flex: 1,
     backgroundColor: COLORS.bgCard,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    borderRadius: 16,
-    padding: 11,
+    borderRadius: 20,
+    padding: 13,
   },
   polarityBoxGreenActive: {
     backgroundColor: COLORS.greenSoftBg,
-    borderColor: COLORS.greenPrimary,
+    borderColor: COLORS.greenBorder,
   },
   polarityBoxRedActive: {
     backgroundColor: COLORS.redSoftBg,
-    borderColor: COLORS.redPrimary,
+    borderColor: COLORS.redBorder,
   },
   polarityBoxTitle: {
     color: COLORS.textPrimary,
-    fontSize: 14,
+    fontSize: 14.5,
     fontWeight: '800',
-    marginTop: 5,
+    letterSpacing: -0.2,
+    marginTop: 6,
     marginBottom: 2,
   },
   polarityBoxSub: {
     color: COLORS.textSecondary,
     fontSize: 11,
-    lineHeight: 15,
+    lineHeight: 15.5,
   },
   photoUploadCard: {
     backgroundColor: COLORS.bgCard,
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
-    padding: 12,
-    marginBottom: 12,
+    padding: 14,
+    marginBottom: 14,
   },
   photoCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 9,
     gap: 6,
   },
   photoCardTitle: {
     color: COLORS.textPrimary,
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '800',
     flex: 1,
   },
@@ -1450,9 +1463,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.greenSoftBg,
     borderWidth: 1,
     borderColor: COLORS.greenBorder,
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
-    borderRadius: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
   userPhotoTagText: {
     color: COLORS.greenBright,
@@ -1460,11 +1473,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   photoPreviewBox: {
-    height: 190,
-    borderRadius: 14,
+    height: 196,
+    borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: COLORS.bgSecondary,
-    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    marginBottom: 11,
     position: 'relative',
   },
   previewImg: {
@@ -1476,18 +1491,21 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(9, 13, 22, 0.9)',
-    paddingHorizontal: 11,
-    paddingVertical: 8,
+    backgroundColor: 'rgba(6, 9, 17, 0.90)',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
     gap: 8,
   },
   livePriceSmallLabel: {
     color: COLORS.textMuted,
     fontSize: 9,
     fontWeight: '800',
+    letterSpacing: 0.5,
   },
   livePriceNumbers: {
     flexDirection: 'row',
@@ -1496,8 +1514,9 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   livePriceMain: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '900',
+    letterSpacing: -0.3,
   },
   livePriceRef: {
     color: COLORS.textSecondary,
@@ -1505,9 +1524,9 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
   },
   liveDiffPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 4.5,
+    borderRadius: 999,
   },
   liveDiffPillText: {
     color: COLORS.white,
@@ -1524,8 +1543,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 11,
-    borderRadius: 12,
+    paddingVertical: 11.5,
+    borderRadius: 14,
   },
   mainPhotoBtnPrimaryText: {
     color: COLORS.white,
@@ -1541,8 +1560,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCardElevated,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
-    paddingVertical: 11,
-    borderRadius: 12,
+    paddingVertical: 11.5,
+    borderRadius: 14,
   },
   mainPhotoBtnSecondaryText: {
     color: COLORS.textPrimary,
@@ -1576,9 +1595,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   miniPickBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     backgroundColor: COLORS.bgCardElevated,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
@@ -1591,13 +1610,13 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
     backgroundColor: COLORS.bgSecondary,
-    padding: 7,
-    borderRadius: 10,
+    padding: 8,
+    borderRadius: 12,
   },
   comparisonThumb: {
     width: 42,
     height: 42,
-    borderRadius: 8,
+    borderRadius: 9,
   },
   comparisonAddedText: {
     flex: 1,
@@ -1607,23 +1626,23 @@ const styles = StyleSheet.create({
   },
   aiScannerCard: {
     backgroundColor: 'rgba(245, 158, 11, 0.08)',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: COLORS.goldBorder,
-    borderRadius: 18,
-    padding: 12,
+    borderRadius: 20,
+    padding: 14,
     marginTop: 10,
     marginBottom: 10,
   },
   aiScannerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    marginBottom: 10,
+    gap: 10,
+    marginBottom: 11,
   },
   aiIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     backgroundColor: COLORS.goldSoftBg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1631,7 +1650,7 @@ const styles = StyleSheet.create({
   },
   aiScannerTitle: {
     color: COLORS.goldBright,
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '800',
   },
   aiScannerSub: {
@@ -1641,7 +1660,7 @@ const styles = StyleSheet.create({
   },
   aiButtonsRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 7,
   },
   aiScanPrimaryBtn: {
     flex: 1,
@@ -1650,9 +1669,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 5,
     backgroundColor: COLORS.goldBright,
-    paddingVertical: 11,
-    paddingHorizontal: 8,
-    borderRadius: 11,
+    paddingVertical: 11.5,
+    paddingHorizontal: 10,
+    borderRadius: 13,
   },
   aiScanPrimaryBtnText: {
     color: COLORS.black,
@@ -1660,20 +1679,21 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   aiScanSecondaryBtn: {
-    width: 42,
+    width: 44,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.goldBorder,
-    borderRadius: 11,
+    borderRadius: 13,
   },
   label: {
     color: COLORS.textPrimary,
-    fontSize: 12.5,
-    fontWeight: '700',
-    marginBottom: 6,
-    marginTop: 8,
+    fontSize: 12.8,
+    fontWeight: '800',
+    letterSpacing: -0.1,
+    marginBottom: 7,
+    marginTop: 10,
   },
   horizontalPills: {
     gap: 7,
@@ -1686,22 +1706,22 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
   },
   pillBtnText: {
     color: COLORS.textSecondary,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   input: {
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
-    borderRadius: 13,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    borderRadius: 15,
+    paddingHorizontal: 13,
+    paddingVertical: 11.5,
     color: COLORS.textPrimary,
     fontSize: 13.5,
     marginBottom: 4,
@@ -1711,7 +1731,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   textArea: {
-    minHeight: 80,
+    minHeight: 84,
     textAlignVertical: 'top',
   },
   priceInputsRow: {
@@ -1723,14 +1743,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 15,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    marginTop: 14,
+    paddingVertical: 15.5,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    marginTop: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 6,
   },
   publishButtonText: {
     color: COLORS.white,
-    fontSize: 14.5,
+    fontSize: 15,
     fontWeight: '900',
   },
 });

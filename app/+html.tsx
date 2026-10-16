@@ -23,20 +23,32 @@ export default function Root({ children }: PropsWithChildren) {
           name="viewport"
           content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
-        <meta name="theme-color" content="#0B0F1A" />
+        <meta name="theme-color" content="#060911" />
         {/* Основният ресет на Expo за ScrollView */}
         <ScrollViewStyleReset />
         <style
           dangerouslySetInnerHTML={{
             __html: `
-/* ---- Ширината на документа никога не надхвърля екрана ---- */
+/* ---- 2026 Obsidian Dark Mode & Typography Polish ---- */
+:root {
+  color-scheme: dark;
+}
 html, body {
   height: 100%;
   max-width: 100%;
   overflow-x: hidden;
   overscroll-behavior-x: none;
+  background-color: #060911;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
-body { margin: 0; background-color: #0B0F1A; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background-color: #060911; -webkit-text-size-adjust: 100%; }
+
+::selection {
+  background: rgba(34, 211, 238, 0.25);
+  color: #F8FAFC;
+}
 
 /* ---- Коренът е точно колкото екрана ---- */
 #root {

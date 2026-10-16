@@ -28,6 +28,7 @@ import { FounderBanner } from '@/components/FounderBanner';
 import {
   calculateDistanceKm,
   detectUserAndStoreLocation,
+  getCityCoordinates,
   getCoordinatesForPost,
 } from '@/lib/locationService';
 import { matchesUniversalSearch, SortMode, sortPostsSmart } from '@/lib/smartSearch';
@@ -68,11 +69,17 @@ export default function FeedScreen() {
     openDonationModal,
     totalCommunitySavedAllPosts,
     openAuthPrompt,
+    isRefreshing,
+    refreshAll,
+    isLoadingMore,
+    hasMorePosts,
+    loadMorePosts,
   } = useApp();
   const { isAuthenticated } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [codeBusy, setCodeBusy] = useState(false);
+  const [isToolsExpanded, setIsToolsExpanded] = useState(false);
   const router = useRouter();
 
   // ID-то на офертата е САМО ЧИСЛА (напр. 48219357). Ако написаното изглежда
@@ -99,11 +106,11 @@ export default function FeedScreen() {
     }
   };
 
-    // Търсенето пита сървъра (цялата база), а не само заредените 60 поста.
-    const [debouncedQuery, setDebouncedQuery] = useState('');
-    const [serverResults, setServerResults] = useState<PostItem[] | null>(null);
-    const [isSearching, setIsSearching] = useState(false);
-    const [sortMode, setSortMode] = useState<SortMode>('newest');
+  // Търсенето пита сървъра (цялата база), а не само заредените 60 поста.
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [serverResults, setServerResults] = useState<PostItem[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [isQuickPhotoOpen, setIsQuickPhotoOpen] = useState(false);
   const [quickInitialPhoto, setQuickInitialPhoto] = useState<string | null>(null);
   const [isSmartToolsOpen, setIsSmartToolsOpen] = useState(false);
@@ -112,7 +119,6 @@ export default function FeedScreen() {
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
   // 1) Дебounce — чакаме да спреш да пишеш, преди да питаме сървъра.
-  //    Без това всяка буква пускаше заявка и приложението „забиваше“.
   useEffect(() => {
     const t = setTimeout(
       () => setDebouncedQuery(searchQuery.trim()),
@@ -121,8 +127,7 @@ export default function FeedScreen() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // 2) Търсене в ЦЯЛАТА база. Преди търсенето филтрираше само заредените
-  //    60 поста, затова „пиле“ не намираше нищо извън тях.
+  // 2) Търсене в ЦЯЛАТА база със запазване на избрания град, категория и полярност.
   useEffect(() => {
     if (!debouncedQuery) {
       setServerResults(null);
@@ -132,7 +137,13 @@ export default function FeedScreen() {
     let cancelled = false;
     setIsSearching(true);
     api
-      .feed({ q: debouncedQuery, limit: 60 })
+      .feed({
+        q: debouncedQuery,
+        city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
+        polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
+        category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
+        limit: 60,
+      })
       .then((res) => {
         if (!cancelled) setServerResults(res.items);
       })
@@ -145,7 +156,7 @@ export default function FeedScreen() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery]);
+  }, [debouncedQuery, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter]);
 
   const handleToggleNearby = async () => {
     if (nearbySorted) {
@@ -223,66 +234,66 @@ export default function FeedScreen() {
 
   const postDistances = useMemo(() => {
     const map: Record<string, number> = {};
-    const refLat = userCoords?.latitude ?? 42.6977;
-    const refLng = userCoords?.longitude ?? 23.3219;
+    const referenceCity =
+      selectedCityFilter !== 'Всички градове' ? selectedCityFilter : userProfile.city;
+    const refCoords = userCoords ?? getCityCoordinates(referenceCity);
+    if (!refCoords) return map;
+
     posts.forEach((p) => {
-      // Постове без реални координати не получават разстояние —
-      // преди тук се измисляха координати и се показваха фалшиви километри.
       const coords = getCoordinatesForPost(p);
       if (!coords) return;
-      map[p.id] = calculateDistanceKm(refLat, refLng, coords.latitude, coords.longitude);
+      map[p.id] = calculateDistanceKm(
+        refCoords.latitude,
+        refCoords.longitude,
+        coords.latitude,
+        coords.longitude
+      );
     });
     return map;
-  }, [posts, userCoords]);
+  }, [posts, userCoords, selectedCityFilter, userProfile.city]);
 
   const filteredPosts = useMemo(() => {
-      // Когато има активно търсене, показваме резултатите от СЪРВЪРА: те
-      // обхващат цялата база (не само заредените 60 поста) и вече са минали
-      // през търсенето по всички полета. Затова тук НЕ прилагаме отново
-      // филтъра по категория — иначе търсенето пак се затваря в избрания таб
-      // и „пиле“ не се намира, ако не е в „Магазини“.
-      const isSearchActive = Boolean(debouncedQuery) && serverResults !== null;
+    const isSearchActive = Boolean(debouncedQuery) && serverResults !== null;
+    const sourcePosts = isSearchActive ? serverResults! : posts;
 
-      const matching = isSearchActive
-        ? serverResults!
-        : posts.filter((post) => {
-            if (selectedPolarityFilter !== 'all' && post.polarity !== selectedPolarityFilter) {
-              return false;
-            }
-            if (selectedCategoryFilter !== 'all' && post.category !== selectedCategoryFilter) {
-              return false;
-            }
-            if (
-              selectedCityFilter !== 'Всички градове' &&
-              post.city.toLowerCase() !== selectedCityFilter.toLowerCase()
-            ) {
-              return false;
-            }
-            if (!matchesUniversalSearch(post, searchQuery)) {
-              return false;
-            }
-            return true;
-          });
-
-      if (nearbySorted && !isSearchActive) {
-        return [...matching].sort(
-          (a, b) => (postDistances[a.id] ?? 999) - (postDistances[b.id] ?? 999)
-        );
+    const matching = sourcePosts.filter((post) => {
+      if (selectedPolarityFilter !== 'all' && post.polarity !== selectedPolarityFilter) {
+        return false;
       }
+      if (selectedCategoryFilter !== 'all' && post.category !== selectedCategoryFilter) {
+        return false;
+      }
+      if (
+        selectedCityFilter !== 'Всички градове' &&
+        post.city.toLowerCase() !== selectedCityFilter.toLowerCase()
+      ) {
+        return false;
+      }
+      if (!isSearchActive && !matchesUniversalSearch(post, searchQuery)) {
+        return false;
+      }
+      return true;
+    });
 
-      return sortPostsSmart(matching, sortMode);
-    }, [
-      posts,
-      serverResults,
-      debouncedQuery,
-      selectedPolarityFilter,
-      selectedCategoryFilter,
-      selectedCityFilter,
-      searchQuery,
-      sortMode,
-      nearbySorted,
-      postDistances,
-    ]);
+    if (nearbySorted) {
+      return [...matching].sort(
+        (a, b) => (postDistances[a.id] ?? 999) - (postDistances[b.id] ?? 999)
+      );
+    }
+
+    return sortPostsSmart(matching, sortMode);
+  }, [
+    posts,
+    serverResults,
+    debouncedQuery,
+    selectedPolarityFilter,
+    selectedCategoryFilter,
+    selectedCityFilter,
+    searchQuery,
+    sortMode,
+    nearbySorted,
+    postDistances,
+  ]);
 
   const greenCount = useMemo(
     () => posts.filter((p) => p.polarity === 'green').length,
@@ -308,6 +319,8 @@ export default function FeedScreen() {
     setSortMode('newest');
     setNearbySorted(false);
   };
+
+  const activeAlertsCount = priceAlerts.filter((a) => a.isActive).length;
 
   const renderHeader = () => (
     <View style={styles.headerContainer}>
@@ -369,6 +382,9 @@ export default function FeedScreen() {
           onChangeText={setSearchQuery}
           returnKeyType="search"
         />
+        {isSearching && (
+          <ActivityIndicator size="small" color={COLORS.greenBright} style={{ marginRight: 6 }} />
+        )}
         {searchQuery.length > 0 && (
           <TouchableOpacity
             onPress={() => setSearchQuery('')}
@@ -379,8 +395,8 @@ export default function FeedScreen() {
         )}
       </View>
 
-      {/* Търсене по ID на оферта: човекът вижда кода на обявата и го въвежда тук */}
-      {looksLikeOfferCode ? (
+      {/* Търсене по ID на оферта */}
+      {looksLikeOfferCode && (
         <TouchableOpacity
           style={styles.codeJump}
           activeOpacity={0.88}
@@ -392,40 +408,312 @@ export default function FeedScreen() {
             {codeBusy ? 'Търся офертата...' : `Отвори оферта с ID ${searchQuery.trim().toUpperCase()}`}
           </Text>
         </TouchableOpacity>
-      ) : (
-        <View style={styles.codeHint}>
-          <Ionicons name="pricetag-outline" size={12} color={COLORS.accentCyan} />
-          <Text style={styles.codeHintText}>
-            Всяка оферта има ID (само числа, напр. 48219357). Напиши го тук, за да я намериш веднага.
-          </Text>
-        </View>
       )}
 
-      {/* „Как работи“ — 12 екрана с примери, един след друг.
-          Стои на първия екран, защото гостът вече влиза направо в потока и
-          не вижда екрана за вход, където преди беше този бутон. */}
-      <TouchableOpacity
-        style={styles.howItWorks}
-        activeOpacity={0.88}
-        accessibilityRole="button"
-        accessibilityLabel="Как работи приложението"
-        onPress={() => router.push('/tour?review=1' as never)}
+      {/* Бързи тагове за умно търсене с 1 докосване */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.quickSearchScroll}
       >
-        <Ionicons name="help-circle" size={17} color={COLORS.accentCyan} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.howItWorksTitle}>Как работи приложението?</Text>
-          <Text style={styles.howItWorksSub} numberOfLines={1}>
-            12 екрана с примери — 30 секунди
+        {QUICK_SEARCH_SUGGESTIONS.map((item) => {
+          const active = searchQuery.toLowerCase() === item.toLowerCase();
+          return (
+            <TouchableOpacity
+              key={item}
+              style={[
+                styles.quickSearchTag,
+                active && styles.quickSearchTagActive,
+              ]}
+              onPress={() => setSearchQuery(active ? '' : item)}
+            >
+              <Ionicons
+                name="sparkles-outline"
+                size={11}
+                color={active ? COLORS.greenBright : COLORS.textMuted}
+              />
+              <Text
+                style={[
+                  styles.quickSearchTagText,
+                  active && styles.quickSearchTagTextActive,
+                ]}
+              >
+                {item}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* КОМПАКТЕН BENTO ACTION BAR (Above-the-Fold): Снимай цена • Инструменти & AI • Томбола • Гид */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <TouchableOpacity
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: COLORS.greenBright,
+            paddingHorizontal: 13,
+            paddingVertical: 10,
+            borderRadius: 14,
+          }}
+          onPress={() => handleQuickPickAndOpen(true)}
+          activeOpacity={0.88}
+        >
+          <Ionicons name="camera" size={15} color={COLORS.black} />
+          <Text style={{ color: COLORS.black, fontSize: 12, fontWeight: '900' }}>
+            Снимай цена
           </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 6,
+            backgroundColor: isToolsExpanded ? COLORS.indigoSoftBg : COLORS.bgCard,
+            borderWidth: 1,
+            borderColor: isToolsExpanded ? COLORS.accentCyanBorder : COLORS.borderSubtle,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            borderRadius: 14,
+          }}
+          onPress={() => setIsToolsExpanded((prev) => !prev)}
+          activeOpacity={0.85}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+            <Ionicons
+              name="sparkles"
+              size={14}
+              color={isToolsExpanded ? COLORS.accentCyan : COLORS.goldBright}
+            />
+            <Text
+              style={{
+                color: COLORS.textPrimary,
+                fontSize: 12,
+                fontWeight: '800',
+                flex: 1,
+              }}
+              numberOfLines={1}
+            >
+              AI Асистент & Инструменти
+            </Text>
+          </View>
+          <Ionicons
+            name={isToolsExpanded ? 'chevron-up' : 'chevron-down'}
+            size={15}
+            color={COLORS.textSecondary}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 13,
+            backgroundColor: COLORS.goldSoftBg,
+            borderWidth: 1,
+            borderColor: COLORS.goldBorder,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          onPress={() => router.push('/raffle' as never)}
+          accessibilityLabel="Активна томбола"
+        >
+          <Ionicons name="gift" size={16} color={COLORS.goldBright} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 13,
+            backgroundColor: COLORS.bgCard,
+            borderWidth: 1,
+            borderColor: COLORS.borderSubtle,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          onPress={() => router.push('/tour?review=1' as never)}
+          accessibilityLabel="Как работи приложението"
+        >
+          <Ionicons name="help-circle-outline" size={18} color={COLORS.accentCyan} />
+        </TouchableOpacity>
+      </View>
+
+      {/* РАЗГЪВАЕМ BENTO ПАНЕЛ: Кошница, Шринкфлация, Аларми, Томбола, Бързо качване и AI Асистент */}
+      {(isToolsExpanded || searchQuery.trim().length > 0) && (
+        <View style={{ marginBottom: 6 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              gap: 8,
+              marginBottom: 10,
+            }}
+          >
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                minWidth: 100,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                backgroundColor: COLORS.greenSoftBg,
+                borderWidth: 1,
+                borderColor: COLORS.greenBorder,
+                borderRadius: 15,
+                paddingVertical: 10,
+                paddingHorizontal: 10,
+              }}
+              onPress={() => {
+                setSmartToolsTab('basket');
+                setIsSmartToolsOpen(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="cart" size={14} color={COLORS.greenBright} />
+              <Text
+                style={{ color: COLORS.greenBright, fontSize: 11.5, fontWeight: '800', letterSpacing: -0.2 }}
+                numberOfLines={1}
+              >
+                🛒 Кошница
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                minWidth: 105,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                backgroundColor: COLORS.redSoftBg,
+                borderWidth: 1,
+                borderColor: COLORS.redBorder,
+                borderRadius: 15,
+                paddingVertical: 10,
+                paddingHorizontal: 10,
+              }}
+              onPress={() => {
+                setSmartToolsTab('shrinkflation');
+                setIsSmartToolsOpen(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="scale" size={14} color={COLORS.redBright} />
+              <Text
+                style={{ color: COLORS.redBright, fontSize: 11.5, fontWeight: '800', letterSpacing: -0.2 }}
+                numberOfLines={1}
+              >
+                📉 Шринкфлация
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                minWidth: 100,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                backgroundColor: COLORS.goldSoftBg,
+                borderWidth: 1,
+                borderColor: COLORS.goldBorder,
+                borderRadius: 15,
+                paddingVertical: 10,
+                paddingHorizontal: 10,
+              }}
+              onPress={() => {
+                setSmartToolsTab('alerts');
+                setIsSmartToolsOpen(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="notifications" size={14} color={COLORS.goldBright} />
+              <Text
+                style={{ color: COLORS.goldBright, fontSize: 11.5, fontWeight: '800', letterSpacing: -0.2 }}
+                numberOfLines={1}
+              >
+                🔔 Аларми ({activeAlertsCount})
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {isToolsExpanded && (
+            <>
+              <View style={styles.quickUploadBar}>
+                <TouchableOpacity
+                  style={styles.quickUploadLeft}
+                  onPress={() => {
+                    setQuickInitialPhoto(null);
+                    setIsQuickPhotoOpen(true);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.quickCameraCircle}>
+                    <Ionicons name="camera" size={18} color={COLORS.greenBright} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.quickUploadTitle} numberOfLines={1}>
+                      Качи снимка с цена 📸
+                    </Text>
+                    <Text style={styles.quickUploadSub} numberOfLines={1}>
+                      Авто-засичане на магазин по GPS & адрес в Google Maps
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <View style={styles.quickUploadActions}>
+                  <TouchableOpacity
+                    style={styles.quickIconBtnPrimary}
+                    onPress={() => handleQuickPickAndOpen(true)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="camera" size={15} color={COLORS.black} />
+                    <Text style={styles.quickIconBtnPrimaryText}>Снимай</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.quickIconBtnSecondary}
+                    onPress={() => handleQuickPickAndOpen(false)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="images-outline" size={16} color={COLORS.textPrimary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <ActiveRaffleCard onOpen={() => router.push('/raffle' as never)} />
+            </>
+          )}
+
+          <SmartPriceAssistantCard
+            filteredPosts={filteredPosts}
+            allPosts={posts}
+            searchQuery={searchQuery}
+            selectedCity={selectedCityFilter}
+            onApplyQuickQuery={(q) => setSearchQuery(q)}
+          />
         </View>
-        <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
-      </TouchableOpacity>
+      )}
 
       {/* Бонусът за новодошли: първа находка в първите минути → „Основател“ */}
       <FounderBanner />
 
-      {/* Гостът чете потока, но не може да участва. Вместо да го оставяме да
-          се чуди защо нищо не става при натискане — казваме му какво печели. */}
+      {/* Гостът чете потока, но не може да участва */}
       {!isAuthenticated && (
         <View style={styles.guestCard}>
           <View style={styles.guestRow}>
@@ -459,189 +747,6 @@ export default function FeedScreen() {
           </View>
         </View>
       )}
-
-      {/* ТОМБОЛАТА: истинската активна томбола с реалните статистики */}
-      <ActiveRaffleCard onOpen={() => router.push('/raffle' as never)} />
-
-      {/* Бързи тагове за умно търсене с 1 докосване */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.quickSearchScroll}
-      >
-        {QUICK_SEARCH_SUGGESTIONS.map((item) => {
-          const active = searchQuery.toLowerCase() === item.toLowerCase();
-          return (
-            <TouchableOpacity
-              key={item}
-              style={[
-                styles.quickSearchTag,
-                active && styles.quickSearchTagActive,
-              ]}
-              onPress={() =>
-                setSearchQuery(active ? '' : item)
-              }
-            >
-              <Ionicons
-                name="sparkles-outline"
-                size={11}
-                color={active ? COLORS.greenBright : COLORS.textMuted}
-              />
-              <Text
-                style={[
-                  styles.quickSearchTagText,
-                  active && styles.quickSearchTagTextActive,
-                ]}
-              >
-                {item}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* УМНИ ИНСТРУМЕНТИ ЗА ПОТРЕБИТЕЛЯ (Кошница, Шринкфлация, Ценови Аларми) */}
-      <View
-        style={{
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: 6,
-          marginBottom: 8,
-        }}
-      >
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            minWidth: 100,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 5,
-            backgroundColor: 'rgba(16, 185, 129, 0.14)',
-            borderWidth: 1,
-            borderColor: COLORS.greenBorder,
-            borderRadius: 12,
-            paddingVertical: 8,
-            paddingHorizontal: 8,
-          }}
-          onPress={() => {
-            setSmartToolsTab('basket');
-            setIsSmartToolsOpen(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="cart" size={14} color={COLORS.greenBright} />
-          <Text
-            style={{ color: COLORS.greenBright, fontSize: 11, fontWeight: '800' }}
-            numberOfLines={1}
-          >
-            🛒 Кошница
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            minWidth: 105,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 5,
-            backgroundColor: 'rgba(244, 63, 94, 0.14)',
-            borderWidth: 1,
-            borderColor: COLORS.redBorder,
-            borderRadius: 12,
-            paddingVertical: 8,
-            paddingHorizontal: 8,
-          }}
-          onPress={() => {
-            setSmartToolsTab('shrinkflation');
-            setIsSmartToolsOpen(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="scale" size={14} color={COLORS.redBright} />
-          <Text
-            style={{ color: COLORS.redBright, fontSize: 11, fontWeight: '800' }}
-            numberOfLines={1}
-          >
-            📉 Шринкфлация
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            minWidth: 100,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 5,
-            backgroundColor: 'rgba(245, 158, 11, 0.14)',
-            borderWidth: 1,
-            borderColor: COLORS.goldBorder,
-            borderRadius: 12,
-            paddingVertical: 8,
-            paddingHorizontal: 8,
-          }}
-          onPress={() => {
-            setSmartToolsTab('alerts');
-            setIsSmartToolsOpen(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="notifications" size={14} color={COLORS.goldBright} />
-          <Text
-            style={{ color: COLORS.goldBright, fontSize: 11, fontWeight: '800' }}
-            numberOfLines={1}
-          >
-            🔔 Аларми ({priceAlerts.filter((a) => a.isActive).length})
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Бърз панел: Качи снимка с цена */}
-      <View style={styles.quickUploadBar}>
-        <TouchableOpacity
-          style={styles.quickUploadLeft}
-          onPress={() => {
-            setQuickInitialPhoto(null);
-            setIsQuickPhotoOpen(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <View style={styles.quickCameraCircle}>
-            <Ionicons name="camera" size={18} color={COLORS.greenBright} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.quickUploadTitle} numberOfLines={1}>
-              Качи снимка с цена 📸
-            </Text>
-            <Text style={styles.quickUploadSub} numberOfLines={1}>
-              Авто-засичане на магазин по GPS & адрес в Google Maps
-            </Text>
-          </View>
-        </TouchableOpacity>
-
-        <View style={styles.quickUploadActions}>
-          <TouchableOpacity
-            style={styles.quickIconBtnPrimary}
-            onPress={() => handleQuickPickAndOpen(true)}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="camera" size={15} color={COLORS.black} />
-            <Text style={styles.quickIconBtnPrimaryText}>Снимай</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickIconBtnSecondary}
-            onPress={() => handleQuickPickAndOpen(false)}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="images-outline" size={16} color={COLORS.textPrimary} />
-          </TouchableOpacity>
-        </View>
-      </View>
 
       {/* ПАДАЩО МЕНЮ ЗА ВСИЧКИ ГРАДОВЕ В БЪЛГАРИЯ */}
       <CityPickerDropdown
@@ -830,53 +935,12 @@ export default function FeedScreen() {
           </TouchableOpacity>
         )}
       </View>
-
-      {/* УМЕН AI ЦЕНОВИ АСИСТЕНТ И КАЛКУЛАТОР */}
-      <SmartPriceAssistantCard
-        filteredPosts={filteredPosts}
-        allPosts={posts}
-        searchQuery={searchQuery}
-        selectedCity={selectedCityFilter}
-        onApplyQuickQuery={(q) => setSearchQuery(q)}
-      />
-
-      {/* Ненатрапчив банер за независима общност (ако потребителят още не е дарил) */}
-      {!userProfile.isSupporter && (
-        <TouchableOpacity
-          style={styles.communityNudgeBanner}
-          onPress={() =>
-            openDonationModal(
-              'SmartPrice е независим проект без реклами. Подкрепи ни с дарение и вземи златна значка „Пазител на Общността“!',
-              true
-            )
-          }
-          activeOpacity={0.85}
-        >
-          <View style={styles.nudgeLeft}>
-            <View style={styles.nudgeIconBox}>
-              <Ionicons name="sparkles" size={17} color={COLORS.goldBright} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nudgeTitle} numberOfLines={1}>
-                100% независими • Без платени ревюта
-              </Text>
-              <Text style={styles.nudgeSubtitle} numberOfLines={2}>
-                Ти все още не си дарил. Подкрепи ни от 2 € →
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-      )}
     </View>
   );
 
   return (
       <SafeAreaView style={styles.safeArea}>
-        {/* ВАЖНО: подаваме ЕЛЕМЕНТ (renderHeader()), не самата функция.
-            Ако се подаде функция, FlatList я третира като компонент; понеже
-            идентичността ѝ се сменя на всеки render, React размонтира и
-            монтира хедъра наново — полето за търсене губи фокус на всяка
-            буква и клавиатурата се затваря (изглежда като „рефреш“). */}
+        {/* ВАЖНО: подаваме ЕЛЕМЕНТ (renderHeader()), не самата функция. */}
         <FlatList
           data={filteredPosts}
           keyExtractor={(item) => item.id}
@@ -884,30 +948,45 @@ export default function FeedScreen() {
             <PostCard post={item} distanceKm={postDistances[item.id]} />
           )}
           ListHeaderComponent={renderHeader()}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <View style={styles.emptyBox}>
-            <Ionicons name="search-outline" size={44} color={COLORS.textMuted} />
-            <Text style={styles.emptyTitle}>Няма намерени публикации</Text>
-            <Text style={styles.emptySub}>
-              Няма резултати за текущото търсене или град ({selectedCityFilter}).
-              Изчисти филтрите или качи първата снимка с цена!
-            </Text>
-            {hasActiveFilters && (
-              <TouchableOpacity
-                style={styles.emptyResetBtn}
-                onPress={resetAllFilters}
-              >
-                <Text style={styles.emptyResetBtnText}>
-                  Покажи всички публикации
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        }
-      />
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          refreshing={isRefreshing}
+          onRefresh={() => void refreshAll()}
+          onEndReached={() => {
+            if (!debouncedQuery && hasMorePosts) {
+              void loadMorePosts();
+            }
+          }}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            isLoadingMore ? (
+              <View style={{ paddingVertical: 18, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={COLORS.greenBright} />
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyBox}>
+              <Ionicons name="search-outline" size={44} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>Няма намерени публикации</Text>
+              <Text style={styles.emptySub}>
+                Няма резултати за текущото търсене или град ({selectedCityFilter}).
+                Изчисти филтрите или качи първата снимка с цена!
+              </Text>
+              {hasActiveFilters && (
+                <TouchableOpacity
+                  style={styles.emptyResetBtn}
+                  onPress={resetAllFilters}
+                >
+                  <Text style={styles.emptyResetBtnText}>
+                    Покажи всички публикации
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          }
+        />
 
       <QuickPricePhotoModal
         visible={isQuickPhotoOpen}
@@ -926,42 +1005,43 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   guestCard: {
-    marginHorizontal: 14,
+    marginHorizontal: 2,
     marginTop: 12,
-    padding: 14,
-    borderRadius: 18,
+    padding: 16,
+    borderRadius: 22,
     backgroundColor: COLORS.indigoSoftBg,
     borderWidth: 1,
     borderColor: COLORS.accentCyanBorder,
   },
-  guestRow: { flexDirection: 'row', gap: 11, alignItems: 'flex-start' },
+  guestRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   guestIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
     backgroundColor: COLORS.accentCyan,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  guestTitle: { color: COLORS.textPrimary, fontSize: 14.5, fontWeight: '900' },
-  guestSub: { color: COLORS.textSecondary, fontSize: 12.6, lineHeight: 18, marginTop: 4 },
-  guestButtons: { flexDirection: 'row', gap: 9, marginTop: 12, flexWrap: 'wrap' },
+  guestTitle: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '900', letterSpacing: -0.2 },
+  guestSub: { color: COLORS.textSecondary, fontSize: 12.8, lineHeight: 18.5, marginTop: 4 },
+  guestButtons: { flexDirection: 'row', gap: 9, marginTop: 13, flexWrap: 'wrap' },
   guestPrimary: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: 15,
+    paddingVertical: 9.5,
     borderRadius: 999,
     backgroundColor: COLORS.greenPrimary,
   },
   guestPrimaryText: { color: COLORS.white, fontSize: 13, fontWeight: '900' },
   guestGhost: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: 15,
+    paddingVertical: 9.5,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
+    borderColor: COLORS.borderStrong,
+    backgroundColor: 'rgba(255,255,255,0.03)',
   },
   guestGhostText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '800' },
   // Търсене по ID на оферта
@@ -976,18 +1056,18 @@ const styles = StyleSheet.create({
   howItWorks: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 11,
     marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.accentCyanBorder,
     backgroundColor: COLORS.accentCyanSoftBg,
     maxWidth: '100%',
   },
-  howItWorksTitle: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '800' },
-  howItWorksSub: { color: COLORS.textMuted, fontSize: 11, marginTop: 1, flexShrink: 1 },
+  howItWorksTitle: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '800', letterSpacing: -0.2 },
+  howItWorksSub: { color: COLORS.textMuted, fontSize: 11, marginTop: 1.5, flexShrink: 1 },
   codeJump: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -995,7 +1075,7 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
     backgroundColor: COLORS.goldBright,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 11,
   },
   codeJumpText: { color: COLORS.black, fontSize: 13, fontWeight: '900' },
@@ -1004,19 +1084,19 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgPrimary,
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 32,
+    paddingHorizontal: 14,
+    paddingBottom: 36,
   },
   headerContainer: {
-    paddingTop: 8,
-    marginBottom: 10,
+    paddingTop: 10,
+    marginBottom: 12,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
-    gap: 8,
+    marginBottom: 12,
+    gap: 10,
   },
   topBarLeft: {
     flex: 1,
@@ -1025,12 +1105,12 @@ const styles = StyleSheet.create({
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   logoBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     backgroundColor: COLORS.greenSoftBg,
     borderWidth: 1,
     borderColor: COLORS.greenBorder,
@@ -1040,43 +1120,49 @@ const styles = StyleSheet.create({
   },
   brandTitle: {
     color: COLORS.textPrimary,
-    fontSize: 19,
+    fontSize: 21,
     fontWeight: '900',
-    letterSpacing: -0.4,
+    letterSpacing: -0.6,
     flexShrink: 1,
   },
   liveTag: {
-    backgroundColor: COLORS.bgCardElevated,
+    backgroundColor: COLORS.accentCyanSoftBg,
     borderWidth: 1,
-    borderColor: COLORS.borderStrong,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 5,
+    borderColor: COLORS.accentCyanBorder,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 999,
     flexShrink: 0,
   },
   liveTagText: {
     color: COLORS.accentCyan,
     fontSize: 8.5,
     fontWeight: '900',
+    letterSpacing: 0.4,
   },
   brandSub: {
     color: COLORS.textSecondary,
-    fontSize: 11.5,
-    marginTop: 2,
+    fontSize: 12,
+    marginTop: 3,
   },
   savedHighlight: {
     color: COLORS.greenBright,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   donateTopButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
     backgroundColor: COLORS.goldBright,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
     flexShrink: 0,
+    shadowColor: COLORS.goldPrimary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   supporterTopButton: {
     backgroundColor: COLORS.goldSoftBg,
@@ -1086,43 +1172,48 @@ const styles = StyleSheet.create({
   donateTopButtonText: {
     color: COLORS.black,
     fontSize: 11.5,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   universalSearchBox: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.bgCard,
-    borderWidth: 1.2,
+    borderWidth: 1,
     borderColor: COLORS.borderStrong,
-    borderRadius: 14,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-    gap: 8,
-    marginBottom: 7,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    gap: 9,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 3,
   },
   universalSearchInput: {
     flex: 1,
     color: COLORS.textPrimary,
-    fontSize: 13.5,
+    fontSize: 14,
     paddingVertical: 0,
   },
   clearSearchBtn: {
     padding: 2,
   },
   quickSearchScroll: {
-    gap: 6,
-    paddingBottom: 9,
+    gap: 7,
+    paddingBottom: 10,
   },
   quickSearchTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(30, 41, 59, 0.65)',
+    gap: 4.5,
+    backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    paddingHorizontal: 9,
-    paddingVertical: 4.5,
-    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 5.5,
+    borderRadius: 999,
   },
   quickSearchTagActive: {
     backgroundColor: COLORS.greenSoftBg,
@@ -1131,7 +1222,7 @@ const styles = StyleSheet.create({
   quickSearchTagText: {
     color: COLORS.textSecondary,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   quickSearchTagTextActive: {
     color: COLORS.greenBright,
@@ -1144,22 +1235,22 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.greenBorder,
-    borderRadius: 15,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    marginBottom: 8,
-    gap: 8,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginBottom: 10,
+    gap: 10,
   },
   quickUploadLeft: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   quickCameraCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 13,
     backgroundColor: COLORS.greenSoftBg,
     borderWidth: 1,
     borderColor: COLORS.greenBorder,
@@ -1169,13 +1260,14 @@ const styles = StyleSheet.create({
   },
   quickUploadTitle: {
     color: COLORS.textPrimary,
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '800',
+    letterSpacing: -0.2,
   },
   quickUploadSub: {
     color: COLORS.textSecondary,
-    fontSize: 10.5,
-    marginTop: 1,
+    fontSize: 11,
+    marginTop: 1.5,
   },
   quickUploadActions: {
     flexDirection: 'row',
@@ -1188,9 +1280,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     backgroundColor: COLORS.greenBright,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: 12,
   },
   quickIconBtnPrimaryText: {
     color: COLORS.black,
@@ -1198,9 +1290,9 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   quickIconBtnSecondary: {
-    width: 33,
-    height: 33,
-    borderRadius: 10,
+    width: 35,
+    height: 35,
+    borderRadius: 12,
     backgroundColor: COLORS.bgCardElevated,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
@@ -1210,23 +1302,25 @@ const styles = StyleSheet.create({
   polaritySwitcher: {
     flexDirection: 'row',
     backgroundColor: COLORS.bgCard,
-    borderRadius: 14,
-    padding: 3,
+    borderRadius: 16,
+    padding: 4,
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    marginBottom: 9,
-    gap: 3,
+    marginBottom: 10,
+    gap: 4,
   },
   polarityTab: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingVertical: 9,
+    paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 11,
+    borderRadius: 12,
   },
   polarityTabAllActive: {
     backgroundColor: COLORS.bgCardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
   },
   polarityTabGreenActive: {
     backgroundColor: COLORS.greenSoftBg,
@@ -1241,35 +1335,35 @@ const styles = StyleSheet.create({
   polarityTabText: {
     color: COLORS.textSecondary,
     fontSize: 11.5,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   polarityTabTextActive: {
     color: COLORS.textPrimary,
     fontWeight: '800',
   },
   categoriesScroll: {
-    gap: 7,
-    paddingBottom: 8,
+    gap: 8,
+    paddingBottom: 10,
   },
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 5.5,
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 12,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 999,
   },
   categoryChipActive: {
     backgroundColor: COLORS.accentIndigo,
-    borderColor: COLORS.accentIndigo,
+    borderColor: 'rgba(255, 255, 255, 0.24)',
   },
   categoryChipText: {
     color: COLORS.textSecondary,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   categoryChipTextActive: {
     color: COLORS.white,
@@ -1279,7 +1373,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 10,
     gap: 6,
   },
   sortScroll: {
@@ -1288,22 +1382,22 @@ const styles = StyleSheet.create({
   sortPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    gap: 4.5,
+    backgroundColor: 'rgba(17, 23, 40, 0.72)',
     borderWidth: 1,
-    borderColor: 'transparent',
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 9,
+    borderColor: COLORS.borderSubtle,
+    paddingHorizontal: 10,
+    paddingVertical: 5.5,
+    borderRadius: 999,
   },
   sortPillActive: {
-    backgroundColor: 'rgba(6, 182, 212, 0.14)',
-    borderColor: 'rgba(6, 182, 212, 0.4)',
+    backgroundColor: COLORS.accentCyanSoftBg,
+    borderColor: COLORS.accentCyanBorder,
   },
   sortPillText: {
     color: COLORS.textMuted,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   sortPillTextActive: {
     color: COLORS.accentCyan,
@@ -1312,13 +1406,13 @@ const styles = StyleSheet.create({
   resetFiltersBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 3.5,
     backgroundColor: COLORS.redSoftBg,
     borderWidth: 1,
     borderColor: COLORS.redBorder,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5.5,
+    borderRadius: 999,
     flexShrink: 0,
   },
   resetFiltersText: {
@@ -1327,22 +1421,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   communityNudgeBanner: {
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
     borderWidth: 1,
     borderColor: COLORS.goldBorder,
-    borderRadius: 14,
-    padding: 10,
-    marginTop: 2,
+    borderRadius: 18,
+    padding: 12,
+    marginTop: 4,
   },
   nudgeLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: 10,
   },
   nudgeIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 9,
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     backgroundColor: COLORS.goldSoftBg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1356,7 +1450,7 @@ const styles = StyleSheet.create({
   nudgeSubtitle: {
     color: COLORS.textSecondary,
     fontSize: 11,
-    marginTop: 1,
+    marginTop: 1.5,
   },
   emptyBox: {
     alignItems: 'center',
@@ -1379,9 +1473,9 @@ const styles = StyleSheet.create({
   emptyResetBtn: {
     marginTop: 14,
     backgroundColor: COLORS.accentIndigo,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 10.5,
+    borderRadius: 999,
   },
   emptyResetBtnText: {
     color: COLORS.white,

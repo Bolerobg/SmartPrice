@@ -1,48 +1,48 @@
 import { CategoryInfo, PlatformTag } from '@/types';
 
 export const COLORS = {
-  // Основна тъмно-модерна тема (Sleek Consumer Social UI)
-  bgPrimary: '#090D16',
-  bgSecondary: '#111827',
-  bgCard: '#161F30',
-  bgCardElevated: '#1E293B',
-  bgGlass: 'rgba(22, 31, 48, 0.88)',
-  borderSubtle: 'rgba(148, 163, 184, 0.14)',
-  borderStrong: 'rgba(148, 163, 184, 0.25)',
+  // 2026 Obsidian & Luminous Glass UI (Spatial Depth + Bento Architecture)
+  bgPrimary: '#060911',
+  bgSecondary: '#0C111E',
+  bgCard: '#111728',
+  bgCardElevated: '#172036',
+  bgGlass: 'rgba(17, 23, 40, 0.82)',
+  borderSubtle: 'rgba(255, 255, 255, 0.08)',
+  borderStrong: 'rgba(255, 255, 255, 0.16)',
 
-  // Текст
+  // Текст (2026 Висококонтрастна типография с меки вторични тонове)
   textPrimary: '#F8FAFC',
   textSecondary: '#94A3B8',
   textMuted: '#64748B',
 
-  // 🟢 Зелена зона: Топ Оферти, Честни цени, Находки
+  // 🟢 Зелена зона: Топ Оферти, Честни цени, Находки (2026 Neon Mint & Emerald)
   greenPrimary: '#10B981',
   greenBright: '#34D399',
   greenDark: '#059669',
-  greenSoftBg: 'rgba(16, 185, 129, 0.14)',
-  greenBorder: 'rgba(16, 185, 129, 0.38)',
+  greenSoftBg: 'rgba(16, 185, 129, 0.12)',
+  greenBorder: 'rgba(52, 211, 153, 0.30)',
 
-  // 🔴 Червена зона: Ценови Капани, Измами, Къде да НЕ се ходи
+  // 🔴 Червена зона: Ценови Капани, Измами, Къде да НЕ се ходи (2026 Electric Coral-Rose)
   redPrimary: '#F43F5E',
   redBright: '#FB7185',
   redDark: '#E11D48',
-  redSoftBg: 'rgba(244, 63, 94, 0.14)',
-  redBorder: 'rgba(244, 63, 94, 0.38)',
+  redSoftBg: 'rgba(244, 63, 94, 0.12)',
+  redBorder: 'rgba(251, 113, 133, 0.30)',
 
-  // ✨ VIP Дарители & Верифицирана Касова Бележка
+  // ✨ VIP Дарители & Верифицирана Касова Бележка (2026 Champagne Amber)
   goldPrimary: '#F59E0B',
-  goldBright: '#FBBF24',
-  goldSoftBg: 'rgba(245, 158, 11, 0.16)',
-  goldBorder: 'rgba(245, 158, 11, 0.42)',
+  goldBright: '#FCD34D',
+  goldSoftBg: 'rgba(245, 158, 11, 0.13)',
+  goldBorder: 'rgba(252, 211, 77, 0.32)',
 
-  // Интерактивни акценти (AI & Радар)
+  // Интерактивни акценти (AI & Радар — 2026 Electric Indigo & Bioluminescent Cyan)
   accentIndigo: '#6366F1',
-    accentCyan: '#06B6D4',
-    accentPurple: '#8B5CF6',
-    // Меки варианти за фонове на баджове/стъпки
-    accentCyanSoftBg: 'rgba(6, 182, 212, 0.14)',
-    accentCyanBorder: 'rgba(6, 182, 212, 0.42)',
-  indigoSoftBg: 'rgba(99, 102, 241, 0.15)',
+  accentCyan: '#22D3EE',
+  accentPurple: '#A855F7',
+  // Меки варианти за фонове на баджове/стъпки
+  accentCyanSoftBg: 'rgba(34, 211, 238, 0.12)',
+  accentCyanBorder: 'rgba(34, 211, 238, 0.32)',
+  indigoSoftBg: 'rgba(99, 102, 241, 0.14)',
 
   white: '#FFFFFF',
   black: '#000000',

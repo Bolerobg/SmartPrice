@@ -225,6 +225,8 @@ export interface UserProfile {
   avatar: string;
   bio: string;
   city: string;
+  role?: 'user' | 'admin';
+  isAdmin?: boolean;
   isSupporter: boolean;
   supporterSince?: string;
   supporterTier?: 'coffee' | 'guardian' | 'legend';
