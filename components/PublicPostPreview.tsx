@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -122,9 +123,9 @@ export const PublicPostPreview: React.FC<Props> = ({ id }) => {
         <Text style={styles.title}>{post.title}</Text>
 
         <View style={styles.metaRow}>
-          <Ionicons name="location" size={13} color={accent} />
+          <Ionicons name={post.sourceUrl ? 'cart-outline' : 'location'} size={13} color={accent} />
           <Text style={styles.metaText}>
-            {post.placeName} · {post.city}
+            {post.sourceUrl ? `Онлайн магазин · ${post.placeName}` : `${post.placeName} · ${post.city}`}
           </Text>
         </View>
         <View style={styles.postedAtRow}>
@@ -162,6 +163,20 @@ export const PublicPostPreview: React.FC<Props> = ({ id }) => {
             </View>
           ) : null}
         </View>
+
+        {post.sourceUrl ? (
+          <TouchableOpacity
+            style={styles.mapRow}
+            onPress={() =>
+              void Linking.openURL(post.sourceUrl as string).catch(() => undefined)
+            }
+            activeOpacity={0.85}
+          >
+            <Ionicons name="cart-outline" size={16} color="#60A5FA" />
+            <Text style={styles.mapText}>Отвори продукта в магазина</Text>
+            <Ionicons name="chevron-forward" size={15} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        ) : null}
 
         {post.description ? (
           <View style={styles.section}>
