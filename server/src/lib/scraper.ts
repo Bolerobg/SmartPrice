@@ -395,6 +395,41 @@ export function extractListPrice(html: string): { price: number; currency?: stri
 }
 
 /** Обръща HTML елементи в текст: маха скриптове/стилове, декодира основните знаци. */
+/**
+ * Маха името/домейна на магазина от описанието.
+ *
+ * Защо: в приложението НЕ показваме кой е сайтът (искане на потребителя) —
+ * описанията обаче идваха от AI с „… предлаган от pottery-factory.com“.
+ * Оставяме чисто описание на продукта, без реклама на конкретен магазин.
+ */
+export function stripShopMentions(text: string, domain?: string): string {
+  let t = (text ?? '').trim();
+  if (!t) return t;
+
+  const hosts = new Set<string>();
+  if (domain) hosts.add(domain.toLowerCase().replace(/^www\./, ''));
+  for (const m of t.matchAll(/\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b/gi)) {
+    hosts.add(m[1]!.toLowerCase().replace(/^www\./, ''));
+  }
+
+  for (const host of hosts) {
+    const h = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    t = t
+      // „, предлаган от shop.bg“ / „предлагана от shop.bg“ / „от shop.bg“
+      .replace(new RegExp(`[,;]?\\s*(?:предлаган[аоы]?|предлагано|предлагат)\\s+(?:от\\s+)?(?:www\\.)?${h}`, 'gi'), '')
+      .replace(new RegExp(`[,;]?\\s*(?:от|в|на)\\s+(?:www\\.)?${h}`, 'gi'), '')
+      .replace(new RegExp(`\\((?:www\\.)?${h}\\)`, 'gi'), '')
+      .replace(new RegExp(`(?:www\\.)?${h}`, 'gi'), '');
+  }
+
+  return t
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .replace(/,\s*\./g, '.')
+    .replace(/^[\s,;.–-]+/, '')
+    .trim();
+}
+
 export function htmlToText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -2736,11 +2771,13 @@ export async function runJob(jobId: string): Promise<void> {
         .slice(0, 8);
 
       const description =
-        (ai?.description ??
-          (p.description ? p.description.slice(0, 1200) : `${title} — цена от онлайн магазин ${shopLabel}.`)).slice(
-          0,
-          4000
-        );
+        stripShopMentions(
+          ai?.description ??
+            (p.description
+              ? p.description.slice(0, 1200)
+              : `${title} — цена от онлайн магазин.`),
+          job.domain
+        ).slice(0, 4000);
 
       if (o.mode === 'preview') {
         await insertItem(jobId, p, ai, {

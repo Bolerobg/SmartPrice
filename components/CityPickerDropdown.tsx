@@ -102,6 +102,8 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
   accentColor = COLORS.greenBright,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  /** Показваме пълния списък (189 града) само след търсене или „Виж всички“. */
+  const [showAll, setShowAll] = useState(false);
   /** Какво пише човекът (реагира веднага) и какво филтрираме (със закъснение). */
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -131,6 +133,7 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
 
   const close = useCallback(() => {
     setIsOpen(false);
+    setShowAll(false);
     setSearchInput('');
     setSearchQuery('');
   }, []);
@@ -140,6 +143,7 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
       // Затваряме ПЪРВО: ако родителят се пре-рендира бавно след смяната на
       // града, листът оставаше отворен и изглеждаше „забил“.
       setIsOpen(false);
+      setShowAll(false);
       setSearchInput('');
       setSearchQuery('');
       onSelectCity(city);
@@ -249,8 +253,13 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
           </TouchableOpacity>
         )}
 
-      {/* Пълен списък на градовете */}
-      <FlatList
+      {/*
+        Пълният списък (189 града) се рендира САМО при търсене или след
+        „Виж всички“ — така отварянето на менюто е мигновено и няма какво да
+        „забива“ на телефон. Иначе показваме само 12-те най-често избирани.
+      */}
+      {searchQuery.trim().length > 0 || showAll ? (
+        <FlatList
         data={filteredCities}
         keyExtractor={(item) => item}
         // „always“: с отворена клавиатура първото докосване вече избира град,
@@ -292,7 +301,20 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
             onChoose={handleChoose}
           />
         )}
-      />
+        />
+      ) : (
+        <TouchableOpacity
+          style={styles.showAllBtn}
+          onPress={() => setShowAll(true)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="list" size={16} color={COLORS.greenBright} />
+          <Text style={styles.showAllText}>
+            Виж всички {allAvailableCities.length - (includeAllOption ? 1 : 0)} града в България
+          </Text>
+          <Ionicons name="chevron-down" size={15} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -650,5 +672,21 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     paddingHorizontal: 12,
     lineHeight: 18,
+  },
+  showAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  showAllText: {
+    color: COLORS.textPrimary,
+    fontSize: 13,
+    fontWeight: '800',
   },
 });
