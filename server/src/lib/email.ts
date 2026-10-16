@@ -388,3 +388,103 @@ export async function sendAdminAlertEmail(params: {
       `\n\nОтвори админ панела за подробности.`,
   });
 }
+
+/* ------------------------------------------------------------------ */
+/*  Томболи със спонсор                                              */
+/* ------------------------------------------------------------------ */
+
+/** Кой получава писмата за наградите (организаторът). */
+function organizerEmail(): string {
+  const first = env.ADMIN_EMAILS.split(',').map((e) => e.trim()).filter(Boolean)[0];
+  return first ?? env.ALERT_EMAIL;
+}
+
+/**
+ * Победител в томбола. Писмото трябва да е кратко и да казва ЕДНО нещо:
+ * „спечели, влез и дай адрес, иначе наградата отива при следващия“.
+ */
+export async function sendRaffleWonEmail(params: {
+  to: string;
+  name: string;
+  prizeTitle: string;
+  sponsorName: string;
+  raffleTitle: string;
+  claimDeadlineDays: number;
+  deliveryNote: string;
+}): Promise<SendResult> {
+  const sponsorLine = params.sponsorName
+    ? ` Наградата е осигурена от <strong style="color:#F8FAFC;">${escapeHtml(params.sponsorName)}</strong>.`
+    : '';
+  const html = plainLayout({
+    heading: `🎉 Печелиш: ${escapeHtml(params.prizeTitle)}`,
+    intro: `Браво, ${escapeHtml(params.name)}! Ти си победителят в „${escapeHtml(params.raffleTitle)}“.`,
+    bodyHtml: `
+      <p>${sponsorLine}</p>
+      <p>За да ти я изпратим, влез в приложението и в екрана на томболата попълни
+         име, телефон, град и адрес. Само ти и екипът виждат тези данни.</p>
+      <p><strong>Дай данните до ${params.claimDeadlineDays} дни</strong> — след това
+         наградата отива при следващия в списъка, за да не увисне.</p>
+      ${params.deliveryNote ? `<p>${escapeHtml(params.deliveryNote)}</p>` : ''}`,
+    footnote: 'Писмото е автоматично. Ако имаш въпрос, отговори на този имейл.',
+  });
+
+  return sendMail({
+    to: params.to,
+    subject: `🎉 Спечели ${params.prizeTitle}`,
+    html,
+    text:
+      `Браво, ${params.name}! Ти спечели ${params.prizeTitle} в „${params.raffleTitle}“.\n\n` +
+      (params.sponsorName ? `Наградата е от ${params.sponsorName}.\n\n` : '') +
+      `Влез в SmartPrice и дай име, телефон, град и адрес за доставка до ` +
+      `${params.claimDeadlineDays} дни. След това наградата отива при следващия.\n` +
+      (params.deliveryNote ? `${params.deliveryNote}\n` : ''),
+  });
+}
+
+/** Писмо до организатора: готовите данни за куриера, без да ги търси в панела. */
+export async function sendRaffleDeliveryEmail(params: {
+  winnerName: string;
+  winnerHandle: string;
+  winnerEmail: string;
+  prizeTitle: string;
+  sponsorName: string;
+  city: string;
+  address: string;
+  phone: string;
+  note: string;
+}): Promise<SendResult> {
+  const rows = [
+    ['Награда', params.prizeTitle],
+    ['Спонсор', params.sponsorName || '—'],
+    ['Получател', `${params.winnerName} (${params.winnerHandle})`],
+    ['Телефон', params.phone],
+    ['Град', params.city],
+    ['Адрес', params.address],
+    ['Бележка', params.note || '—'],
+  ]
+    .map(
+      ([k, v]) =>
+        `<tr><td style="color:#94A3B8;padding:3px 12px 3px 0;">${escapeHtml(k)}</td>` +
+        `<td style="color:#F8FAFC;font-weight:700;">${escapeHtml(v)}</td></tr>`
+    )
+    .join('');
+
+  const html = plainLayout({
+    heading: '📦 Победител даде данни за доставка',
+    intro: 'Ето какво да дадеш на куриера:',
+    bodyHtml: `<table role="presentation" cellpadding="0" cellspacing="0">${rows}</table>`,
+    footnote: 'Статусът се сменя от админ панела → Томболи → Печалби.',
+  });
+
+  return sendMail({
+    to: organizerEmail(),
+    subject: `📦 Доставка: ${params.prizeTitle} → ${params.winnerName}`,
+    html,
+    text:
+      `Награда: ${params.prizeTitle}\n` +
+      `Спонсор: ${params.sponsorName || '—'}\n` +
+      `Получател: ${params.winnerName} (${params.winnerHandle})\n` +
+      `Телефон: ${params.phone}\nГрад: ${params.city}\nАдрес: ${params.address}\n` +
+      `Бележка: ${params.note || '—'}`,
+  });
+}

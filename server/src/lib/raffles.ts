@@ -993,14 +993,14 @@ export async function logEvent(
   raffleId: string,
   userId: string | null,
   kind: string,
-  detail: Record<string, unknown> = {}
+  detail: Record<string, unknown> = {},
+  isPublic = false
 ): Promise<void> {
-  await query('insert into raffle_events (raffle_id, user_id, kind, detail) values ($1,$2,$3,$4)', [
-    raffleId,
-    userId,
-    kind,
-    JSON.stringify(detail),
-  ]);
+  await query(
+    `insert into raffle_events (raffle_id, user_id, kind, detail, is_public)
+     values ($1,$2,$3,$4,$5)`,
+    [raffleId, userId, kind, JSON.stringify(detail), isPublic]
+  );
 }
 
 /** Колко пъти сме показали рекламата и дали е редно да я покажем пак. */

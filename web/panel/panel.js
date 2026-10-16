@@ -146,6 +146,7 @@ const PAGES = {
   demo: ['Демо играч', 'Тестов играч, който печели — за демонстрация и проби'],
   founder: ['Основатели', 'Бонус за първите: значка „Основател“ за първа находка до 5 мин.'],
   import: ['Внасяне на бонове', 'Методът „кошче на касата“: реални бонове наведнъж, под профил „Редакция“'],
+  wins: ['Печалби и доставки', 'Кой е спечелил, има ли адрес и изпратена ли е наградата'],
   comments: ['Коментари', 'Преглед и модерация на коментарите'],
   reports: ['Сигнали', 'Какво сигнализират потребителите'],
   categories: ['Категории', 'Етикети и думи за търсене'],
@@ -235,6 +236,7 @@ async function render(page, force = false) {
     if (page === 'demo') return await renderDemo(box, force);
     if (page === 'founder') return await renderFounder(box, force);
     if (page === 'import') return await renderImport(box, force);
+    if (page === 'wins') return await renderWins(box, force);
     if (page === 'comments') return await renderComments(box, force);
     if (page === 'reports') return await renderReports(box, force);
     if (page === 'categories') return await renderCategories(box, force);
@@ -1464,6 +1466,48 @@ function raffleForm(r) {
           научи дъската с втория профил. <strong>Това е най-силната защита.</strong>
         </div>
       </label>
+
+      <div class="field full" style="border-top:1px solid var(--line);padding-top:14px;margin-top:4px">
+        <strong>🎁 Спонсор, правила и начин на печелене</strong>
+        <div class="dim" style="margin-top:4px;font-size:12px">
+          Спонсорът дава продукта. Пиши го честно — „награда от <спонсор>“ носи доверие,
+          а „наш подарък“ не се вярва. Данък върху печалбата: при награда от спонсор
+          организаторът дължи 10% данък — провери с адвокат и искай документ от спонсора.
+        </div>
+      </div>
+
+      <label class="field"><span>Спонсор (кой дава наградата)</span><input id="rf-sponsor" value="${esc(r?.sponsor?.name || '')}" placeholder="Напр. „Козметика Роза“"></label>
+      <label class="field"><span>Линк на спонсора</span><input id="rf-sponsor-url" value="${esc(r?.sponsor?.url || '')}" placeholder="https://..."></label>
+      <label class="field"><span>Контакт със спонсора (вътрешно)</span><input id="rf-sponsor-contact" value="" placeholder="име, имейл, телефон"></label>
+      <label class="field"><span>Уговорки със спонсора (вътрешно)</span><input id="rf-sponsored-note" value="" placeholder="кой плаща доставката, фактура…"></label>
+
+      <label class="field full"><span>Правила на томболата (показват се на хората)</span>
+        <textarea id="rf-rules" placeholder="1. Участваш с находки със снимка. 2. Печели първият, изпълнил условието. 3. Участието е безплатно и не изисква покупка. 4. Наградата се изпраща с куриер за наша сметка.">${esc(r?.rules || '')}</textarea>
+      </label>
+
+      <label class="field"><span>Как се печели</span>
+        <select id="rf-winmode">
+          <option value="first_to_complete"${(r?.winMode ?? 'first_to_complete') === 'first_to_complete' ? ' selected' : ''}>Първият, който събере находките — печели веднага</option>
+          <option value="fastest_puzzle"${r?.winMode === 'fastest_puzzle' ? ' selected' : ''}>Най-бързото нареждане на пъзела (старото)</option>
+        </select>
+      </label>
+      <label class="field"><span>Място в опашката (по-малко = по-рано)</span><input id="rf-queue" type="number" min="0" max="10000" value="${r?.queueOrder ?? 100}"></label>
+      <label class="field"><span>Дни на победителя да даде адрес</span><input id="rf-claim" type="number" min="1" max="90" value="${r?.claimDeadlineDays ?? 7}"></label>
+      <label class="field"><span>Вид награда</span>
+        <select id="rf-prizekind">
+          <option value="product"${(r?.prizeKind ?? 'product') === 'product' ? ' selected' : ''}>Продукт от спонсор</option>
+          <option value="service"${r?.prizeKind === 'service' ? ' selected' : ''}>Услуга</option>
+          <option value="cash"${r?.prizeKind === 'cash' ? ' selected' : ''}>Пари</option>
+          <option value="other"${r?.prizeKind === 'other' ? ' selected' : ''}>Друго</option>
+        </select>
+      </label>
+      <label class="field"><span>Стойност на наградата (€)</span><input id="rf-prizevalue" type="number" step="0.01" value="${r?.prizeValueEur ?? ''}"></label>
+      <label class="field full"><span>Бележка за доставката (показва се на победителя)</span><input id="rf-delivery" value="${esc(r?.deliveryNote || '')}" placeholder="Изпращаме с Еконт за наша сметка; може и до офис."></label>
+
+      <label class="field full" style="display:flex;gap:10px;align-items:center">
+        <input id="rf-auto" type="checkbox"${r && r.autoActivateNext === false ? '' : ' checked'}>
+        <span>Когато тази томбола бъде спечелена — пусни автоматично следващата от опашката</span>
+      </label>
     </div>
     ${isNew ? '' : `<div class="hint" style="margin-top:12px">Статус: <strong>${esc(r.status)}</strong> · участници: ${num(r.qualifiedCount)}</div>`}`;
 
@@ -1545,6 +1589,25 @@ function raffleForm(r) {
     };
     const opensValue = $('#rf-opens').value;
     payload.officialOpensAt = opensValue ? new Date(opensValue).toISOString() : undefined;
+
+    // Спонсор, правила, начин на печелене, опашка — новите полета (миграция 021).
+    const sponsorPayload = {
+      sponsorName: $('#rf-sponsor').value.trim() || undefined,
+      sponsorUrl: $('#rf-sponsor-url').value.trim() || undefined,
+      sponsorContact: $('#rf-sponsor-contact').value.trim() || undefined,
+      sponsoredNote: $('#rf-sponsored-note').value.trim() || undefined,
+      rulesText: $('#rf-rules').value.trim() || undefined,
+      winMode: $('#rf-winmode').value,
+      queueOrder: Number($('#rf-queue').value) || 0,
+      autoActivateNext: Boolean($('#rf-auto').checked),
+      claimDeadlineDays: Number($('#rf-claim').value) || 7,
+      deliveryNote: $('#rf-delivery').value.trim() || undefined,
+      prizeKind: $('#rf-prizekind').value,
+      prizeValueEur: $('#rf-prizevalue').value ? Number($('#rf-prizevalue').value) : undefined,
+    };
+    // При създаване всичко пътува в един POST; при редакция новите полета се
+    // пращат отделно, за да не се пипа старият PATCH.
+    Object.assign(payload, sponsorPayload);
     try {
       if (isNew) {
         if (!payload.endsAt) throw new Error('Посочи краен срок.');
@@ -1552,6 +1615,7 @@ function raffleForm(r) {
         toast('Томболата е създадена и активна');
       } else {
         await api(`/raffles/${r.id}`, { method: 'PATCH', body: payload });
+        await api(`/raffles/${r.id}/sponsor`, { method: 'PATCH', body: sponsorPayload });
         toast('Томболата е обновена');
       }
       closeModal();
@@ -3076,6 +3140,125 @@ python import_receipts.py --file receipts.json --commit  # внася наист
         <code>SMART_PRICE_ADMIN_PASSWORD</code>. Никъде не се записва във файл.
       </div>
     </div>`;
+}
+
+const WIN_STATUS = {
+  pending_data: ['Чака адрес от победителя', 'pill-gold'],
+  ready_to_ship: ['Готово за изпращане', 'pill-cyan'],
+  shipped: ['Изпратено', 'pill-green'],
+  delivered: ['Доставено', 'pill-dim'],
+  expired: ['Изтекло (не даде адрес)', 'pill-red'],
+};
+
+/**
+ * Печалби и доставки.
+ *
+ * Тук се вижда кой какво е спечелил и има ли данни за куриера. Без този екран
+ * наградата се губи: победителят я чака, а никой не знае къде да я прати.
+ */
+async function renderWins(box, force) {
+  const status = (cache.winsFilter = force ? 'all' : cache.winsFilter || 'all');
+  const data = await api(`/raffle-wins?status=${encodeURIComponent(status)}`);
+  const items = data.items || [];
+
+  box.innerHTML = `
+    <div class="toolbar">
+      <select class="grow" id="w-status">
+        ${['all', 'pending_data', 'ready_to_ship', 'shipped', 'delivered', 'expired']
+          .map((s) => `<option value="${s}"${s === status ? ' selected' : ''}>${s === 'all' ? 'Всички печалби' : esc(WIN_STATUS[s][0])}</option>`)
+          .join('')}
+      </select>
+      <button class="btn" id="w-expire">Маркирай изтеклите срокове</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🏆 Спечелени награди (${num(items.length)})</div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Спечелена</th><th>Победител</th><th>Награда</th><th>Статус</th><th>Данни за доставка</th><th></th>
+        </tr></thead>
+        <tbody>
+        ${
+          items.length
+            ? items
+                .map((w) => {
+                  const d = w.delivery || {};
+                  const st = WIN_STATUS[w.status] || ['?', 'pill-dim'];
+                  const hasData = Boolean(d.name || d.address);
+                  return `<tr>
+              <td class="mono dim">${w.wonAt ? new Date(w.wonAt).toLocaleString('bg-BG') : '—'}<div class="dim">${esc(w.raffleTitle || '')}</div></td>
+              <td>${esc(w.winner.name)}<div class="dim">@${esc(w.winner.handle || '')} · ${esc(w.winner.email || '')}</div></td>
+              <td>${esc(w.prizeTitle)}${w.sponsorName ? `<div class="dim">от ${esc(w.sponsorName)}</div>` : ''}</td>
+              <td><span class="pill ${st[1]}">${esc(st[0])}</span>
+                  ${w.trackingNote ? `<div class="dim">${esc(w.trackingNote)}</div>` : ''}</td>
+              <td>${hasData
+                  ? `${esc(d.name || '')}<div class="dim">${esc(d.phone || '')} · ${esc(d.city || '')}</div><div class="dim">${esc(d.address || '')}</div>${d.note ? `<div class="dim">${esc(d.note)}</div>` : ''}`
+                  : '<span class="pill pill-gold">още няма адрес</span>'}</td>
+              <td style="white-space:nowrap">
+                <button class="btn btn-sm" data-w-ship="${w.id}">Изпратено</button>
+                <button class="btn btn-sm" data-w-done="${w.id}">Доставено</button>
+                <button class="btn btn-sm btn-danger" data-w-next="${w.id}" title="Наградата отива при следващия в класирането">Дай на следващия</button>
+              </td>
+            </tr>`;
+                })
+                .join('')
+            : '<tr><td colspan="6" class="empty">Още няма спечелени награди</td></tr>'
+        }
+        </tbody></table></div>
+      <div class="hint" style="margin-top:10px">
+        Победителят получава писмо веднага след печалбата. Ако не даде адрес в срока
+        (вижда се в „Спечелена“), наградата може да отиде при следващия в класирането
+        с бутона „Дай на следващия“.
+      </div>
+    </div>`;
+
+  $('#w-status').onchange = (e) => {
+    cache.winsFilter = e.target.value;
+    render('wins', false);
+  };
+
+  $('#w-expire')?.addEventListener('click', async () => {
+    const res = await api('/raffle-wins/expire', { method: 'POST' });
+    toast(res.expired ? `Маркирани ${res.expired} изтекли` : 'Няма изтекли срокове');
+    render('wins', true);
+  });
+
+  box.querySelectorAll('[data-w-ship]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const note = prompt('Номер на пратка / куриер (по избор):', '');
+      if (note === null) return;
+      await api(`/raffle-wins/${btn.dataset.wShip}/status`, {
+        method: 'POST',
+        body: { status: 'shipped', trackingNote: note || undefined },
+      });
+      toast('Отбелязано като изпратено');
+      render('wins', true);
+    });
+  });
+
+  box.querySelectorAll('[data-w-done]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await api(`/raffle-wins/${btn.dataset.wDone}/status`, {
+        method: 'POST',
+        body: { status: 'delivered' },
+      });
+      toast('Отбелязано като доставено');
+      render('wins', true);
+    });
+  });
+
+  box.querySelectorAll('[data-w-next]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Наградата да отиде при следващия в класирането?')) return;
+      try {
+        const res = await api(`/raffle-wins/${btn.dataset.wNext}/next-in-line`, { method: 'POST' });
+        toast(`Наградата отива при ${res.next}`);
+        render('wins', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    });
+  });
 }
 
 async function renderFavorites(box) {

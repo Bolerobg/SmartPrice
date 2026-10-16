@@ -11,6 +11,7 @@ import {
   PROMO_MAX_VIEWS as MAX_PROMO,
   buildPuzzle,
   checkQualification,
+  countQualifyingDays,
   countQualifyingPosts,
   drawWinner,
   effectiveStatus,
@@ -30,6 +31,18 @@ import {
 } from '../lib/raffles.js';
 import { isDemoMode, setDemoMode } from '../lib/settings.js';
 import { syncBadges } from '../lib/badges.js';
+import {
+  activateNextRaffle,
+  claimWin,
+  declareWinner,
+  expireStaleWins,
+  getWin,
+  giveToNextInLine,
+  myRaffles,
+  raffleHistory,
+  type SponsorExtras,
+} from '../lib/sponsorRaffles.js';
+import { sendRaffleWonEmail } from '../lib/email.js';
 import { requireAdminAnyToken } from '../lib/admin.js';
 
 /**
@@ -53,7 +66,22 @@ function formatWait(seconds: number): string {
 }
 
 function mapRaffle(r: Awaited<ReturnType<typeof loadRaffle>>, extra: Record<string, unknown> = {}) {
+  // Новите полета (миграция 021) идват с `r.*`, но типът RaffleRow още не ги знае.
+  const ext = r as unknown as Partial<SponsorExtras>;
   return {
+    // --- спонсор и правила (публични) ---
+    sponsor: ext.sponsor_name
+      ? { name: ext.sponsor_name, url: ext.sponsor_url ?? '' }
+      : null,
+    rules: ext.rules_text ?? '',
+    deliveryNote: ext.delivery_note ?? '',
+    winMode: ext.win_mode ?? 'fastest_puzzle',
+    prizeKind: ext.prize_kind ?? 'product',
+    prizeValueEur: ext.prize_value_eur == null ? null : Number(ext.prize_value_eur),
+    claimDeadlineDays: ext.claim_deadline_days ?? 7,
+    queueOrder: ext.queue_order ?? 100,
+    autoActivateNext: ext.auto_activate_next ?? true,
+    closedReason: ext.closed_reason ?? null,
     id: r.id,
     title: r.title,
     description: r.description,
@@ -160,12 +188,50 @@ export default async function raffleRoutes(app: FastifyInstance) {
 
   app.get('/api/raffles/winners', async () => ({ items: await winnersWall(20) }));
 
+  /** Публична история: коя томбола, каква награда, кой спечели (без лични данни). */
+  app.get('/api/raffles/history', async (req) => {
+    const q = z
+      .object({ limit: z.coerce.number().int().min(1).max(100).default(30) })
+      .parse(req.query);
+    return { items: await raffleHistory(q.limit) };
+  });
+
+  /** Моите томболи: в кои съм участвал, какъв е резултатът, кой е спечелил. */
+  app.get('/api/raffles/mine', async (req) => {
+    const userId = requireUserId(req);
+    return await myRaffles(userId);
+  });
+
+  /** Данните за доставка на победителя — само той (и админът) ги вижда. */
+  app.get('/api/raffles/:id/win', async (req) => {
+    const userId = requireUserId(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return await getWin(id, userId, false);
+  });
+
+  /** Победителят подава име, телефон, град и адрес — иначе наградата отива при следващия. */
+  app.post('/api/raffles/:id/claim', async (req) => {
+    const userId = requireUserId(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const input = z
+      .object({
+        name: z.string().trim().min(2, 'Напиши име за получателя.').max(120),
+        phone: z.string().trim().min(6, 'Телефонът е твърде къс.').max(30),
+        city: z.string().trim().min(2, 'Напиши град.').max(80),
+        address: z.string().trim().min(5, 'Напиши адрес (или офис на куриер).').max(300),
+        note: z.string().trim().max(300).optional(),
+      })
+      .parse(req.body ?? {});
+    return await claimWin({ raffleId: id, userId, ...input });
+  });
+
   app.get('/api/raffles/:id', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const userId = optionalUserId(req);
     const raffle = await loadRaffle(id);
     const entry = userId ? await loadEntry(id, userId) : null;
     const progress = userId ? await countQualifyingPosts(raffle, userId) : 0;
+    const progressDays = userId ? await countQualifyingDays(raffle, userId) : 0;
 
     return {
       raffle: mapRaffle(raffle, {
@@ -184,6 +250,8 @@ export default async function raffleRoutes(app: FastifyInstance) {
           : null,
         // „още N находки“ — точното число, което мотивира
         postsNeeded: Math.max(0, raffle.condition_posts - progress),
+        myDaysCount: progressDays,
+        daysNeeded: Math.max(0, raffle.condition_distinct_days - progressDays),
       }),
       standings: await standings(id, 30),
       // Пълната прозрачност: всеки (и който не е участвал) вижда кой за колко
@@ -467,6 +535,8 @@ export default async function raffleRoutes(app: FastifyInstance) {
         admin.id,
       ]
     );
+    // Спонсор, правила, режим на печелене и място в опашката — от същия формуляр.
+    await applySponsorFields(created!.id, sponsorFields.parse(req.body ?? {}));
     await logEvent(created!.id, admin.id, 'created', { by: admin.email });
     const raffle = await loadRaffle(created!.id);
     return reply.status(201).send({ raffle: mapRaffle(raffle) });
@@ -613,6 +683,185 @@ export default async function raffleRoutes(app: FastifyInstance) {
    * „нагласи“ томбола. Затова е изкарано настрани, с ясно предупреждение в
    * панела, и демо участието се вижда като демо — в резултатите и в дневника.
    */
+  /* ---------------- спонсор, опашка, печалби и доставка (миграция 021) */
+
+  /**
+   * Новите полета на томболата: спонсор, правила, как се печели, поредност.
+   *
+   * Отделен маршрут, за да не се пипа старият insert — съществуващите томболи
+   * продължават да работят точно както досега.
+   */
+  const sponsorFields = z.object({
+    sponsorName: z.string().trim().max(120).optional(),
+    sponsorUrl: z.string().trim().max(300).optional(),
+    rulesText: z.string().trim().max(6000).optional(),
+    sponsoredNote: z.string().trim().max(1000).optional(),
+    sponsorContact: z.string().trim().max(200).optional(),
+    prizeKind: z.enum(['product', 'cash', 'service', 'other']).optional(),
+    prizeValueEur: z.coerce.number().min(0).max(1_000_000).optional(),
+    deliveryNote: z.string().trim().max(600).optional(),
+    winMode: z.enum(['fastest_puzzle', 'first_to_complete']).optional(),
+    queueOrder: z.coerce.number().int().min(0).max(10000).optional(),
+    autoActivateNext: z.boolean().optional(),
+    claimDeadlineDays: z.coerce.number().int().min(1).max(90).optional(),
+  });
+
+  type SponsorInput = z.infer<typeof sponsorFields>;
+
+  async function applySponsorFields(raffleId: string, input: SponsorInput) {
+    const sets: string[] = [];
+    const vals: unknown[] = [raffleId];
+    const push = (col: string, value: unknown) => {
+      vals.push(value);
+      sets.push(`${col} = $${vals.length}`);
+    };
+    if (input.sponsorName !== undefined) push('sponsor_name', input.sponsorName || null);
+    if (input.sponsorUrl !== undefined) push('sponsor_url', input.sponsorUrl || null);
+    if (input.rulesText !== undefined) push('rules_text', input.rulesText);
+    if (input.sponsoredNote !== undefined) push('sponsored_note', input.sponsoredNote || null);
+    if (input.sponsorContact !== undefined) push('sponsor_contact', input.sponsorContact || null);
+    if (input.prizeKind !== undefined) push('prize_kind', input.prizeKind);
+    if (input.prizeValueEur !== undefined) push('prize_value_eur', input.prizeValueEur);
+    if (input.deliveryNote !== undefined) push('delivery_note', input.deliveryNote);
+    if (input.winMode !== undefined) push('win_mode', input.winMode);
+    if (input.queueOrder !== undefined) push('queue_order', input.queueOrder);
+    if (input.autoActivateNext !== undefined) push('auto_activate_next', input.autoActivateNext);
+    if (input.claimDeadlineDays !== undefined) push('claim_deadline_days', input.claimDeadlineDays);
+    if (!sets.length) return;
+    await query(`update raffles set ${sets.join(', ')}, updated_at = now() where id = $1`, vals);
+  }
+
+  app.patch('/api/admin/raffles/:id/sponsor', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const input = sponsorFields.parse(req.body ?? {});
+    await applySponsorFields(id, input);
+    await logEvent(id, null, 'sponsor_updated', { fields: Object.keys(input) });
+    return { ok: true };
+  });
+
+  /** Обявяване на победител на ръка (напр. наградата се дава на конкретен човек). */
+  app.post('/api/admin/raffles/:id/winner', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(req.body ?? {});
+    const res = await declareWinner({ raffleId: id, userId, decidedBy: 'admin' });
+    if (res.already) throw badRequest('Тази томбола вече има победител.');
+    return { ok: true, activated: 'activated' in res ? res.activated : null };
+  });
+
+  /** Пусни следващата томбола от опашката на ръка. */
+  app.post('/api/admin/raffles/:id/activate-next', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const raffle = await loadRaffle(id);
+    const ext = raffle as unknown as { queue_order?: number };
+    const next = await activateNextRaffle(Number(ext.queue_order ?? 100) + 1, id);
+    if (!next) throw badRequest('Няма чакаща томбола в опашката.');
+    return { ok: true, activated: next };
+  });
+
+  /** Печалби: кой какво е спечелил и има ли данни за доставка. */
+  app.get('/api/admin/raffle-wins', async (req) => {
+    await adminGuard(req);
+    const q = z
+      .object({
+        status: z
+          .enum(['all', 'pending_data', 'ready_to_ship', 'shipped', 'delivered', 'expired'])
+          .default('all'),
+      })
+      .parse(req.query);
+
+    const rows = await many<Record<string, unknown>>(
+      `select w.id, w.raffle_id, w.status, w.won_at, w.claimed_at, w.shipped_at,
+              w.delivery_name, w.delivery_phone, w.delivery_city, w.delivery_address,
+              w.delivery_note, w.tracking_note, w.admin_note,
+              p.name as winner_name, p.handle as winner_handle, p.email as winner_email,
+              r.title, r.prize_title, r.sponsor_name, r.rules_text,
+              r.claim_deadline_days,
+              (w.won_at + (r.claim_deadline_days || ' days')::interval) as claim_deadline
+         from raffle_wins w
+         join profiles p on p.id = w.user_id
+         join raffles r on r.id = w.raffle_id
+        where ($1 = 'all' or w.status = $1)
+        order by w.won_at desc
+        limit 200`,
+      [q.status]
+    );
+
+    return {
+      items: rows.map((w) => ({
+        id: w.id,
+        raffleId: w.raffle_id,
+        status: w.status,
+        wonAt: iso(w.won_at as Date),
+        claimedAt: iso(w.claimed_at as Date | null),
+        shippedAt: iso(w.shipped_at as Date | null),
+        claimDeadline: iso(w.claim_deadline as Date),
+        winner: {
+          name: w.winner_name,
+          handle: w.winner_handle,
+          email: w.winner_email,
+        },
+        prizeTitle: w.prize_title,
+        raffleTitle: w.title,
+        sponsorName: w.sponsor_name ?? '',
+        delivery: {
+          name: w.delivery_name,
+          phone: w.delivery_phone,
+          city: w.delivery_city,
+          address: w.delivery_address,
+          note: w.delivery_note,
+        },
+        trackingNote: w.tracking_note,
+        adminNote: w.admin_note,
+      })),
+    };
+  });
+
+  /** Смяна на статуса: за изпращане → изпратено → доставено. */
+  app.post('/api/admin/raffle-wins/:id/status', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const input = z
+      .object({
+        status: z.enum(['pending_data', 'ready_to_ship', 'shipped', 'delivered', 'expired']),
+        trackingNote: z.string().trim().max(300).optional(),
+        adminNote: z.string().trim().max(500).optional(),
+      })
+      .parse(req.body ?? {});
+
+    await query(
+      `update raffle_wins
+          set status = $2,
+              shipped_at = case when $2 in ('shipped','delivered')
+                                then coalesce(shipped_at, now()) else shipped_at end,
+              tracking_note = coalesce($3, tracking_note),
+              admin_note = coalesce($4, admin_note),
+              updated_at = now()
+        where id = $1`,
+      [id, input.status, input.trackingNote ?? null, input.adminNote ?? null]
+    );
+    return { ok: true };
+  });
+
+  /** Победителят не даде адрес → наградата отива при следващия в класирането. */
+  app.post('/api/admin/raffle-wins/:id/next-in-line', async (req) => {
+    await adminGuard(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const row = await one<{ raffle_id: string }>('select raffle_id from raffle_wins where id = $1', [id]);
+    if (!row) throw notFound('Няма такава печалба.');
+    const res = await giveToNextInLine(row.raffle_id);
+    return res;
+  });
+
+  /** Автоматично изтекли (непотърсени) награди — пуска се от панела. */
+  app.post('/api/admin/raffle-wins/expire', async (req) => {
+    await adminGuard(req);
+    const n = await expireStaleWins();
+    return { ok: true, expired: n };
+  });
+
   app.get('/api/admin/demo', async (req) => {
     await adminGuard(req);
     const demoMode = await isDemoMode();

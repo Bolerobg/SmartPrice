@@ -6,6 +6,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { countPosts, loadPosts, type SortMode } from '../lib/feed.js';
 import { loadFullProfile } from '../lib/profile.js';
 import { getSetting } from '../lib/settings.js';
+import { checkFirstToComplete } from '../lib/sponsorRaffles.js';
 
 const CATEGORIES = [
   'restaurants',
@@ -358,6 +359,11 @@ export default async function postRoutes(app: FastifyInstance) {
 
       return id;
     });
+
+    // Томболи „първият, който събере N находки“: проверяваме веднага след
+    // публикацията. Ако човекът току-що изпълни условието — печели сега, а
+    // томболата се затваря и пуска следващата. Не бави отговора (fire-and-forget).
+    void checkFirstToComplete(userId).catch(() => undefined);
 
     return reply.status(201).send({
       post: await loadOnePost(postId, userId),

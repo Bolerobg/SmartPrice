@@ -17,6 +17,7 @@ import { COLORS } from '@/constants/theme';
 import { ProductPairPuzzle } from '@/components/ProductPairPuzzle';
 import { api, ApiError, type PuzzleTile, type RaffleItem, type RaffleResults, type RaffleStanding } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
+import { RaffleClaimModal } from '@/components/RaffleClaimModal';
 
 type Phase = 'idle' | 'loading' | 'countdown' | 'playing';
 
@@ -68,7 +69,10 @@ const Stat: React.FC<{ label: string; value: string | number }> = ({ label, valu
 export default function RaffleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, profile } = useAuth();
+  // Победителят: данните за доставка се подават от него, в приложението.
+  const [claimOpen, setClaimOpen] = useState(false);
+  const [claimDone, setClaimDone] = useState(false);
   const [raffle, setRaffle] = useState<RaffleItem | null>(null);
   const [standings, setStandings] = useState<RaffleStanding[]>([]);
   // Пълните резултати (за всички) + дали е отворен одитният дневник.
@@ -359,7 +363,68 @@ export default function RaffleDetailScreen() {
               <Text style={styles.prizeLinkText}>Виж продукта</Text>
             </TouchableOpacity>
           ) : null}
+
+          {/* Спонсорът се казва честно: „награда от <спонсор>“ носи доверие. */}
+          {raffle.sponsor ? (
+            <TouchableOpacity
+              style={styles.sponsorRow}
+              activeOpacity={raffle.sponsor.url ? 0.8 : 1}
+              onPress={() => raffle.sponsor?.url && void Linking.openURL(raffle.sponsor.url)}
+            >
+              <Ionicons name="ribbon-outline" size={14} color={COLORS.goldBright} />
+              <Text style={styles.sponsorText}>
+                Награда от <Text style={styles.sponsorName}>{raffle.sponsor.name}</Text>
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
+
+        {/* Победителят: тук дава данни за доставка */}
+        {raffle.winnerId && profile?.id && raffle.winnerId === profile.id ? (
+          <View style={styles.winBox}>
+            <Text style={styles.winTitle}>🏆 Ти спечели тази награда!</Text>
+            <Text style={styles.winText}>
+              {claimDone
+                ? 'Данните са получени. Ще получиш наградата с куриер — ще видиш номера на пратката тук.'
+                : `Дай име, телефон и адрес, за да ти я изпратим${
+                    raffle.claimDeadlineDays ? ` (до ${raffle.claimDeadlineDays} дни)` : ''
+                  }.`}
+            </Text>
+            {!claimDone ? (
+              <TouchableOpacity
+                style={styles.winBtn}
+                activeOpacity={0.9}
+                onPress={() => setClaimOpen(true)}
+              >
+                <Ionicons name="gift" size={16} color={COLORS.black} />
+                <Text style={styles.winBtnText}>Дай данни за доставка</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* Модалът, с който победителят дава данни за доставка */}
+        <RaffleClaimModal
+          raffleId={raffle.id}
+          visible={claimOpen}
+          defaultName={profile?.name}
+          defaultCity={profile?.city}
+          deliveryNote={raffle.deliveryNote}
+          claimDeadlineDays={raffle.claimDeadlineDays}
+          onClose={() => setClaimOpen(false)}
+          onDone={() => {
+            setClaimOpen(false);
+            setClaimDone(true);
+          }}
+        />
+
+        {/* Правилата на томболата — за да няма изненади */}
+        {raffle.rules ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Правила на томболата</Text>
+            <Text style={styles.blockText}>{raffle.rules}</Text>
+          </View>
+        ) : null}
 
         {/* Условието */}
         <View style={styles.block}>
@@ -376,6 +441,17 @@ export default function RaffleDetailScreen() {
             {progress} / {raffle.conditionPosts} находки
             {raffle.postsNeeded ? ` · още ${raffle.postsNeeded}` : ' · условието е покрито ✓'}
           </Text>
+          {raffle.conditionDistinctDays && raffle.conditionDistinctDays > 1 ? (
+            <Text style={styles.progressText}>
+              Различни дни: {raffle.myDaysCount ?? 0} / {raffle.conditionDistinctDays}
+              {raffle.daysNeeded ? ` · още ${raffle.daysNeeded}` : ' ✓'}
+            </Text>
+          ) : null}
+          {raffle.winMode === 'first_to_complete' ? (
+            <Text style={styles.hintLine}>
+              Печели първият, който изпълни условието — не се нарежда пъзел.
+            </Text>
+          ) : null}
 
           {/* Гост: томболата се рекламира преди регистрация — тук обясняваме как
               се участва и водим към вход, вместо да показваме неактивен бутон. */}
@@ -665,6 +741,32 @@ export default function RaffleDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  sponsorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  sponsorText: { color: COLORS.textSecondary, fontSize: 12.5 },
+  sponsorName: { color: COLORS.goldBright, fontWeight: '900' },
+  winBox: {
+    marginHorizontal: 14,
+    marginTop: 14,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: COLORS.goldSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+  },
+  winTitle: { color: COLORS.goldBright, fontSize: 17, fontWeight: '900' },
+  winText: { color: COLORS.textSecondary, fontSize: 13.5, lineHeight: 20, marginTop: 6 },
+  winBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: COLORS.goldBright,
+  },
+  winBtnText: { color: COLORS.black, fontSize: 14.5, fontWeight: '900' },
+  hintLine: { color: COLORS.accentCyan, fontSize: 12.5, marginTop: 8, fontWeight: '700' },
   root: { flex: 1, backgroundColor: COLORS.bgPrimary },
   scroll: { padding: 18, paddingTop: 24, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },

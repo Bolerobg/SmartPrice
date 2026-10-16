@@ -417,6 +417,21 @@ export interface RaffleItem {
   finishedAt: string | null;
   secondsLeft: number;
   myProgress?: number;
+  /** Колко находки от различни дни имам (за условието „от ≥2 дни“). */
+  myDaysCount?: number;
+  daysNeeded?: number;
+  // --- спонсор и правила (миграция 021) ---
+  sponsor?: { name: string; url: string } | null;
+  rules?: string;
+  deliveryNote?: string;
+  /** Как се печели: първият изпълнил условието или най-бързото нареждане. */
+  winMode?: 'fastest_puzzle' | 'first_to_complete';
+  prizeKind?: 'product' | 'cash' | 'service' | 'other';
+  prizeValueEur?: number | null;
+  claimDeadlineDays?: number;
+  queueOrder?: number;
+  autoActivateNext?: boolean;
+  closedReason?: string | null;
   postsNeeded?: number;
   practiceAttempts?: number;
   myEntry?: RaffleEntryState | null;
@@ -730,6 +745,51 @@ export const api = {
   /** Бележка и собствено място към любима оферта. */
   setBookmarkNote: (postId: string, payload: { note?: string | null; lat?: number | null; lng?: number | null }) =>
     rawRequest<{ ok: boolean }>(`/api/posts/${postId}/bookmark`, { method: 'PATCH', body: payload }),
+
+  /** Победител подава данни за доставка на наградата. */
+  raffleClaim: (
+    raffleId: string,
+    body: { name: string; phone: string; city: string; address: string; note?: string }
+  ) => rawRequest<{ ok: boolean }>(`/api/raffles/${raffleId}/claim`, { method: 'POST', body }),
+
+  /** Данните за доставка на моята печалба (само за победителя). */
+  raffleWin: (raffleId: string) =>
+    rawRequest<{
+      prizeTitle: string;
+      sponsorName: string;
+      status: string;
+      deliveryNote: string;
+      delivery: { name: string | null; phone: string | null; city: string | null; address: string | null; note: string | null } | null;
+      isMine: boolean;
+      wonAt: string | null;
+      trackingNote: string | null;
+    }>(`/api/raffles/${raffleId}/win`),
+
+  /** Моите томболи: участия, резултати, кой е спечелил. */
+  myRaffles: () =>
+    rawRequest<{
+      stats: { postsTotal: number; postsWithPhoto: number; wins: number; entries: number };
+      items: Array<{
+        raffleId: string;
+        title: string;
+        prizeTitle: string;
+        prizeImage: string;
+        sponsorName: string;
+        status: string;
+        iWon: boolean;
+        winStatus: string | null;
+        winner: { name: string; city: string } | null;
+        joinedAt: string | null;
+        finishedAt: string | null;
+        endsAt: string | null;
+      }>;
+    }>('/api/raffles/mine'),
+
+  /** Публична история: коя томбола, каква награда, кой спечели. */
+  raffleHistory: (limit = 30) =>
+    rawRequest<{ items: Array<Record<string, unknown>> }>(`/api/raffles/history?limit=${limit}`, {
+      auth: false,
+    }),
 
   createPost: (payload: CreatePostPayload) =>
     rawRequest<{
