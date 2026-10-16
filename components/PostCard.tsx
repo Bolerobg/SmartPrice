@@ -218,11 +218,11 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
       <TouchableOpacity
         activeOpacity={0.88}
         onPress={() => {
-          // Онлайн магазин → отваряме продукта. Физически магазин → страницата с локацията.
-          if (post.sourceUrl) {
-            Linking.openURL(post.sourceUrl).catch(() => router.push(`/post/${post.id}`));
-            return;
-          }
+          // Винаги отваряме ОФЕРТАТА (за да се свери цената — както при
+          // физическите магазини). Линкът към онлайн магазина е ВЪТРЕ в картата
+          // (бутонът „Отвори продукта в онлайн магазина“ долу), не при докосване
+          // на картата — иначе човек излиза от приложението, преди да е видял
+          // нашата цена и снимката.
           router.push(`/post/${post.id}`);
         }}
         style={styles.cardBodyTap}
