@@ -49,3 +49,4 @@ yarn-error.*
 
 # TypeScript
 *.tsbuildinfo
+web/tiktok/
