@@ -99,6 +99,13 @@ def sql_for(topics):
             % (q(t["title"]), q(t["body"]), arr, q(t["category"]), t["priority"])
         )
     listed = ", ".join(q(x) for x in titles)
+    # Старите теми от началната миграция (source='seed') се изключват — оттук
+    # нататък ЕДИН източник на истината: този файл. (Ръчно написаните от панела
+    # теми — source='admin' — не се пипат.)
+    out.append(
+        "update assistant_knowledge set is_active = false, updated_at = now()\n"
+        " where source = 'seed' and is_active;"
+    )
     out.append(
         "update assistant_knowledge set is_active = false, updated_at = now()\n"
         " where source = 'file' and is_active and not (title = any(array[%s]::text[]));" % listed
