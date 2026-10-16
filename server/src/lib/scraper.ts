@@ -674,15 +674,33 @@ export async function collectFromSitemap(
   opts: FetchOpts
 ): Promise<{ urls: string[]; usedSitemap?: string }> {
   const u = new URL(startUrl);
+  // Първо питаме robots.txt — там доста сайтове обявяват нестандартен sitemap.
+  const fromRobots: string[] = [];
+  try {
+    const rb = await politeFetch(`${u.origin}/robots.txt`, { ...opts, accept: 'text/plain' });
+    if (rb.ok && rb.text) {
+      for (const line of rb.text.split('\n')) {
+        const m = /^\s*sitemap:\s*(\S+)/i.exec(line);
+        if (m) fromRobots.push(m[1].trim());
+        if (fromRobots.length >= 6) break;
+      }
+    }
+  } catch {
+    // няма robots.txt — не е проблем
+  }
+
   const candidates = /sitemap/i.test(u.pathname)
     ? [u.toString()]
     : [
+        ...fromRobots,
         `${u.origin}/sitemap.xml`,
         `${u.origin}/sitemap_index.xml`,
+        `${u.origin}/sitemap-index.xml`,
         `${u.origin}/wp-sitemap.xml`,
         `${u.origin}/product-sitemap.xml`,
         `${u.origin}/sitemap_products_1.xml`,
         `${u.origin}/sitemap-products.xml`,
+        `${u.origin}/sitemap/sitemap.xml`,
       ];
 
   const seenSitemaps = new Set<string>();
@@ -734,6 +752,235 @@ export async function collectFromSitemap(
 }
 
 /* ------------------------------------------------------- Shopify / Woo */
+
+/** Фиксираният курс — на бележките още пише лв., а приложението работи в евро. */
+const BGN_PER_EUR = 1.95583;
+
+/** Декодира основните XML/HTML знаци в текст от фийд. */
+function feedDecode(value: string): string {
+  return value
+    .replace(/<!\[CDATA\[|\]\]>/g, '')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .trim();
+}
+
+/** Прави относителен адрес от фийд в абсолютен. */
+function feedAbs(value: string, baseUrl: string): string | undefined {
+  const v = value.trim();
+  if (!v || /^(javascript:|#|mailto:)/i.test(v)) return undefined;
+  try {
+    return new URL(v, baseUrl).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Цена от фийд: „12.50 BGN“, „12,50 лв.“, „12.50 EUR“ или само число.
+ * Ако пише лв./BGN — превалутираме в евро (приложението работи в евро).
+ */
+function feedPrice(raw?: string): { price?: number; currency?: string } {
+  if (!raw) return {};
+  const isBgn = /лв|bgn/i.test(raw);
+  const m = /(\d+(?:[.,]\d+)?)/.exec(raw.replace(/\u00a0/g, ' '));
+  if (!m) return {};
+  const value = Number(m[1].replace(',', '.'));
+  if (!Number.isFinite(value) || value <= 0) return {};
+  return {
+    price: isBgn ? Number((value / BGN_PER_EUR).toFixed(2)) : value,
+    currency: 'EUR',
+  };
+}
+
+/** Кои фийдове да пробваме — Google Merchant, RSS и Atom ги има на всякакви платформи. */
+const FEED_PATHS = [
+  '/feed/google.xml',
+  '/googlemerchant.xml',
+  '/feed/googlemerchant.xml',
+  '/products.xml',
+  '/catalog.xml',
+  '/feed/products.xml',
+  '/feed.xml',
+  '/rss.xml',
+  '/products.atom',
+  '/feed/?post_type=product',
+];
+
+/** Чете магазинни XML фийдове: <item> (RSS / Google Merchant) или <entry> (Atom). */
+export function parseFeedItems(xml: string, baseUrl: string): RawProduct[] {
+  const blocks = xml.match(/<(item|entry)[\s>][\s\S]*?<\/\1>/gi) ?? [];
+  const out: RawProduct[] = [];
+  for (const block of blocks) {
+    const pick = (...names: string[]): string | undefined => {
+      for (const name of names) {
+        const tag = new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, 'i').exec(block);
+        if (tag) {
+          const v = feedDecode(tag[1]);
+          if (v) return v;
+        }
+        const attr = new RegExp(`<${name}[^>]*href=["']([^"']+)["']`, 'i').exec(block);
+        if (attr) return attr[1];
+      }
+      return undefined;
+    };
+
+    const title = pick('title', 'g:title');
+    if (!title) continue;
+    const link = pick('link', 'g:link');
+    const money = feedPrice(pick('g:price', 'g:sale_price', 'price', 'sale_price'));
+    const image = pick('g:image_link', 'image', 'g:additional_image_link');
+
+    out.push({
+      sourceUrl: (link && feedAbs(link, baseUrl)) || baseUrl,
+      title,
+      price: money.price,
+      currency: money.currency,
+      imageUrl: image ? feedAbs(image, baseUrl) : undefined,
+      brand: pick('g:brand', 'brand'),
+      availability: pick('g:availability', 'availability'),
+      via: 'feed',
+    });
+  }
+  return out;
+}
+
+/** Пробва магазинните фийдове — често единственият начин при нестандартен магазин. */
+export async function tryProductFeed(
+  origin: string,
+  limit: number,
+  opts: FetchOpts
+): Promise<RawProduct[] | null> {
+  for (const path of FEED_PATHS) {
+    try {
+      const res = await politeFetch(`${origin}${path}`, opts);
+      if (!res.ok || !res.text) continue;
+      if (!/<(item|entry)[\s>]/i.test(res.text)) continue;
+      const items = parseFeedItems(res.text, res.url || origin);
+      if (items.length >= 3) return items.slice(0, limit);
+    } catch {
+      // следващ фийд
+    }
+  }
+  return null;
+}
+
+/**
+ * Magento / Adobe Commerce: GraphQL чете продукти без ключ.
+ * Достатъчно е да върне няколко продукта — после ги внасяме като останалите.
+ */
+export async function tryMagento(
+  origin: string,
+  limit: number,
+  opts: FetchOpts
+): Promise<RawProduct[] | null> {
+  const query =
+    `{ products(pageSize: ${Math.min(100, Math.max(1, limit))}) { items { name url_key url_suffix ` +
+    `small_image { url } price_range { minimum_price { final_price { value currency } } } } } }`;
+  let res: Response;
+  try {
+    res = await fetch(`${origin}/graphql`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'User-Agent': 'SmartPriceBot/1.0 (+https://smartprice.bg)',
+      },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+
+  const payload = (await res.json().catch(() => null)) as {
+    data?: { products?: { items?: Array<Record<string, unknown>> } };
+  } | null;
+  const items = payload?.data?.products?.items;
+  if (!Array.isArray(items) || items.length === 0) return null;
+
+  const out: RawProduct[] = [];
+  for (const raw of items) {
+    const item = raw as {
+      name?: string;
+      url_key?: string;
+      url_suffix?: string;
+      small_image?: { url?: string };
+      price_range?: { minimum_price?: { final_price?: { value?: number; currency?: string } } };
+    };
+    const final = item.price_range?.minimum_price?.final_price;
+    const value = Number(final?.value);
+    const currency = String(final?.currency ?? 'EUR').toUpperCase();
+    const suffix = item.url_suffix ? `.${String(item.url_suffix).replace(/^\./, '')}` : '';
+    out.push({
+      sourceUrl: item.url_key ? `${origin}/${String(item.url_key)}${suffix}` : origin,
+      title: item.name ? feedDecode(item.name) : undefined,
+      price:
+        Number.isFinite(value) && value > 0
+          ? currency === 'BGN'
+            ? Number((value / BGN_PER_EUR).toFixed(2))
+            : value
+          : undefined,
+      currency: 'EUR',
+      imageUrl: item.small_image?.url ? String(item.small_image.url) : undefined,
+      via: 'magento',
+    });
+  }
+  return out.length ? out : null;
+}
+
+/** Връзки, които изглеждат като категории (магазини без sitemap и без продукти на началната). */
+export function extractCategoryLinks(html: string, baseUrl: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const href = feedAbs(m[1], baseUrl);
+    if (!href || seen.has(href)) continue;
+    if (!/(categor|kategor|katalog|catalog|produkt|product|shop|magazin|store|\/c\/|\/cat\/|\/k\/)/i.test(href)) continue;
+    if (/\.(pdf|jpg|jpeg|png|webp|zip|xml)$/i.test(href)) continue;
+    if (href === baseUrl) continue;
+    seen.add(href);
+    out.push(href);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+/** Обикаля категориите и събира продуктите от картите в тях. */
+export async function collectFromCategories(
+  html: string,
+  baseUrl: string,
+  limit: number,
+  opts: FetchOpts
+): Promise<RawProduct[]> {
+  const categories = extractCategoryLinks(html, baseUrl);
+  const products: RawProduct[] = [];
+  const seen = new Set<string>();
+  for (const category of categories) {
+    if (products.length >= limit) break;
+    try {
+      const res = await politeFetch(category, opts);
+      if (!res.ok || !res.text) continue;
+      for (const product of extractListingProducts(res.text, res.url)) {
+        const key = `${(product.title ?? '').toLowerCase()}|${product.price ?? ''}`;
+        if (!product.title || seen.has(key)) continue;
+        seen.add(key);
+        products.push(product);
+        if (products.length >= limit) break;
+      }
+    } catch {
+      // някоя категория може да не отговори — продължаваме
+    }
+  }
+  return products;
+}
 
 export async function tryShopify(
   origin: string,
@@ -1674,6 +1921,26 @@ export async function runJob(jobId: string): Promise<void> {
       }
     }
 
+    // Магазинни XML фийдове (Google Merchant / RSS) — работят на всяка платформа.
+    if (!products.length) {
+      const feed = await tryProductFeed(origin, limit, fo);
+      if (feed) {
+        products = feed;
+        strategy = 'feed';
+        await logLine(jobId, `Магазинният фийд (Google/RSS) даде ${products.length} продукта.`);
+      }
+    }
+
+    // Magento / Adobe Commerce — чете продуктите през GraphQL, без ключ.
+    if (!products.length) {
+      const magento = await tryMagento(origin, limit, fo);
+      if (magento) {
+        products = magento;
+        strategy = 'magento';
+        await logLine(jobId, `Magento/Adobe — взех ${products.length} продукта през GraphQL.`);
+      }
+    }
+
     if (!products.length) {
       await setStatus(jobId, 'parsing');
       let urls: string[] = [];
@@ -1699,9 +1966,21 @@ export async function runJob(jobId: string): Promise<void> {
               `Листингът съдържа ${cards.length} продукта в картите — взимам ги направо, без да отварям всяка страница.`
             );
           } else {
-            urls = extractProductLinks(home.text, home.url, o.selectors?.list);
-            strategy = 'listing';
-            await logLine(jobId, `Листингът даде ${urls.length} връзки към продукти.`);
+            // Много магазини нямат sitemap, а началната им страница е само меню.
+            // Тогава продуктите са в категориите — обикаляме ги и ги взимаме оттам.
+            const fromCats = await collectFromCategories(home.text, home.url, limit, fo);
+            if (fromCats.length >= 2) {
+              products = fromCats;
+              strategy = 'categories';
+              await logLine(
+                jobId,
+                `Началната е само меню — обиколих категориите и взех ${fromCats.length} продукта.`
+              );
+            } else {
+              urls = extractProductLinks(home.text, home.url, o.selectors?.list);
+              strategy = 'listing';
+              await logLine(jobId, `Листингът даде ${urls.length} връзки към продукти.`);
+            }
           }
         }
       } else {
@@ -1714,8 +1993,9 @@ export async function runJob(jobId: string): Promise<void> {
         await syncVisited(jobId);
         await setStatus(jobId, 'failed', {
           error:
-            `Не намерих продукти в ${job.domain}. Пробвах: Shopify каталог, WooCommerce, sitemap, ` +
-            `връзки в листинга и карти в листинга. Най-честата причина: сайтът е с JavaScript ` +
+            `Не намерих продукти в ${job.domain}. Пробвах: Shopify каталог, WooCommerce, магазинни ` +
+            `фийдове (Google/RSS), Magento GraphQL, sitemap (вкл. от robots.txt), категории, връзки в ` +
+            `листинга и карти в листинга. Най-честата причина: сайтът е с JavaScript ` +
             `(съдържанието идва чак след зареждане), или е нестандартен. Тогава дай ръчни селектори ` +
             `(list: a.product@href, price: .price@text, image: img@src).`,
           finished_at: new Date(),
