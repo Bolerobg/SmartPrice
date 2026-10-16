@@ -152,7 +152,7 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
   const offsetPlaceholder = `$${where.values.length + 2}`;
 
   const rows = await many<PostRow>(
-    `select v.*, p.source, p.source_note
+    `select v.*, p.source, p.source_note, p.source_url
        from v_posts_full v
        join posts p on p.id = v.id
        join profiles a on a.id = v.author_id

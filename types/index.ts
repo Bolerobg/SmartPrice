@@ -121,6 +121,8 @@ export interface PostItem {
    */
   source?: string;
   sourceNote?: string | null;
+  /** Линк към продукта в онлайн магазина (при оферти от скрапер). */
+  sourceUrl?: string | null;
   pricePaid: number;
   referencePrice?: number; // Очаквана/нормална цена за сравнение (колко е спестено или надвзето)
   currency: string;

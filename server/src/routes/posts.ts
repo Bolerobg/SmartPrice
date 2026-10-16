@@ -703,7 +703,7 @@ export default async function postRoutes(app: FastifyInstance) {
 
     const items = await many<Record<string, unknown>>(
       `select p.id, p.public_code, p.title, p.price_paid::text as price, p.city, p.place_name,
-              p.platform_tag, p.source, p.image_url, p.polarity, p.created_at::text,
+              p.platform_tag, p.source, p.source_url, p.image_url, p.polarity, p.created_at::text,
               p.address, p.google_maps_url
          from posts p
         where p.status = 'published'

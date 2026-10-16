@@ -45,6 +45,7 @@ export interface PostRow {
   /** Откъде идва цената (миграция 020): user | receipt_basket | brochure | … */
   source?: string | null;
   source_note?: string | null;
+  source_url?: string | null;
   polarity: 'green' | 'red';
   category: string;
   custom_category_label: string | null;
@@ -175,6 +176,8 @@ export function mapPost(params: {
     // Откъде идва цената: потребител, кошче на касата, брошура, сигнал от TikTok.
     source: post.source ?? 'user',
     sourceNote: post.source_note ?? null,
+    // Линк към продукта (само при оферти от онлайн магазин).
+    sourceUrl: post.source_url ?? null,
     polarity: post.polarity,
     category: post.category,
     customCategoryLabel: post.custom_category_label ?? undefined,

@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
@@ -216,7 +217,14 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
       {/* Автор и Локация */}
       <TouchableOpacity
         activeOpacity={0.88}
-        onPress={() => router.push(`/post/${post.id}`)}
+        onPress={() => {
+          // Онлайн магазин → отваряме продукта. Физически магазин → страницата с локацията.
+          if (post.sourceUrl) {
+            Linking.openURL(post.sourceUrl).catch(() => router.push(`/post/${post.id}`));
+            return;
+          }
+          router.push(`/post/${post.id}`);
+        }}
         style={styles.cardBodyTap}
       >
         <View style={styles.headerRow}>

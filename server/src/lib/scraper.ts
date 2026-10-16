@@ -1857,10 +1857,10 @@ export async function importProduct(params: {
          author_id, polarity, category, platform_tag, title, description,
          place_name, city, price_paid, reference_price, currency,
          unit_quantity, unit_type, price_per_unit, image_url, tags,
-         seller_type, source, source_note
+         seller_type, source, source_note, source_url
        ) values (
          $1,$2,$3,'Онлайн магазин',$4,$5,$6,$7,$8,$9,'EUR',$10,$11,$12,$13,$14,
-         'business','scraper',$15
+         'business','scraper',$15,$16
        ) returning id`,
       [
         authorId,
@@ -1878,6 +1878,8 @@ export async function importProduct(params: {
         params.imageUrl,
         params.tags.slice(0, 8),
         `Онлайн магазин ${params.domain}: ${params.sourceUrl}`.slice(0, 300),
+        // Линк към продукта: картата на офертата води натам, не към картата с локация.
+        params.sourceUrl.slice(0, 500),
       ]
     );
     const postId = res.rows[0]!.id;

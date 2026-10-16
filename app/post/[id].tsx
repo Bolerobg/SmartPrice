@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ReceiptModalCard } from '@/components/ReceiptModalCard';
@@ -390,7 +391,7 @@ export default function PostDetailScreen() {
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="location" size={20} color="#60A5FA" />
+                <Ionicons name={post.sourceUrl ? 'cart' : 'location'} size={20} color="#60A5FA" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text
@@ -401,7 +402,7 @@ export default function PostDetailScreen() {
                     letterSpacing: 0.4,
                   }}
                 >
-                  МЕСТОПОЛОЖЕНИЕ НА ОБЕКТА • GOOGLE MAPS
+                  {post.sourceUrl ? 'ОНЛАЙН МАГАЗИН' : 'МЕСТОПОЛОЖЕНИЕ НА ОБЕКТА • GOOGLE MAPS'}
                 </Text>
                 <Text
                   style={{
@@ -411,7 +412,7 @@ export default function PostDetailScreen() {
                     marginTop: 1,
                   }}
                 >
-                  {post.placeName}
+                  {post.sourceUrl ? 'Продукт в онлайн магазин' : post.placeName}
                 </Text>
                 <Text
                   style={{
@@ -420,7 +421,9 @@ export default function PostDetailScreen() {
                     marginTop: 2,
                   }}
                 >
-                  📍 {post.address ? `${post.address}, ` : ''}гр. {post.city}
+                  {post.sourceUrl
+                    ? `🛒 ${post.sourceUrl.replace(/^https?:\/\//, '').split('/')[0]}`
+                    : `📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`}
                 </Text>
                 {post.locationAutoDetected && (
                   <Text
@@ -439,7 +442,21 @@ export default function PostDetailScreen() {
 
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() =>
+              onPress={() => {
+                // Има линк към продукта → отваряме магазина. Иначе → картата с локацията.
+                if (post.sourceUrl) {
+                  Linking.openURL(post.sourceUrl).catch(() =>
+                    openInGoogleMaps({
+                      placeName: post.placeName,
+                      address: post.address,
+                      city: post.city,
+                      latitude: post.latitude,
+                      longitude: post.longitude,
+                      googleMapsUrl: post.googleMapsUrl,
+                    })
+                  );
+                  return;
+                }
                 openInGoogleMaps({
                   placeName: post.placeName,
                   address: post.address,
@@ -447,8 +464,8 @@ export default function PostDetailScreen() {
                   latitude: post.latitude,
                   longitude: post.longitude,
                   googleMapsUrl: post.googleMapsUrl,
-                })
-              }
+                });
+              }}
               style={{
                 backgroundColor: 'rgba(59, 130, 246, 0.18)',
                 borderWidth: 1,
@@ -462,7 +479,7 @@ export default function PostDetailScreen() {
                 gap: 8,
               }}
             >
-              <Ionicons name="map" size={17} color="#60A5FA" />
+              <Ionicons name={post.sourceUrl ? 'cart-outline' : 'map'} size={17} color="#60A5FA" />
               <Text
                 style={{
                   color: '#60A5FA',
@@ -470,7 +487,7 @@ export default function PostDetailScreen() {
                   fontWeight: '800',
                 }}
               >
-                Отвори адреса в Google Maps
+                {post.sourceUrl ? 'Отвори продукта в магазина' : 'Отвори адреса в Google Maps'}
               </Text>
               <Ionicons name="open-outline" size={15} color="#60A5FA" />
             </TouchableOpacity>
