@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -24,6 +24,8 @@ import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAt, formatPostedAtLong, formatRelativeTime } from '@/src/lib/format';
+import { loadSimilarOffers } from '@/src/api/client';
+import type { SimilarOffer } from '@/src/api/client';
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -43,6 +45,24 @@ export default function PostDetailScreen() {
   const [commentPrice, setCommentPrice] = useState<string>('');
   const [showPriceInput, setShowPriceInput] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
+
+  // „Същият продукт другаде“: другите цени, които общността е намерила за
+  // същия продукт. Показваме ги, за да може човекът да сравни и да избере
+  // най-изгодното, вместо да вижда само една оферта.
+  const [similar, setSimilar] = useState<{ count: number; items: SimilarOffer[] } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!isAuthenticated || !id) return;
+    loadSimilarOffers(String(id))
+      .then((r) => {
+        if (alive && r.count > 0) setSimilar({ count: r.count, items: r.items });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [id, isAuthenticated]);
 
   // Гост, дошъл по споделен линк: показваме публичен преглед на офертата.
   // Без това линкът водеше до екран за вход и получателят не виждаше нищо.
@@ -247,6 +267,55 @@ export default function PostDetailScreen() {
           ) : null}
 
           <Text style={styles.description}>{post.description}</Text>
+
+          {/* Същият продукт другаде — за да може човекът да сравни и избере
+              по-евтиното, вместо да вижда само една оферта. */}
+          {similar && similar.count > 0 ? (
+            <View style={styles.similarBox}>
+              <View style={styles.similarHeader}>
+                <Ionicons name="swap-horizontal" size={16} color={COLORS.accentCyan} />
+                <Text style={styles.similarTitle}>Същият продукт другаде ({similar.count})</Text>
+              </View>
+              <Text style={styles.similarHint}>
+                Другите цени за този продукт, от най-евтината нагоре. Натисни, за да отвориш офертата.
+              </Text>
+              {similar.items.slice(0, 8).map((s, index) => {
+                const price = Number(s.price);
+                const isCheapest = index === 0 && price < post.pricePaid;
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={styles.similarRow}
+                    onPress={() => router.push(`/post/${s.id}`)}
+                    accessibilityRole="button"
+                  >
+                    {s.image_url ? (
+                      <Image source={{ uri: s.image_url }} style={styles.similarThumb} />
+                    ) : (
+                      <View style={[styles.similarThumb, styles.similarThumbEmpty]}>
+                        <Ionicons name="image-outline" size={16} color={COLORS.textMuted} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.similarRowTitle} numberOfLines={1}>
+                        {s.title}
+                      </Text>
+                      <Text style={styles.similarRowMeta} numberOfLines={1}>
+                        {s.source === 'scraper' ? '🌐 ' : '📍 '}
+                        {s.place_name || ''}
+                        {s.city ? ` • ${s.city}` : ''}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={styles.similarPrice}>{price.toFixed(2)} €</Text>
+                      {isCheapest ? <Text style={styles.similarBest}>НАЙ-ЕВТИНО</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              <Text style={styles.similarFoot}>Твоята цена: {post.pricePaid.toFixed(2)} €</Text>
+            </View>
+          ) : null}
 
           {/* Главна снимка + Обява vs Реалност */}
           <View style={styles.heroImageBox}>
@@ -579,6 +648,45 @@ export default function PostDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  /* „Същият продукт другаде“ */
+  similarBox: {
+    marginTop: 16,
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: 'rgba(148, 163, 184, 0.08)',
+    borderWidth: 1,
+    borderColor: COLORS.accentCyanBorder,
+  },
+  similarHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  similarTitle: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '800' },
+  similarHint: { color: COLORS.textMuted, fontSize: 11.5, marginTop: 4, marginBottom: 6, lineHeight: 16 },
+  similarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 163, 184, 0.14)',
+  },
+  similarThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: 'rgba(148, 163, 184, 0.12)',
+  },
+  similarThumbEmpty: { alignItems: 'center', justifyContent: 'center' },
+  similarRowTitle: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' },
+  similarRowMeta: { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
+  similarPrice: { color: COLORS.accentCyan, fontSize: 14, fontWeight: '800' },
+  similarBest: {
+    color: COLORS.greenPrimary,
+    fontSize: 8.5,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+    marginTop: 2,
+  },
+  similarFoot: { color: COLORS.textSecondary, fontSize: 11.5, marginTop: 10, fontWeight: '700' },
+
   postedAtRow: {
     flexDirection: 'row',
     alignItems: 'center',

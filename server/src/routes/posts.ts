@@ -667,4 +667,48 @@ export default async function postRoutes(app: FastifyInstance) {
     );
     return { ok: true, message: 'Сигналът е приет и ще бъде прегледан от модератор.' };
   });
+
+  /**
+   * „Същият продукт другаде“ — всички оферти за този продукт от други места.
+   *
+   * Смисълът на приложението е да сравниш. Затова до една оферта показваме и
+   * останалите цени за същия продукт, подредени от най-евтината — включително
+   * внесените от онлайн магазини. Сравняваме по първите смислени думи от
+   * заглавието, за да хващаме и „Олио 1 л“, и „Олио слънчогледово 1 л“.
+   */
+  app.get('/api/posts/:id/similar', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+
+    const me = await one<{ id: string; title: string }>(
+      `select id, title from posts where id = $1 and status = 'published'`,
+      [id]
+    );
+    if (!me) throw notFound('Публикацията не е намерена.');
+
+    const words = me.title
+      .toLowerCase()
+      .replace(/[^a-zа-я0-9 ]+/gi, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 4);
+
+    const first = words[0] ?? '';
+    const second = words[1] ?? '';
+    if (!first) return { key: '', count: 0, items: [] };
+
+    const items = await many<Record<string, unknown>>(
+      `select p.id, p.public_code, p.title, p.price_paid::text as price, p.city, p.place_name,
+              p.platform_tag, p.source, p.image_url, p.polarity, p.created_at::text,
+              p.address, p.google_maps_url
+         from posts p
+        where p.status = 'published'
+          and p.id <> $1
+          and p.title ilike '%' || $2 || '%'
+          and ($3 = '' or p.title ilike '%' || $3 || '%')
+        order by p.price_paid asc
+        limit 12`,
+      [id, first, second]
+    );
+
+    return { key: `${first} ${second}`.trim(), count: items.length, items };
+  });
 }

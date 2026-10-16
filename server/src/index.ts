@@ -22,6 +22,8 @@ import raffleRoutes from './routes/raffles.js';
 import referralRoutes from './routes/referrals.js';
 import adminRoutes from './routes/admin.js';
 import assistantRoutes from './routes/assistant.js';
+import scraperRoutes from './routes/scraper.js';
+import { startScraperWorker } from './lib/scraper.js';
 import { startSecurityMonitor } from './lib/security.js';
 import { seedDemoData } from './seed.js';
 
@@ -177,6 +179,8 @@ export async function buildApp() {
   await app.register(adminRoutes);
   // AI съветникът „Ценко“ — чат, който познава приложението и подканя към действие
   await app.register(assistantRoutes);
+  // Скраперът на онлайн магазини (само от админ панела)
+  await app.register(scraperRoutes);
 
   /* ---------------------------------------------------------------------
    *  Спрени/изтрити профили и активност.
@@ -262,6 +266,11 @@ async function main() {
   } else {
     startSecurityMonitor(10 * 60 * 1000);
   }
+
+  // Скраперът: подхваща чакащи задачи от базата (и възстановява прекъснати).
+  // Работи във всеки режим — иначе „пуснах задача“ щеше да виси завинаги.
+  await startScraperWorker();
+  app.log.info('Скрапер на магазини: работникът е включен');
 
   const shutdown = async (signal: string) => {
     app.log.info(`Получен ${signal} — затварям...`);

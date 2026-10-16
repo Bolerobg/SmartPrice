@@ -195,6 +195,38 @@ function safeJson(text: string): unknown {
 }
 
 /** Качва снимка (multipart) и връща публичния ѝ адрес. */
+/** Оферта за същия продукт, намерена на друго място. */
+export interface SimilarOffer {
+  id: string;
+  public_code?: string;
+  title: string;
+  price: string | number;
+  city?: string;
+  place_name?: string;
+  platform_tag?: string;
+  source?: string;
+  image_url?: string;
+  polarity?: string;
+  created_at?: string;
+  address?: string;
+  google_maps_url?: string;
+}
+
+/**
+ * „Същият продукт другаде“ — всички други цени за този продукт.
+ *
+ * Смисълът на приложението е да сравниш: намерил си олио за 5 € — ами ако
+ * същото е 3.50 € в магазина отсреща? Сървърът сравнява по заглавие и връща
+ * офертите подредени от най-евтината.
+ */
+export async function loadSimilarOffers(
+  postId: string
+): Promise<{ key: string; count: number; items: SimilarOffer[] }> {
+  return rawRequest<{ key: string; count: number; items: SimilarOffer[] }>(
+    `/api/posts/${postId}/similar`
+  );
+}
+
 export async function uploadImage(uri: string): Promise<string> {
   const tokens = await loadTokens();
   const form = new FormData();
