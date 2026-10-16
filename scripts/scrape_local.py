@@ -373,15 +373,26 @@ def refresh_prices(api, token, limit, verbose=False):
     Нужно е за магазините, които блокират нашия сървър (Cloudflare 403):
     сървърът не може да провери, но домашният IP може.
     """
-    proc = subprocess.run(
-        ["curl", "-s", "%s/api/posts?limit=%d" % (api, limit), "-A", UA],
-        capture_output=True, timeout=120,
-    )
-    try:
-        posts = json.loads(proc.stdout.decode("utf-8", "replace")).get("items") or []
-    except Exception:
-        print("  не успях да прочета офертите от приложението")
-        return 0, 0
+    # ВАЖНО: приложението връща грешка за твърде голям limit (над 50) — затова
+    # искаме на порции по 50 и ги събираме, докато стигнем искания брой.
+    posts, offset, page_size = [], 0, 50
+    while len(posts) < limit:
+        proc = subprocess.run(
+            ["curl", "-s", "%s/api/posts?limit=%d&offset=%d" % (api, page_size, offset), "-A", UA],
+            capture_output=True, timeout=120,
+        )
+        try:
+            chunk = json.loads(proc.stdout.decode("utf-8", "replace")).get("items") or []
+        except Exception:
+            print("  не успях да прочета офертите от приложението")
+            break
+        if not chunk:
+            break
+        posts.extend(chunk)
+        offset += len(chunk)
+        if len(chunk) < page_size:
+            break
+    posts = posts[:limit]
 
     targets = [p for p in posts if (p.get("sourceUrl") or p.get("source_url"))]
     print("  оферти с линк към магазин: %d" % len(targets))

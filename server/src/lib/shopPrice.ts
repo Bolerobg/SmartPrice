@@ -73,10 +73,10 @@ export async function getStoredShopPrice(postId: string): Promise<StoredShopPric
     const row = await one<{
       price_eur: string;
       list_price_eur: string | null;
-      checked_at: string;
+      checked_at: Date | string;
       checked_by: string;
     }>(
-      `select price_eur::text, list_price_eur::text, checked_at::text, checked_by
+      `select price_eur::text, list_price_eur::text, checked_at, checked_by
          from shop_price_checks where post_id = $1`,
       [postId]
     );
@@ -87,7 +87,11 @@ export async function getStoredShopPrice(postId: string): Promise<StoredShopPric
     return {
       priceEur: Number(price.toFixed(2)),
       listPriceEur: list && Number.isFinite(list) && list > price ? Number(list.toFixed(2)) : undefined,
-      checkedAt: row.checked_at,
+      // ISO 8601 — иначе iOS/Safari не чете датата от Postgres формат.
+      checkedAt:
+        row.checked_at instanceof Date
+          ? row.checked_at.toISOString()
+          : String(row.checked_at).replace(' ', 'T'),
       checkedBy: row.checked_by,
     };
   } catch {
