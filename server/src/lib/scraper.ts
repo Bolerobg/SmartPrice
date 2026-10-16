@@ -792,7 +792,11 @@ export function extractOpencartCards(html: string, pageUrl: string): RawProduct[
     const priceBlock =
       /<[^>]*class="[^"]*\bprice-new\b[^"]*"[^>]*>([\s\S]{0,80}?)<\//i.exec(window)?.[1] ??
       /<p[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([\s\S]{0,200}?)<\/p>/i.exec(window)?.[1];
-    const { price, currency } = extractGenericPrice(priceBlock ?? window);
+    // Подаваме маркъпа, не само вътрешния текст: общата евристика първо гледа
+    // елемент с клас „price“ — върху гол текст този път е недостъпен.
+    const { price, currency } = extractGenericPrice(
+      priceBlock ? `<div class="price">${priceBlock}</div>` : window
+    );
 
     // Снимката: последната `<img>` преди заглавието (картата), не икона.
     // ВНИМАНИЕ: в този шаблон картата има големи вградени SVG икони и снимката
@@ -1404,8 +1408,10 @@ export function extractGenericPrice(html: string): { price?: number; currency?: 
     [/(?:лв\.?|BGN)\s*(\d[\d\s.,]*)/i, 'BGN'],
     [/(?:£)\s*(\d[\d\s.,]*)/, 'GBP'],
     [/(?:\$)\s*(\d[\d\s.,]*)/, 'USD'],
-    [/(\d[\d\s.,]*)\s*(?:€|EUR)\b/i, 'EUR'],
-    [/(\d[\d\s.,]*)\s*(?:лв\.?|BGN)\b/i, 'BGN'],
+    // ВНИМАНИЕ: НЕ слагай `\b` след € или £ — те не са букви, значи граница на
+    // дума няма и цена от вида „4.50 €“ се пропуска (хванато на pottery-factory.com).
+    [/(\d[\d\s.,]*)\s*(?:€|EUR)(?![A-Za-z])/i, 'EUR'],
+    [/(\d[\d\s.,]*)\s*(?:лв\.?|BGN)(?![A-Za-zа-яА-Я])/i, 'BGN'],
     [/(\d[\d\s.,]*)\s*(?:£)/, 'GBP'],
   ];
   for (const [re, currency] of patterns) {
