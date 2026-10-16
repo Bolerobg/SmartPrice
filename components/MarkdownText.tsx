@@ -201,18 +201,25 @@ export const MarkdownText: React.FC<Props> = ({ text, style }) => {
 
   // maxWidth/overflow: дори нещо нечупливо (дълъг линк, код) не може да
   // разпъне балончето и да изхвърли бутоните извън екрана на телефон.
-  return <View style={styles.root}>{blocks}</View>;
+  return (
+    <View
+      style={[
+        styles.root,
+        // На web: дълга нечуплива дума (линк, код) се пренася, вместо да
+        // разпъне балончето.
+        Platform.OS === 'web'
+          ? ({ wordBreak: 'break-word', overflowWrap: 'anywhere' } as never)
+          : null,
+      ]}
+    >
+      {blocks}
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
   /* Нищо в отговора не може да излезе извън балончето. */
-  root: {
-    maxWidth: '100%',
-    overflow: 'hidden',
-    ...(Platform.OS === 'web'
-      ? ({ wordBreak: 'break-word', overflowWrap: 'anywhere' } as never)
-      : null),
-  },
+  root: { maxWidth: '100%', overflow: 'hidden' },
   base: { color: COLORS.textPrimary, fontSize: 14.5, lineHeight: 21.5, flexShrink: 1 },
   bold: { fontWeight: '800', color: COLORS.textPrimary },
   italic: { fontStyle: 'italic' },
