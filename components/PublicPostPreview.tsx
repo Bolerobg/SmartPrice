@@ -131,7 +131,7 @@ export const PublicPostPreview: React.FC<Props> = ({ id, onLogin }) => {
         <View style={styles.metaRow}>
           <Ionicons name={post.sourceUrl ? 'cart-outline' : 'location'} size={13} color={accent} />
           <Text style={styles.metaText}>
-            {post.sourceUrl ? `Онлайн магазин · ${post.placeName}` : `${post.placeName} · ${post.city}`}
+            {post.sourceUrl ? 'Онлайн магазин' : `${post.placeName} · ${post.city}`}
           </Text>
         </View>
         <View style={styles.postedAtRow}>

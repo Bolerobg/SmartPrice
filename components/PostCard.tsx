@@ -61,12 +61,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
 
   const categoryObj = CATEGORIES.find((c) => c.id === post.category);
 
-  // Кой е сайтът, ако цената е дошла от онлайн магазин. Бележката на внесените
-  // оферти е „Онлайн магазин <домейн>: <адрес на продукта>“ — вадим домейна.
-  const shopWhere = (() => {
-    const m = /Онлайн магазин\s+([^\s:]+)/.exec(post.sourceNote || '');
-    return m ? m[1]! : '';
-  })();
 
   // Изчисляване на % спестяване или % надценка
   const priceDiffPercent =
@@ -250,11 +244,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
                 <View style={styles.shopKindRow}>
                   <Ionicons name="globe-outline" size={11} color={COLORS.accentCyan} />
                   <Text style={styles.shopKindOnline}>ОНЛАЙН МАГАЗИН</Text>
-                  {shopWhere ? (
-                    <Text style={styles.shopKindWhere} numberOfLines={1}>
-                      · {shopWhere}
-                    </Text>
-                  ) : null}
                 </View>
               ) : post.address || post.googleMapsUrl ? (
                 <View style={styles.shopKindRow}>

@@ -416,17 +416,19 @@ export default function PostDetailScreen() {
                 >
                   {post.sourceUrl ? 'Продукт в онлайн магазин' : post.placeName}
                 </Text>
-                <Text
-                  style={{
-                    color: COLORS.textSecondary,
-                    fontSize: 12.5,
-                    marginTop: 2,
-                  }}
-                >
-                  {post.sourceUrl
-                    ? `🛒 ${post.sourceUrl.replace(/^https?:\/\//, '').split('/')[0]}`
-                    : `📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`}
-                </Text>
+                {/* Само за физически обекти: адресът. За онлайн не показваме сайта —
+                    по желание на потребителя (името на магазина не се показва в UI). */}
+                {!post.sourceUrl ? (
+                  <Text
+                    style={{
+                      color: COLORS.textSecondary,
+                      fontSize: 12.5,
+                      marginTop: 2,
+                    }}
+                  >
+                    {`📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`}
+                  </Text>
+                ) : null}
                 {post.locationAutoDetected && (
                   <Text
                     style={{

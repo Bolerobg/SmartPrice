@@ -90,6 +90,9 @@ const CityRow = memo(function CityRow({
  */
 const CITY_ROW_HEIGHT = 44;
 
+/** Дали сме в браузър (PWA). Там НЕ ползваме React Native `Modal`. */
+const IS_WEB = Platform.OS === 'web';
+
 export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
   selectedCity,
   onSelectCity,
@@ -113,9 +116,7 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
   }, [searchInput]);
 
   const allAvailableCities = useMemo(() => {
-    const base = includeAllOption
-      ? CITIES
-      : CITIES.filter((c) => c !== 'Всички градове');
+    const base = includeAllOption ? CITIES : CITIES.filter((c) => c !== 'Всички градове');
     // Премахване на евентуални дубликати
     return Array.from(new Set(base));
   }, [includeAllOption]);
@@ -123,13 +124,16 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
   const filteredCities = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return allAvailableCities;
-    return allAvailableCities.filter((city) =>
-      city.toLowerCase().includes(q)
-    );
+    return allAvailableCities.filter((city) => city.toLowerCase().includes(q));
   }, [allAvailableCities, searchQuery]);
 
-  const isFilteredActive =
-    includeAllOption && selectedCity !== 'Всички градове';
+  const isFilteredActive = includeAllOption && selectedCity !== 'Всички градове';
+
+  const close = useCallback(() => {
+    setIsOpen(false);
+    setSearchInput('');
+    setSearchQuery('');
+  }, []);
 
   const handleChoose = useCallback(
     (city: string) => {
@@ -141,6 +145,155 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
       onSelectCity(city);
     },
     [onSelectCity]
+  );
+
+  /**
+   * Съдържанието на листа — стоим го на едно място, за да не се разминава
+   * между web overlay-а и нативния Modal.
+   */
+  const sheetBody = (
+    <View style={styles.sheet}>
+      <View style={styles.handleBar} />
+
+      {/* Заглавие на падащото меню */}
+      <View style={styles.modalHeader}>
+        <View style={styles.modalTitleRow}>
+          <Ionicons name="map" size={19} color={COLORS.greenBright} />
+          <Text style={styles.modalTitle}>Избери град в България</Text>
+        </View>
+        <TouchableOpacity onPress={close} style={styles.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Ionicons name="close" size={22} color={COLORS.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Търсачка за градове */}
+      <View style={styles.searchBox}>
+        <Ionicons name="search" size={17} color={COLORS.textSecondary} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Търси град, курорт или населено място..."
+          placeholderTextColor={COLORS.textMuted}
+          value={searchInput}
+          onChangeText={setSearchInput}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+        />
+        {searchInput.length > 0 && (
+          <TouchableOpacity
+            onPress={() => {
+              setSearchInput('');
+              setSearchQuery('');
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Бързи чипове за най-търсените градове, когато няма въведен текст */}
+      {searchInput.trim().length === 0 && (
+        <View style={styles.quickSection}>
+          <Text style={styles.quickSectionLabel}>⚡ Най-често избирани:</Text>
+          <View style={styles.quickChipsWrap}>
+            {includeAllOption && (
+              <TouchableOpacity
+                style={[
+                  styles.quickChip,
+                  selectedCity === 'Всички градове' && styles.quickChipActive,
+                ]}
+                onPress={() => handleChoose('Всички градове')}
+              >
+                <Text
+                  style={[
+                    styles.quickChipText,
+                    selectedCity === 'Всички градове' && styles.quickChipTextActive,
+                  ]}
+                >
+                  🌍 Всички градове
+                </Text>
+              </TouchableOpacity>
+            )}
+            {POPULAR_QUICK_CITIES.map((city) => {
+              const active = selectedCity === city;
+              const count = cityPostCounts?.[city.toLowerCase()] || 0;
+              return (
+                <TouchableOpacity
+                  key={city}
+                  style={[styles.quickChip, active && styles.quickChipActive]}
+                  onPress={() => handleChoose(city)}
+                >
+                  <Text style={[styles.quickChipText, active && styles.quickChipTextActive]}>
+                    {city}
+                    {count > 0 ? ` (${count})` : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
+      {/* Опция за добавяне на собствено населено място, ако потребителят е написал нещо ново */}
+      {searchQuery.trim().length >= 2 &&
+        !filteredCities.some((c) => c.toLowerCase() === searchQuery.trim().toLowerCase()) && (
+          <TouchableOpacity
+            style={styles.customCityOption}
+            onPress={() => handleChoose(searchQuery.trim())}
+          >
+            <Ionicons name="add-circle" size={18} color={COLORS.greenBright} />
+            <Text style={styles.customCityOptionText}>
+              Избери населено място: „{searchQuery.trim()}“
+            </Text>
+          </TouchableOpacity>
+        )}
+
+      {/* Пълен списък на градовете */}
+      <FlatList
+        data={filteredCities}
+        keyExtractor={(item) => item}
+        // „always“: с отворена клавиатура първото докосване вече избира град,
+        // вместо да се изразходва само за затваряне на клавиатурата.
+        keyboardShouldPersistTaps="always"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+        // ВАЖНО: без ограничена височина списъкът се разпъва и НЕ се скролва
+        // (градовете „не мърдат“). flex:1 + minHeight:0 му дава точно
+        // остатъка от листа, който да скролва.
+        style={styles.list}
+        nestedScrollEnabled
+        bounces={false}
+        // Рендираме малко наведнъж, с известна височина на реда — така
+        // 189-те града не товарят телефона при отваряне и търсене.
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        updateCellsBatchingPeriod={40}
+        windowSize={5}
+        removeClippedSubviews={false}
+        getItemLayout={(_, index) => ({
+          length: CITY_ROW_HEIGHT,
+          offset: CITY_ROW_HEIGHT * index,
+          index,
+        })}
+        ListEmptyComponent={
+          <Text style={styles.listEmptyText}>
+            Няма град с такова име. Напиши го и го избери по-горе — ще го добавим като
+            населено място.
+          </Text>
+        }
+        renderItem={({ item }) => (
+          <CityRow
+            city={item}
+            selected={selectedCity === item}
+            count={
+              item === 'Всички градове' ? undefined : cityPostCounts?.[item.toLowerCase()] || 0
+            }
+            onChoose={handleChoose}
+          />
+        )}
+      />
+    </View>
   );
 
   return (
@@ -174,10 +327,7 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
               {label} ({allAvailableCities.length - (includeAllOption ? 1 : 0)}+ града в БГ)
             </Text>
             <Text
-              style={[
-                styles.triggerValue,
-                isFilteredActive && { color: accentColor },
-              ]}
+              style={[styles.triggerValue, isFilteredActive && { color: accentColor }]}
               numberOfLines={1}
             >
               {selectedCity}
@@ -208,185 +358,33 @@ export const CityPickerDropdown: React.FC<CityPickerDropdownProps> = ({
         </View>
       </TouchableOpacity>
 
-      <Modal
-        visible={isOpen}
-        // На web „slide“ анимацията понякога остава заседнала и листът не се
-        // затваря, макар филтърът да е приложен. Затова там — без анимация.
-        animationType={Platform.OS === 'web' ? 'none' : 'slide'}
-        transparent
-        onRequestClose={() => setIsOpen(false)}
-      >
-        <KeyboardAvoidingView
-          style={styles.backdrop}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={styles.sheet}>
-            <View style={styles.handleBar} />
-
-            {/* Заглавие на падащото меню */}
-            <View style={styles.modalHeader}>
-              <View style={styles.modalTitleRow}>
-                <Ionicons name="map" size={19} color={COLORS.greenBright} />
-                <Text style={styles.modalTitle}>Избери град в България</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setIsOpen(false)}
-                style={styles.closeBtn}
-              >
-                <Ionicons name="close" size={22} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Търсачка за градове */}
-            <View style={styles.searchBox}>
-              <Ionicons name="search" size={17} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Търси град, курорт или населено място..."
-                placeholderTextColor={COLORS.textMuted}
-                value={searchInput}
-                onChangeText={setSearchInput}
-                autoCorrect={false}
-              />
-              {searchInput.length > 0 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setSearchInput('');
-                    setSearchQuery('');
-                  }}
-                >
-                  <Ionicons
-                    name="close-circle"
-                    size={18}
-                    color={COLORS.textMuted}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Бързи чипове за най-търсените градове, когато няма въведен текст */}
-            {searchInput.trim().length === 0 && (
-              <View style={styles.quickSection}>
-                <Text style={styles.quickSectionLabel}>
-                  ⚡ Най-често избирани:
-                </Text>
-                <View style={styles.quickChipsWrap}>
-                  {includeAllOption && (
-                    <TouchableOpacity
-                      style={[
-                        styles.quickChip,
-                        selectedCity === 'Всички градове' &&
-                          styles.quickChipActive,
-                      ]}
-                      onPress={() => handleChoose('Всички градове')}
-                    >
-                      <Text
-                        style={[
-                          styles.quickChipText,
-                          selectedCity === 'Всички градове' &&
-                            styles.quickChipTextActive,
-                        ]}
-                      >
-                        🌍 Всички градове
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {POPULAR_QUICK_CITIES.map((city) => {
-                    const active = selectedCity === city;
-                    const count = cityPostCounts?.[city.toLowerCase()] || 0;
-                    return (
-                      <TouchableOpacity
-                        key={city}
-                        style={[
-                          styles.quickChip,
-                          active && styles.quickChipActive,
-                        ]}
-                        onPress={() => handleChoose(city)}
-                      >
-                        <Text
-                          style={[
-                            styles.quickChipText,
-                            active && styles.quickChipTextActive,
-                          ]}
-                        >
-                          {city}
-                          {count > 0 ? ` (${count})` : ''}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
-
-            {/* Опция за добавяне на собствено населено място, ако потребителят е написал нещо ново */}
-            {searchQuery.trim().length >= 2 &&
-              !filteredCities.some(
-                (c) => c.toLowerCase() === searchQuery.trim().toLowerCase()
-              ) && (
-                <TouchableOpacity
-                  style={styles.customCityOption}
-                  onPress={() => handleChoose(searchQuery.trim())}
-                >
-                  <Ionicons
-                    name="add-circle"
-                    size={18}
-                    color={COLORS.greenBright}
-                  />
-                  <Text style={styles.customCityOptionText}>
-                    Избери населено място: „{searchQuery.trim()}“
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-            {/* Пълен списък на градовете */}
-            <FlatList
-              data={filteredCities}
-              keyExtractor={(item) => item}
-              // „always“: с отворена клавиатура първото докосване вече избира град,
-              // вместо да се изразходва само за затваряне на клавиатурата.
-              keyboardShouldPersistTaps="always"
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.listContent}
-              // ВАЖНО: без ограничена височина списъкът се разпъва и НЕ се скролва
-              // (градовете „не мърдат“). flex:1 + minHeight:0 му дава точно
-              // остатъка от листа, който да скролва.
-              style={styles.list}
-              nestedScrollEnabled
-              bounces={false}
-              // Рендираме малко наведнъж, с известна височина на реда — така
-              // 189-те града не товарят телефона при отваряне и търсене.
-              initialNumToRender={16}
-              maxToRenderPerBatch={16}
-              windowSize={7}
-              removeClippedSubviews={false}
-              getItemLayout={(_, index) => ({
-                length: CITY_ROW_HEIGHT,
-                offset: CITY_ROW_HEIGHT * index,
-                index,
-              })}
-              ListEmptyComponent={
-                <Text style={styles.listEmptyText}>
-                  Няма град с такова име. Напиши го и го избери по-горе — ще го
-                  добавим като населено място.
-                </Text>
-              }
-              renderItem={({ item }) => (
-                <CityRow
-                  city={item}
-                  selected={selectedCity === item}
-                  count={
-                    item === 'Всички градове'
-                      ? undefined
-                      : cityPostCounts?.[item.toLowerCase()] || 0
-                  }
-                  onChoose={handleChoose}
-                />
-              )}
-            />
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      {/*
+        ВАЖНО (защо не е `Modal` на web): React Native `Modal` на web се рендира
+        в портал, със собствена анимация и отделен слой — при 189 реда и
+        отворена клавиатура на телефон това караше менюто да „забива“ (листът
+        се отваряше бавно, списъкът не се скролваше, а понякога оставаше
+        отворен). На web ползваме обикновен фиксиран overlay: по-лек е, скролва
+        нативно и се затваря мигновено. Нативно (iOS/Android) си остава Modal.
+      */}
+      {IS_WEB
+        ? isOpen
+          ? <View style={styles.webOverlay}>{sheetBody}</View>
+          : null
+        : (
+          <Modal
+            visible={isOpen}
+            animationType="slide"
+            transparent
+            onRequestClose={close}
+          >
+            <KeyboardAvoidingView
+              style={styles.backdrop}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              {sheetBody}
+            </KeyboardAvoidingView>
+          </Modal>
+        )}
     </>
   );
 };
@@ -447,6 +445,17 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCardElevated,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  /** Web overlay: фиксиран слой на цял екран (вместо Modal на web). */
+  webOverlay: {
+    ...(Platform.OS === 'web' ? { position: 'fixed' as unknown as 'absolute' } : {}),
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    backgroundColor: 'rgba(4, 7, 14, 0.86)',
+    justifyContent: 'flex-end',
   },
   backdrop: {
     flex: 1,
