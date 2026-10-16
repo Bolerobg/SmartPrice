@@ -16,6 +16,26 @@ import { computePriceStats, priceTrendLabel } from '@/lib/priceHistory';
 import { Avatar } from '@/components/Avatar';
 import { PostItem, ReactionKey } from '@/types';
 
+/**
+ * Откъде е дошла офертата.
+ *
+ * Приложението не е само потребителски отзиви: част от цените са внесени от
+ * редакцията (реални касови бонове от кошчетата на касите, официални брошури).
+ * Прозрачността е задължителна — всеки трябва да вижда, че това НЕ е мнение на
+ * човек, който е бил там. Затова офертите с източник различен от „user“ носят
+ * малък етикет.
+ */
+const SOURCE_LABEL: Record<string, { text: string; icon: string; hint: string }> = {
+  receipt_basket: {
+    text: 'ОТ БОН',
+    icon: 'receipt-outline',
+    hint: 'Реален касов бон, внесен от редакцията',
+  },
+  brochure: { text: 'ОТ БРОШУРА', icon: 'document-outline', hint: 'Официална брошура/каталог' },
+  tiktok_signal: { text: 'СИГНАЛ', icon: 'megaphone-outline', hint: 'Сигнал, споделен с разрешение' },
+  import: { text: 'ВНЕСЕНО', icon: 'cloud-download-outline', hint: 'Внесено от редакцията' },
+};
+
 interface PostCardProps {
   post: PostItem;
   distanceKm?: number;
@@ -332,6 +352,18 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
             <View style={styles.sellerPill}>
               <Ionicons name="person-outline" size={11} color={COLORS.black} />
               <Text style={styles.sellerPillText}>ЧАСТНО ЛИЦЕ</Text>
+            </View>
+          ) : null}
+
+          {/* Откъде е цената: внесена от редакцията (бон/брошура), не от потребител */}
+          {post.source && post.source !== 'user' && SOURCE_LABEL[post.source] ? (
+            <View style={styles.sourcePill}>
+              <Ionicons
+                name={SOURCE_LABEL[post.source].icon as never}
+                size={11}
+                color={COLORS.accentCyan}
+              />
+              <Text style={styles.sourcePillText}>{SOURCE_LABEL[post.source].text}</Text>
             </View>
           ) : null}
         </View>
@@ -731,6 +763,25 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   sellerPillText: { color: COLORS.black, fontSize: 8.5, fontWeight: '900', letterSpacing: 0.4 },
+  /* Етикет „откъде е цената“ — за прозрачност, че не е потребителски отзив */
+  sourcePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.accentCyanSoftBg,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyanBorder,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginLeft: 4,
+  },
+  sourcePillText: {
+    color: COLORS.accentCyan,
+    fontSize: 8.5,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
   sellerNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',

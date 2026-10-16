@@ -114,6 +114,13 @@ export interface PostItem {
   longitude?: number;
   googleMapsUrl?: string;
   locationAutoDetected?: boolean;
+  /**
+   * Откъде идва цената: 'user' (качил я е човек) или 'receipt_basket' /
+   * 'brochure' / 'tiktok_signal' / 'import' (внесена от редакцията).
+   * Ползва се за етикета „от бон“ / „от брошура“ — за прозрачност.
+   */
+  source?: string;
+  sourceNote?: string | null;
   pricePaid: number;
   referencePrice?: number; // Очаквана/нормална цена за сравнение (колко е спестено или надвзето)
   currency: string;
