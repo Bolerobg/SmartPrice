@@ -171,7 +171,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       `insert into profiles
          (email, email_key, password_hash, name, handle, city, bio,
           reputation_points, is_official)
-       values ($1, normalize_email($1), 'no-login', $2, $3, $4, $5, 0, true)
+       values ($1::citext, normalize_email($1::text), 'no-login', $2, $3, $4, $5, 0, true)
        on conflict (email) do update set is_official = true
        returning id`,
       [
