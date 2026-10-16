@@ -513,6 +513,12 @@ export default async function scraperRoutes(app: FastifyInstance) {
     minGapMin: z.coerce.number().int().min(0).max(1440).default(20),
     mode: z.enum(['preview', 'import']).default('import'),
     options: optionsSchema.optional(),
+    /** Таван на внесеното от този сайт. NULL/0 = без таван. */
+    maxTotal: z.coerce.number().int().min(0).max(100000).optional(),
+    /** Спира се сам, когато сайтът се изчерпи (3 обиколки без нови продукти). */
+    stopWhenDone: z.coerce.boolean().default(true),
+    /** Всяка обиколка влиза от различно място в каталога. */
+    rotate: z.coerce.boolean().default(true),
   });
 
   const scheduleSchema = scheduleBase
@@ -530,8 +536,8 @@ export default async function scraperRoutes(app: FastifyInstance) {
     const s = await one<Record<string, unknown>>(
       `insert into scrape_schedules
          (created_by, domain, url, label, enabled, daily_quota, burst_min, burst_max,
-          hour_from, hour_to, min_gap_min, mode, options, day_key)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)
+          hour_from, hour_to, min_gap_min, mode, options, day_key, max_total, stop_when_done, rotate)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17)
        returning id::text, domain, url, label, enabled, daily_quota, burst_min, burst_max,
                  hour_from, hour_to, min_gap_min, mode, used_today, runs_today,
                  total_imported, total_crawled, total_jobs, last_run_at::text, next_run_at::text`,
@@ -553,6 +559,9 @@ export default async function scraperRoutes(app: FastifyInstance) {
         // работника (на всеки 4 сек) вижда „NULL ≠ днес“ и нулира броячите,
         // точно след като сме пуснали първата обиколка.
         sofiaParts().dateKey,
+        input.maxTotal && input.maxTotal > 0 ? input.maxTotal : null,
+        input.stopWhenDone,
+        input.rotate,
       ]
     );
 
@@ -589,6 +598,8 @@ export default async function scraperRoutes(app: FastifyInstance) {
       `select s.id::text, s.domain, s.url, s.label, s.enabled, s.daily_quota, s.burst_min, s.burst_max,
               s.hour_from, s.hour_to, s.min_gap_min, s.mode, s.used_today, s.runs_today,
               s.total_imported, s.total_crawled, s.total_jobs, s.last_run_at::text, s.next_run_at::text,
+              s.dry_runs, s.max_total, s.stop_when_done, s.rotate, s.auto_stopped_at::text,
+              s.last_status, s.last_message,
               (select count(*)::int from scrape_jobs j
                 where j.schedule_id = s.id and j.status in ('queued','discovering','parsing','enriching','importing')) as running
          from scrape_schedules s
@@ -619,6 +630,16 @@ export default async function scraperRoutes(app: FastifyInstance) {
     if (input.minGapMin !== undefined) push('min_gap_min', input.minGapMin);
     if (input.mode !== undefined) push('mode', input.mode);
     if (input.options !== undefined) push('options', JSON.stringify(input.options), '::jsonb');
+    if (input.maxTotal !== undefined) push('max_total', input.maxTotal > 0 ? input.maxTotal : null);
+    if (input.stopWhenDone !== undefined) push('stop_when_done', input.stopWhenDone);
+    if (input.rotate !== undefined) push('rotate', input.rotate);
+    // Включване след самоспиране = нов шанс: нулираме брояча на „сухите“ обиколки.
+    if (input.enabled === true) {
+      push('dry_runs', 0);
+      push('auto_stopped_at', null, '::timestamptz');
+      push('last_status', null);
+      push('last_message', null);
+    }
     if (!map.length) throw badRequest('Няма какво да се обнови.');
 
     const values: unknown[] = [id];
@@ -634,6 +655,116 @@ export default async function scraperRoutes(app: FastifyInstance) {
 
     await audit({ admin, action: 'scraper.schedule_update', targetType: 'scrape_schedule', targetId: id, ip: req.ip });
     return { ok: true };
+  });
+
+
+  /**
+   * Добавяне на НЯКОЛКО сайта наведнъж (напр. 10 магазина).
+   *
+   * Защо: добавянето един по един при 10 сайта е 10 модала и 10 пъти едни и същи
+   * настройки. Тук се подава списък (текст с нов ред, запетая или интервал) и
+   * всяко правило се прилага за всички. Дублираните адреси се прескачат, а
+   * резултатът казва точно кой е влязъл и кой не — без тихо губене.
+   */
+  app.post('/api/admin/scraper/schedules/bulk', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        urls: z.union([z.string().max(20_000), z.array(z.string().max(1000)).max(200)]),
+        label: z.string().trim().max(120).optional(),
+        dailyQuota: z.coerce.number().int().min(1).max(2000).default(20),
+        burstMin: z.coerce.number().int().min(1).max(200).default(3),
+        burstMax: z.coerce.number().int().min(1).max(200).default(6),
+        hourFrom: z.coerce.number().int().min(0).max(23).default(8),
+        hourTo: z.coerce.number().int().min(1).max(24).default(22),
+        minGapMin: z.coerce.number().int().min(0).max(1440).default(20),
+        mode: z.enum(['preview', 'import']).default('import'),
+        options: optionsSchema.optional(),
+        maxTotal: z.coerce.number().int().min(0).max(100000).optional(),
+        stopWhenDone: z.coerce.boolean().default(true),
+        rotate: z.coerce.boolean().default(true),
+      })
+      .parse(req.body ?? {});
+
+    const lines =
+      typeof input.urls === 'string' ? input.urls.split(/[\s,;]+/).filter(Boolean) : input.urls;
+    const options = (input.options ?? {}) as Record<string, unknown>;
+    const seen = new Set<string>();
+    const created: string[] = [];
+    const skipped: Array<{ url: string; reason: string }> = [];
+
+    for (const line of lines) {
+      const raw = String(line).trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase().replace(/\/+$/, '');
+      if (seen.has(key)) {
+        skipped.push({ url: raw, reason: 'повторен в списъка' });
+        continue;
+      }
+      seen.add(key);
+
+      let u: URL;
+      try {
+        u = normalizeStartUrl(raw);
+      } catch {
+        skipped.push({ url: raw, reason: 'невалиден адрес' });
+        continue;
+      }
+      const domain = u.hostname.replace(/^www\./, '');
+
+      const dup = await one<{ id: string }>(
+        `select id::text from scrape_schedules where url = $1 or domain = $2 limit 1`,
+        [u.toString(), domain]
+      );
+      if (dup) {
+        skipped.push({ url: raw, reason: 'вече има разписание за този сайт' });
+        continue;
+      }
+
+      const s = await one<{ id: string }>(
+        `insert into scrape_schedules
+           (created_by, domain, url, label, enabled, daily_quota, burst_min, burst_max,
+            hour_from, hour_to, min_gap_min, mode, options, day_key, max_total, stop_when_done, rotate)
+         values ($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16)
+         returning id::text`,
+        [
+          admin.id,
+          domain,
+          u.toString(),
+          input.label ?? null,
+          input.dailyQuota,
+          input.burstMin,
+          input.burstMax,
+          input.hourFrom,
+          input.hourTo,
+          input.minGapMin,
+          input.mode,
+          JSON.stringify(options),
+          sofiaParts().dateKey,
+          input.maxTotal && input.maxTotal > 0 ? input.maxTotal : null,
+          input.stopWhenDone,
+          input.rotate,
+        ]
+      );
+      if (!s) {
+        skipped.push({ url: raw, reason: 'не се записа' });
+        continue;
+      }
+      // Първото пускане се разпръсва във времето, вместо 10 сайта да бъдат ударени наведнъж.
+      await query(`update scrape_schedules set next_run_at = $2 where id = $1`, [s.id, await nextRunFor(s.id)]);
+      created.push(s.id);
+    }
+
+    await audit({
+      admin,
+      action: 'scraper.schedule_bulk_create',
+      targetType: 'scrape_schedule',
+      targetId: created[0] ?? null,
+      targetLabel: `${created.length} сайта`,
+      details: { created: created.length, skipped: skipped.length, dailyQuota: input.dailyQuota },
+      ip: req.ip,
+    });
+    return { ok: true, created: created.length, skipped, ids: created };
   });
 
   app.post('/api/admin/scraper/schedules/:id/run', async (req) => {

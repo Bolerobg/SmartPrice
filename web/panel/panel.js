@@ -2451,7 +2451,10 @@ function scraperSchedulesHtml(items) {
   if (!items.length) {
     return `<div class="card">${`<div class="card-title">📅 Разписания и дневен лимит</div>`}${form}
       <div class="hint">Още няма разписание. Добави едно и сайтът ще се пълни сам, без да пречи.</div>
-      <div style="margin-top:12px"><button class="btn btn-primary" id="sc-sched-add">+ Ново разписание</button></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="sc-sched-add">+ Ново разписание</button>
+        <button class="btn" id="sc-sched-bulk">➕ Добави няколко сайта</button>
+      </div>
     </div>`;
   }
 
@@ -2459,7 +2462,12 @@ function scraperSchedulesHtml(items) {
     <div class="card">
       <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
         <span>📅 Разписания и дневен лимит <span class="pill pill-dim">${num(items.length)}</span></span>
-        <button class="btn btn-sm btn-primary" id="sc-sched-add">+ Ново разписание</button>
+        <span style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-primary" id="sc-sched-add">+ Ново разписание</button>
+          <button class="btn btn-sm" id="sc-sched-bulk">➕ Няколко сайта</button>
+          <button class="btn btn-sm btn-ghost" id="sc-sched-allon">▶ Пусни всички</button>
+          <button class="btn btn-sm btn-ghost" id="sc-sched-alloff">⏸ Пауза всички</button>
+        </span>
       </div>
       ${form}
       <div class="table-wrap">
@@ -2470,14 +2478,20 @@ function scraperSchedulesHtml(items) {
               .map(
                 (s) => `<tr>
               <td><strong>${esc(s.label || s.domain)}</strong><div class="hint" style="margin:0">${esc(s.domain)}</div></td>
-              <td><strong>${num(s.daily_quota)}</strong></td>
+              <td><strong>${num(s.daily_quota)}</strong>${s.max_total ? `<div class="hint" style="margin:0">таван ${num(s.max_total)}</div>` : ''}</td>
               <td>${num(s.burst_min)}–${num(s.burst_max)}</td>
               <td>${String(s.hour_from).padStart(2, '0')}:00–${String(s.hour_to).padStart(2, '0')}:00<div class="hint" style="margin:0">пауза ≥ ${num(s.min_gap_min)} мин</div></td>
               <td><strong>${num(s.used_today)}</strong>/${num(s.daily_quota)}<div class="hint" style="margin:0">${num(s.runs_today)} пускания</div></td>
               <td>${s.enabled ? (s.running > 0 ? '<span class="spinner"></span> върви сега' : s.next_run_at ? ago(s.next_run_at) === 'сега' ? 'сега' : 'след ' + ago(s.next_run_at) : '—') : '<span class="pill pill-dim">спряно</span>'}</td>
               <td>${num(s.total_imported)}<div class="hint" style="margin:0">${num(s.total_jobs)} обиколки</div></td>
               <td>${num(s.total_crawled)} стр.</td>
-              <td>${s.enabled ? `<span class="pill" style="background:rgba(34,197,94,.16);color:#34D399">включено</span>` : '<span class="pill pill-dim">пауза</span>'}</td>
+              <td>${
+                s.auto_stopped_at
+                  ? `<span class="pill" style="background:rgba(251,191,36,.18);color:#FBBF24">⏹ спря се сам</span>`
+                  : s.enabled
+                    ? `<span class="pill" style="background:rgba(34,197,94,.16);color:#34D399">включено</span>`
+                    : '<span class="pill pill-dim">пауза</span>'
+              }${s.last_message ? `<div class="hint" style="margin:0;max-width:220px">${esc(s.last_message)}</div>` : ''}</td>
               <td class="actions">
                 <button class="btn btn-sm btn-ok" data-sc-sched-run="${esc(s.id)}">Пусни сега</button>
                 <button class="btn btn-sm btn-ghost" data-sc-sched-edit="${esc(s.id)}">Редакция</button>
@@ -2495,6 +2509,8 @@ function scraperSchedulesHtml(items) {
 }
 
 function bindScraperSchedules() {
+  // Настройките от последната ръчна задача — за да не се въвеждат пак.
+  const lastOpts = scraperLastForm ?? {};
   const openSchedForm = (s) =>
     openModal(
       s ? 'Редакция на разписание' : 'Ново разписание',
@@ -2510,6 +2526,7 @@ function bindScraperSchedules() {
         <label class="field"><span>Активен от (час)</span><input id="sch-hf" type="number" min="0" max="23" value="${Number(s?.hour_from ?? 8)}"></label>
         <label class="field"><span>Активен до (час)</span><input id="sch-ht" type="number" min="1" max="24" value="${Number(s?.hour_to ?? 22)}"></label>
         <label class="field"><span>Мин. пауза между пускания (мин)</span><input id="sch-gap" type="number" min="0" max="1440" value="${Number(s?.min_gap_min ?? 20)}"></label>
+        <label class="field"><span>Макс. общо продукти (0 = без таван)</span><input id="sch-maxtotal" type="number" min="0" max="100000" value="${Number(s?.max_total ?? 0)}"></label>
         <label class="field"><span>Какво да прави</span>
           <select id="sch-mode">
             <option value="import"${(s?.mode || 'import') === 'import' ? ' selected' : ''}>Внасяй директно</option>
@@ -2520,6 +2537,34 @@ function bindScraperSchedules() {
             <option value="1"${s?.enabled !== false ? ' selected' : ''}>Включено</option>
             <option value="0"${s?.enabled === false ? ' selected' : ''}>Изключено</option>
           </select></label>
+      </div>
+      <div style="margin-top:12px;padding:12px;border:1px solid rgba(148,163,184,.18);border-radius:12px">
+        <div style="font-weight:600;font-size:14px;margin-bottom:8px">⚙️ Същите настройки като при ръчна задача</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px">
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sch-robots"${lastOpts.respectRobots === false ? '' : ' checked'}> Спазвай robots.txt</label>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sch-ai"${lastOpts.useAi !== false ? ' checked' : ''}> AI обработка</label>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sch-img"${lastOpts.downloadImages ? ' checked' : ''}> Сваляй снимките</label>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sch-skipimg"${lastOpts.skipWithoutImage !== false ? ' checked' : ''}> Без снимка → пропусни</label>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sch-tag"${lastOpts.addShopTag !== false ? ' checked' : ''}> Етикет на магазина</label>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sch-stopdone"${s?.stop_when_done !== false ? ' checked' : ''}> Спри сам, като свърши сайтът</label>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sch-rotate"${s?.rotate !== false ? ' checked' : ''}> Различен вход всеки път</label>
+        </div>
+        <div class="form-grid" style="margin-top:10px">
+          <label class="field"><span>Мин. цена (€)</span><input id="sch-minp" type="number" min="0" step="0.01" value="${lastOpts.minPrice ?? ''}"></label>
+          <label class="field"><span>Макс. цена (€)</span><input id="sch-maxp" type="number" min="0" step="0.01" value="${lastOpts.maxPrice ?? ''}"></label>
+          <label class="field"><span>Град</span><input id="sch-city" value="${esc(lastOpts.city ?? '')}"></label>
+          <label class="field"><span>Категория</span>
+            <select id="sch-cat">
+              <option value="ai"${lastOpts.categoryMode !== 'breadcrumb' && lastOpts.categoryMode !== 'fixed' ? ' selected' : ''}>AI избира</option>
+              <option value="breadcrumb"${lastOpts.categoryMode === 'breadcrumb' ? ' selected' : ''}>От навигацията на сайта</option>
+            </select></label>
+          <label class="field"><span>Дедупликация</span>
+            <select id="sch-dedupe">
+              <option value="url"${lastOpts.dedupe !== 'title' && lastOpts.dedupe !== 'off' ? ' selected' : ''}>По адрес</option>
+              <option value="title"${lastOpts.dedupe === 'title' ? ' selected' : ''}>По заглавие</option>
+              <option value="off"${lastOpts.dedupe === 'off' ? ' selected' : ''}>Без</option>
+            </select></label>
+        </div>
       </div>`,
       [
         {
@@ -2527,6 +2572,10 @@ function bindScraperSchedules() {
           label: s ? 'Запази' : 'Създай',
           cls: 'btn-primary',
           onClick: async () => {
+            const posOrUndef = (sel) => {
+              const v = Number($(sel).value);
+              return Number.isFinite(v) && v > 0 ? v : undefined;
+            };
             const body = {
               url: $('#sch-url').value.trim(),
               label: $('#sch-label').value.trim() || undefined,
@@ -2538,6 +2587,21 @@ function bindScraperSchedules() {
               minGapMin: Number($('#sch-gap').value),
               mode: $('#sch-mode').value,
               enabled: $('#sch-enabled').value === '1',
+              maxTotal: Number($('#sch-maxtotal').value) || 0,
+              stopWhenDone: $('#sch-stopdone').checked,
+              rotate: $('#sch-rotate').checked,
+              options: {
+                respectRobots: $('#sch-robots').checked,
+                useAi: $('#sch-ai').checked,
+                downloadImages: $('#sch-img').checked,
+                skipWithoutImage: $('#sch-skipimg').checked,
+                addShopTag: $('#sch-tag').checked,
+                minPrice: posOrUndef('#sch-minp'),
+                maxPrice: posOrUndef('#sch-maxp'),
+                city: $('#sch-city').value.trim() || undefined,
+                categoryMode: $('#sch-cat').value || undefined,
+                dedupe: $('#sch-dedupe').value || undefined,
+              },
             };
             try {
               if (s) await api(`/scraper/schedules/${s.id}`, { method: 'PATCH', body });
@@ -2590,6 +2654,121 @@ function bindScraperSchedules() {
       render('scraper', true);
     };
   });
+
+  /**
+   * Добавяне на няколко сайта наведнъж.
+   *
+   * При 10 магазина добавянето един по един е 10 модала и 10 пъти едни и същи
+   * настройки. Тук се подава списък и едни правила за всички — а резултатът казва
+   * кой сайт е влязъл и кой е прескочен (за да няма тихо губене).
+   */
+  const openBulkForm = () =>
+    openModal(
+      '\u2795 \u041d\u044f\u043a\u043e\u043b\u043a\u043e \u0441\u0430\u0439\u0442\u0430 \u043d\u0430\u0432\u0435\u0434\u043d\u044a\u0436',
+      `
+      <div class="hint" style="margin-bottom:10px">Всеки адрес на нов ред (до 200). Всеки сайт тръгва на СВОЙ случаен момент в активните часове — не удрят всички наведнъж. Сайтове, които вече имат разписание, се прескачат.</div>
+      <label class="field full"><span>Адреси (един на ред)</span>
+        <textarea id="blk-urls" rows="8" placeholder="https://magazin1.bg\nhttps://magazin2.bg\nhttps://magazin3.bg/kategoriya"></textarea></label>
+      <div class="form-grid" style="margin-top:10px">
+        <label class="field"><span>Колко продукта на ден (за всеки)</span><input id="blk-quota" type="number" min="1" max="2000" value="${Number(lastOpts.__quota ?? 20)}"></label>
+        <label class="field"><span>Група от</span><input id="blk-bmin" type="number" min="1" max="200" value="3"></label>
+        <label class="field"><span>Група до</span><input id="blk-bmax" type="number" min="1" max="200" value="6"></label>
+        <label class="field"><span>Активен от (час)</span><input id="blk-hf" type="number" min="0" max="23" value="8"></label>
+        <label class="field"><span>Активен до (час)</span><input id="blk-ht" type="number" min="1" max="24" value="22"></label>
+        <label class="field"><span>Мин. пауза (мин)</span><input id="blk-gap" type="number" min="0" max="1440" value="20"></label>
+        <label class="field"><span>Макс. общо продукти (0 = без)</span><input id="blk-maxtotal" type="number" min="0" value="0"></label>
+        <label class="field"><span>Какво да прави</span>
+          <select id="blk-mode"><option value="import">Внасяй директно</option><option value="preview">Само показвай</option></select></label>
+        <label class="field"><span>robots.txt</span>
+          <select id="blk-robots"><option value="1">Спазвай (правилното)</option><option value="0">Пренебрегни</option></select></label>
+        <label class="field"><span>AI обработка</span>
+          <select id="blk-ai"><option value="1">Да</option><option value="0">Не</option></select></label>
+      </div>`,
+      [
+        {
+          id: 'blk-save',
+          label: 'Добави ги',
+          cls: 'btn-primary',
+          onClick: async () => {
+            const urls = $('#blk-urls').value.trim();
+            if (!urls) return toast('Въведи поне един адрес', 'error');
+            try {
+              const r = await api('/scraper/schedules/bulk', {
+                method: 'POST',
+                body: {
+                  urls,
+                  dailyQuota: Number($('#blk-quota').value),
+                  burstMin: Number($('#blk-bmin').value),
+                  burstMax: Number($('#blk-bmax').value),
+                  hourFrom: Number($('#blk-hf').value),
+                  hourTo: Number($('#blk-ht').value),
+                  minGapMin: Number($('#blk-gap').value),
+                  maxTotal: Number($('#blk-maxtotal').value) || 0,
+                  mode: $('#blk-mode').value,
+                  stopWhenDone: true,
+                  rotate: true,
+                  options: {
+                    respectRobots: $('#blk-robots').value === '1',
+                    useAi: $('#blk-ai').value === '1',
+                    skipWithoutImage: true,
+                    addShopTag: true,
+                  },
+                },
+              });
+              const skipped = r.skipped || [];
+              toast(`Добавени ${r.created} сайта${skipped.length ? `, \u043f\u0440\u0435\u0441\u043a\u043e\u0447\u0435\u043d\u0438 ${skipped.length}` : ''}`);
+              if (skipped.length) {
+                openModal(
+                  'Прескочени адреси',
+                  `<div class="hint" style="margin-bottom:10px">Тези не влязоха — виждаш защо:</div>
+                   <ul style="padding-left:18px;color:var(--muted);font-size:13px;line-height:1.8">
+                     ${skipped.map((s) => `<li><strong>${esc(s.url)}</strong> — ${esc(s.reason)}</li>`).join('')}
+                   </ul>`,
+                  [{ id: 'blk-close2', label: 'Ясно', cls: 'btn-primary', onClick: () => { closeModal(); render('scraper', true); } }],
+                  true
+                );
+              } else {
+                closeModal();
+                render('scraper', true);
+              }
+            } catch (e) {
+              toast(e.message, 'error');
+            }
+          },
+        },
+        { id: 'blk-cancel', label: 'Отказ', cls: 'btn-ghost', onClick: closeModal },
+      ],
+      true
+    );
+
+  $('#sc-sched-bulk')?.addEventListener('click', () => openBulkForm());
+
+  /** Пускане/спиране на всички разписания с едно натискане. */
+  const setAll = async (enabled) => {
+    try {
+      const all = await api('/scraper/schedules');
+      const items = all.items || [];
+      let done = 0;
+      for (const s of items) {
+        if (s.enabled === enabled) continue;
+        await api(`/scraper/schedules/${s.id}`, { method: 'PATCH', body: { enabled } });
+        done++;
+      }
+      toast(enabled ? `Пуснах ${done} разписания` : `Спрях ${done} разписания`);
+      render('scraper', true);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+  $('#sc-sched-allon')?.addEventListener('click', () => setAll(true));
+  $('#sc-sched-alloff')?.addEventListener('click', () =>
+    confirmAction({
+      title: 'Пауза на всички разписания',
+      message: 'Да спра всички разписания? Вече внесеното остава.',
+      confirmLabel: 'Спри всички',
+      onConfirm: () => setAll(false),
+    })
+  );
 
   document.querySelectorAll('[data-sc-sched-del]').forEach((b) => {
     b.onclick = () =>

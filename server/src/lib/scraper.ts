@@ -63,6 +63,12 @@ export interface ScrapeOptions {
   saveProfile?: boolean;
   /** За тестове: позволява и вътрешни адреси (по подразбиране забранено). */
   allowPrivate?: boolean;
+  /**
+   * От кой адрес да започне обиколката (завърта списъка).
+   * Разписанията слагат случаен брой всеки път, за да влизат от различно място
+   * в каталога — различни продукти, различен маршрут, нищо за научаване.
+   */
+  startOffset?: number;
 }
 
 const DEFAULTS: Required<Pick<ScrapeOptions,
@@ -91,6 +97,26 @@ export const SCRAPE_CATEGORIES = [
 // с „Cannot convert argument to a ByteString“ — затова низът е само латиница.
 const UA =
   'Mozilla/5.0 (compatible; SmartPriceBot/1.0; +https://smartprice.bg; product-prices)';
+
+/**
+ * Реалистични браузъри, между които се избира СЛУЧАЙНО за всяка заявка.
+ *
+ * Защо: един и същ User-Agent на всеки 30 секунди от един IP е най-лесният
+ * признак за бот. Ротацията не лъже сайта (не се представяме за друг човек),
+ * а разпределя трафика така, както би изглеждал от нормален браузър.
+ */
+const UA_POOL = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1',
+];
+
+/** Случаен браузър от пула (задачите „по разписание“ изглеждат различно всеки път). */
+export function pickUserAgent(): string {
+  return UA_POOL[Math.floor(Math.random() * UA_POOL.length)]!;
+}
 
 /**
  * Какво приемаме по подразбиране — само страници.
@@ -251,7 +277,7 @@ export async function politeFetch(url: string, opts: FetchOpts = {}): Promise<Fe
     try {
       const res = await fetch(url0.toString(), {
         headers: {
-          'User-Agent': UA,
+          'User-Agent': pickUserAgent(),
           Accept: opts.accept ?? (htmlOnly ? 'text/html,application/xhtml+xml' : DEFAULT_ACCEPT),
           'Accept-Language': 'bg,en;q=0.8',
         },
@@ -1669,6 +1695,13 @@ export interface ScheduleRow {
   total_jobs: number;
   last_run_at: string | null;
   next_run_at: string | null;
+  dry_runs: number;
+  max_total: number | null;
+  stop_when_done: boolean;
+  rotate: boolean;
+  auto_stopped_at: string | null;
+  last_status: string | null;
+  last_message: string | null;
 }
 
 /** Час и дата в българско време (смята и лятното време само). */
@@ -1757,7 +1790,15 @@ export async function tickSchedules(): Promise<number> {
     }
 
     const burst = Math.max(1, Math.min(remaining, Math.round(rand(s.burst_min, s.burst_max))));
-    const options = { ...(s.options ?? {}), count: burst, mode: s.mode === 'import' ? 'import' : 'preview' };
+    const options: Record<string, unknown> = {
+      ...(s.options ?? {}),
+      count: burst,
+      mode: s.mode === 'import' ? 'import' : 'preview',
+    };
+    // „Да не се усетят“: всяка обиколка влиза от различно място в каталога и с
+    // леко различно темпо, вместо всеки ден по един и същ маршрут.
+    if (s.rotate) options.startOffset = Math.floor(Math.random() * 5000);
+    if (options.delayMs === undefined) options.delayMs = Math.round(rand(1200, 4200));
 
     const job = await one<{ id: string }>(
       `insert into scrape_jobs (url, domain, mode, options, target_count, status, schedule_id, source_kind)
@@ -1780,21 +1821,62 @@ export async function tickSchedules(): Promise<number> {
 
 /** Обновява статистиката на разписанието след като задачата му приключи. */
 async function updateScheduleAfterJob(scheduleId: string, jobId: string): Promise<void> {
-  const j = await one<{ imported: number; parsed: number; pages_visited: number }>(
-    `select imported, parsed, pages_visited from scrape_jobs where id = $1`,
+  const j = await one<{ imported: number; parsed: number; pages_visited: number; status: string; error: string | null }>(
+    `select imported, parsed, pages_visited, status, error from scrape_jobs where id = $1`,
     [jobId]
   );
   if (!j) return;
-  // Квотата се харчи и когато сме само в преглед — продуктите пак са взети от сайта.
   const taken = Number(j.imported || 0) > 0 ? Number(j.imported) : Number(j.parsed || 0);
+  const s = await one<ScheduleRow>(`select * from scrape_schedules where id = $1`, [scheduleId]);
+  if (!s) return;
+
+  // Нищо ново от сайта НЕ е грешка — това е изчерпване (всичко вече го имаме).
+  const dry = taken > 0 ? 0 : Number(s.dry_runs || 0) + 1;
+  const importedTotal = Number(s.total_imported || 0) + Number(j.imported || 0);
+  const hitCap = s.max_total != null && importedTotal >= Number(s.max_total);
+  const exhausted = dry >= 3;
+
+  let enabled = s.enabled;
+  let status = taken > 0 ? 'ok' : j.status === 'failed' ? 'error' : 'no_new';
+  let message =
+    taken > 0
+      ? `Взех ${taken} продукта.`
+      : j.status === 'failed'
+        ? `Грешка: ${String(j.error ?? 'неизвестна').slice(0, 160)}`
+        : `Няма нови продукти (${dry} поредни обиколки).`;
+
+  let autoStopped: string | null = null;
+  if (s.stop_when_done && (exhausted || hitCap)) {
+    enabled = false;
+    autoStopped = new Date().toISOString();
+    status = hitCap ? 'done' : 'exhausted';
+    message = hitCap
+      ? `Стигнах тавана от ${s.max_total} продукта — спрях се сам.`
+      : 'Сайтът е изчерпан — 3 поредни обиколки без нови продукти. Спрях се сам.';
+  }
+
+  // Квотата се харчи и когато сме само в преглед — продуктите пак са взети от сайта.
   await query(
     `update scrape_schedules
         set used_today = used_today + $2,
             total_imported = total_imported + $3,
             total_crawled = total_crawled + $4,
+            dry_runs = $5, last_status = $6, last_message = $7,
+            enabled = $8,
+            auto_stopped_at = coalesce($9::timestamptz, auto_stopped_at),
             updated_at = now()
       where id = $1`,
-    [scheduleId, taken, Number(j.imported || 0), Number(j.pages_visited || 0)]
+    [
+      scheduleId,
+      taken,
+      Number(j.imported || 0),
+      Number(j.pages_visited || 0),
+      dry,
+      status,
+      message,
+      enabled,
+      autoStopped,
+    ]
   );
 }
 
@@ -2082,6 +2164,13 @@ export async function runJob(jobId: string): Promise<void> {
       ]);
 
       // Ако картите в листинга вече ни дадоха продуктите, не отваряме нищо друго.
+      // Разписанията влизат от различно място в каталога всеки път.
+      const off = Math.max(0, Number(o.startOffset ?? 0));
+      if (off > 0 && urls.length > 1) {
+        const k = off % urls.length;
+        urls = [...urls.slice(k), ...urls.slice(0, k)];
+        await logLine(jobId, `Влизам от ${k + 1}-ия адрес в списъка (различен вход всеки път).`);
+      }
       if (!products.length) {
       const maxRead = Math.min(urls.length, limit * 2, o.maxPages * 60);
       for (const url of urls.slice(0, maxRead)) {
