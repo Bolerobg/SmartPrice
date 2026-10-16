@@ -482,10 +482,18 @@ const styles = StyleSheet.create({
      * КЛЮЧОВО за web: `flex: 1` НЕ ограничава височината, когато родителят
      * (листът) е с височина по съдържание — списъкът се разпъва на 189 реда,
      * отрязва се от `overflow: hidden` и НЕ могат да се скролват градовете
-     * (изглежда като „забило“). Затова на web даваме на списъка точна
-     * максимална височина.
+     * (изглежда като „забило“). Затова на web: точна максимална височина
+     * + ИЗРИЧНО `overflow-y: auto` (React Native Web оставяше `visible`,
+     * затова контейнерът не скролваше изобщо).
      */
-    ...(Platform.OS === 'web' ? { maxHeight: '58vh' as unknown as number } : {}),
+    ...(Platform.OS === 'web'
+      ? ({
+          maxHeight: '58vh',
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
+          WebkitOverflowScrolling: 'touch',
+        } as unknown as Record<string, unknown>)
+      : {}),
   },
   handleBar: {
     width: 44,
