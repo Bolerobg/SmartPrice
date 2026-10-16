@@ -762,11 +762,56 @@ export function looksLikeProductPage(p: { title?: string; price?: number }): boo
  * изрежда всички продукти на една страница — една заявка вместо тридесет.
  * Ако в нея няма директни продуктови връзки, минаваме през категориите от същата карта.
  */
+/**
+ * Чете продуктите направо от картите на OpenCart темата.
+ *
+ * Защо не по адрес: OpenCart с „SEO адреси“ прави продукти като
+ * `/domakinska-keramika/keramichno-gyuveche-kafqvo` — без ID, без „product“ и
+ * без цифра. По адрес такъв продукт е неразличим от категория. В самия HTML обаче
+ * картата е стандартна: `.product-thumb` → `<h4><a href>` (заглавие),
+ * `<p class="price">4.50 €</p>`, `<img>`.
+ */
+export function extractOpencartCards(html: string, pageUrl: string): RawProduct[] {
+  const thumbParts = html.split(/<div[^>]+class="[^"]*\bproduct-thumb\b[^"]*"/i).slice(1);
+  const parts = thumbParts.length ? thumbParts : html.split(/<div[^>]+class="[^"]*\bcaption\b[^"]*"/i).slice(1);
+  const out: RawProduct[] = [];
+
+  for (const part of parts.slice(0, 80)) {
+    const seg = part.slice(0, 4000);
+    const aTag = /<h4[^>]*>\s*<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,200}?)<\/a>/i.exec(seg);
+    if (!aTag) continue;
+    const sourceUrl = resolveUrl(decodeHref(aTag[1]!), pageUrl);
+    const title = htmlToText(aTag[2]!).slice(0, 200);
+    if (!sourceUrl || !title || title.length < 3) continue;
+
+    const priceHtml = /<p[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([\s\S]{0,140}?)<\/p>/i.exec(seg)?.[1];
+    const { price, currency } = extractGenericPrice(priceHtml ?? seg.slice(0, 1800));
+    const image = extractGenericImage(seg, pageUrl) ?? undefined;
+
+    out.push({
+      sourceUrl,
+      title,
+      price,
+      currency,
+      imageUrl: image,
+      via: 'opencart',
+    });
+  }
+
+  const seen = new Set<string>();
+  return out.filter((p) => {
+    const key = `${p.sourceUrl}|${(p.title ?? '').toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function collectFromOpencart(
   origin: string,
   limit: number,
   opts: FetchOpts
-): Promise<string[]> {
+): Promise<RawProduct[]> {
   const smUrl = `${origin}/index.php?route=information/sitemap`;
   let res: FetchResult;
   try {
@@ -776,33 +821,57 @@ export async function collectFromOpencart(
   }
   if (!res.ok || !res.text || res.text.length < 500) return [];
 
-  const out = new Set<string>();
-  const add = (list: string[]) => list.forEach((u) => out.add(realProductUrl(u)));
-  add(extractProductLinks(res.text, res.url));
-  if (out.size >= 2) return [...out].slice(0, limit * 3);
+  // Служебните страници не ни трябват — от картата на сайта взимаме само категориите.
+  const service =
+    /(account|information|contact|cart|checkout|wishlist|compare|manufacturer|login|register|special|search|sitemap|quick_view|route=common|route=product\/product|route=product\/quick_view|\.(jpg|jpeg|png|webp|gif|css|js|svg|xml)$|^\/cdn-cgi)/i;
+  const candidates = [
+    ...new Set(
+      [...res.text.matchAll(/href=["']([^"']+)["']/gi)]
+        .map((m) => decodeHref(m[1]!))
+        .map((h) => {
+          try {
+            return new URL(h, res.url).toString();
+          } catch {
+            return '';
+          }
+        })
+        .filter((u) => u && u.startsWith(origin) && !service.test(u) && u !== `${origin}/`)
+    ),
+  ].slice(0, 10);
 
-  // Няма директни продуктови връзки? Тогава категориите от същата карта.
-  const cats = [...new Set((res.text.match(/href="([^"]*route=product\/category[^"]*)"/gi) ?? [])
-    .map((h) => decodeHref(/href="([^"]+)"/i.exec(h)?.[1] ?? ''))
-    .map((h) => {
-      try {
-        return new URL(h, res.url).toString();
-      } catch {
-        return '';
-      }
-    })
-    .filter(Boolean))].slice(0, 8);
-
-  for (const c of cats) {
+  const out: RawProduct[] = [];
+  const seen = new Set<string>();
+  for (const cat of candidates) {
+    if (out.length >= limit) break;
     try {
-      const r2 = await politeFetch(c, opts);
-      if (r2.ok && r2.text) add(extractProductLinks(r2.text, r2.url));
+      const r2 = await politeFetch(cat, opts);
+      if (!r2.ok || !r2.text) continue;
+      const found = extractOpencartCards(r2.text, r2.url);
+      if (found.length >= 2) {
+        // Категория с карти — това са истинските продукти (със заглавие, цена и снимка).
+        for (const p of found) {
+          const key = (p.sourceUrl ?? p.title ?? '').toString();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push(p);
+          if (out.length >= limit) break;
+        }
+        continue;
+      }
+      // Единична продуктова страница (в картата на сайта понякога има и такива).
+      if (found.length === 1) {
+        out.push(found[0]!);
+        continue;
+      }
+      const one2 = parseProductPage(r2.text, r2.url, {});
+      if (one2.title && one2.price && looksLikeProductPage(one2) && looksLikeProductUrl(r2.url)) {
+        out.push(one2);
+      }
     } catch {
       // следваща категория
     }
-    if (out.size >= limit * 3) break;
   }
-  return [...out].slice(0, limit * 3);
+  return out.slice(0, limit);
 }
 
 /** OpenCart: AJAX „бърз преглед“ → истинската продуктова страница със същия продукт. */
@@ -2183,14 +2252,17 @@ export async function runJob(jobId: string): Promise<void> {
 
       if (!isProductish) {
         // Първо OpenCart-картата (ако е такъв магазин) — после sitemap.xml.
-        const ocUrls = await collectFromOpencart(origin, limit, fo);
-        if (ocUrls.length >= 2) {
-          urls = ocUrls;
+        const oc = await collectFromOpencart(origin, limit, fo);
+        if (oc.length >= 2) {
+          products = oc.slice(0, limit);
           strategy = 'opencart';
-          await logLine(jobId, `OpenCart картата на сайта даде ${ocUrls.length} продукта.`);
+          await logLine(
+            jobId,
+            `OpenCart магазин: взех ${products.length} продукта направо от картите в категориите.`
+          );
         }
 
-        const sm = urls.length
+        const sm = products.length || urls.length
           ? { urls: [] as string[], fromProductSitemap: false }
           : await collectFromSitemap(job.url, limit, fo);
         if (sm.urls.length) {
@@ -2198,7 +2270,7 @@ export async function runJob(jobId: string): Promise<void> {
           sitemapFromProducts = sm.fromProductSitemap === true;
           strategy = 'sitemap';
           await logLine(jobId, `Sitemap: намерих ${sm.urls.length} продуктови адреса.`);
-        } else if (!urls.length) {
+        } else if (!urls.length && !products.length) {
           await logLine(jobId, 'Няма sitemap — гледам листинга.');
           const home = await politeFetch(job.url, fo);
           // Първо най-бързото: продуктите, изброени в самия листинг. За
