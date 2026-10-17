@@ -3503,6 +3503,7 @@ python import_receipts.py --file receipts.json --commit  # внася наист
 /* ------------------------------------------- Фейсбук касови бележки */
 
 let fbReceiptsFilter = 'pending';
+let fbReceiptsPolarity = '';
 let fbReceiptsSelected = new Set();
 let fbReceiptsJobPoll = null;
 let fbReceiptsLastGroupUrl = 'https://www.facebook.com/groups/3111975342346393';
@@ -3613,6 +3614,8 @@ async function renderFbReceipts(box) {
           <button class="btn btn-sm ${fbReceiptsFilter === 'rejected' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="rejected">✕ Отхвърлени (${num(counts.rejected)})</button>
           <button class="btn btn-sm ${fbReceiptsFilter === 'not_receipt' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="not_receipt">🖼 Без бележка (${num(counts.not_receipt)})</button>
           <button class="btn btn-sm ${fbReceiptsFilter === 'all' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="all">Всички</button>
+          <button class="btn btn-sm ${fbReceiptsPolarity === 'red' ? 'btn-primary' : 'btn-ghost'}" data-fb-pol="red">🔴 Червени флагове</button>
+          <button class="btn btn-sm ${fbReceiptsPolarity === 'green' ? 'btn-primary' : 'btn-ghost'}" data-fb-pol="green">🟢 Топ находки</button>
         </div>
       </div>
 
@@ -3631,7 +3634,10 @@ async function renderFbReceipts(box) {
       <div style="margin-top:12px">
         ${
           items.length
-            ? items.map((it) => renderFbQueueItemCard(it)).join('')
+            ? items
+                .filter((it) => !fbReceiptsPolarity || it.polarity === fbReceiptsPolarity)
+                .map((it) => renderFbQueueItemCard(it))
+                .join('')
             : `<div class="empty" style="padding:28px 12px">Няма записи в този списък. Пусни сваляне от групата горе или подай пост със снимка на бележка.</div>`
         }
       </div>
@@ -3643,6 +3649,15 @@ async function renderFbReceipts(box) {
     btn.onclick = () => {
       fbReceiptsFilter = btn.dataset.fbTab;
       fbReceiptsSelected = new Set();
+      render('fb_receipts', true);
+    };
+  });
+
+  document.querySelectorAll('[data-fb-pol]').forEach((btn) => {
+    btn.onclick = () => {
+      const val = btn.dataset.fbPol || '';
+      // Включва/изключва филтъра по полярност (червени флагове / топ находки).
+      fbReceiptsPolarity = fbReceiptsPolarity === val ? '' : val;
       render('fb_receipts', true);
     };
   });

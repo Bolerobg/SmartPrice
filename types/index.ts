@@ -164,6 +164,7 @@ export interface PostItem {
   reactions: PostReactions;
   userReaction?: ReactionKey;
   helpedCount: number; // Брой хора натиснали "Спести ми пари / Спаси ме от капан"
+  signalCount?: number; // Брой независими сигнали за същата оферта (Facebook групи)
   communitySavedBgn: number; // Общо спестени € на общността от този пост
   userMarkedHelped?: boolean;
   isBookmarked?: boolean;

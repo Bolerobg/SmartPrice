@@ -77,6 +77,7 @@ export interface PostRow {
   verified_valid_today_count: number;
   last_verified_at: Date | string | null;
   helped_count: number;
+  signal_count?: number;
   community_saved_bgn: number;
   tags: string[];
   created_at: Date | string;
@@ -237,6 +238,7 @@ export function mapPost(params: {
     },
     userReaction: userReaction ?? undefined,
     helpedCount: post.helped_count,
+    signalCount: post.signal_count ?? 1,
     communitySavedBgn: post.community_saved_bgn,
     userMarkedHelped,
     isBookmarked,
