@@ -3580,6 +3580,19 @@ async function renderFbReceipts(box) {
             <input id="fb-cookie-input" type="password" placeholder="${cfg.hasFbCookie ? 'Вече има записан cookie' : 'c_user=...; xs=...'}" autocomplete="off">
             <span class="hint" style="margin-top:4px">Ако нямаш Apify ключ, можеш да поставиш Cookie от браузъра си или да ползваш 1-клик бутона долу.</span>
           </label>
+          <label class="field" style="flex-direction:row;align-items:center;gap:8px">
+            <input type="checkbox" id="fb-auto-approve" ${cfg.autoApprove ? 'checked' : ''}>
+            <span>Автоматично одобряване на сигнали с висока увереност (без ръчен преглед)</span>
+          </label>
+          <label class="field">
+            <span>Минимална увереност за авто-одобрение (0.1 – 1)</span>
+            <input id="fb-auto-approve-min" type="number" min="0.1" max="1" step="0.05" value="${Number(cfg.autoApproveMin ?? 0.9)}">
+            <span class="hint" style="margin-top:4px">0.9 = пускаме само сигналите, в които AI-ят е почти сигурен. Под прага остават за твоя преглед.</span>
+          </label>
+          <label class="field" style="flex-direction:row;align-items:center;gap:8px">
+            <input type="checkbox" id="fb-comments-enabled" ${cfg.commentsEnabled === false ? '' : 'checked'}>
+            <span>Да чете и коментарите под постовете (повече сигнали, малко по-бавно)</span>
+          </label>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:center">
           <button class="btn btn-sm btn-ok" id="fb-save-settings">💾 Запази настройките</button>
@@ -3637,12 +3650,13 @@ async function renderFbReceipts(box) {
   $('#fb-save-settings')?.addEventListener('click', async () => {
     const apifyToken = $('#fb-apify-token').value.trim();
     const fbCookie = $('#fb-cookie-input').value.trim();
-    const body = {};
+    const body = {
+      autoApprove: Boolean($('#fb-auto-approve')?.checked),
+      autoApproveMin: Number($('#fb-auto-approve-min')?.value || 0.9),
+      commentsEnabled: Boolean($('#fb-comments-enabled')?.checked),
+    };
     if (apifyToken) body.apifyToken = apifyToken;
     if (fbCookie) body.fbCookie = fbCookie;
-    if (!Object.keys(body).length) {
-      return toast('Въведи Apify токен или FB Cookie, за да ги запазя', 'warn');
-    }
     try {
       await api('/fb-receipts/settings', { method: 'POST', body });
       toast('Настройките за Facebook са запазени');
