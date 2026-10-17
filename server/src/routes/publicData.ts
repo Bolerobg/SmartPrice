@@ -104,8 +104,10 @@ export default async function publicDataRoutes(app: FastifyInstance): Promise<vo
       })
       .parse(req.query ?? {});
 
-    const where: string[] = ['price > 0', `observed_date >= (now() - ($3::int || ' days')::interval)::date`];
-    const args: unknown[] = [];
+    // Внимание: номерата на параметрите се строят динамично — иначе при липсваща
+    // дума/град се получава липсващ параметър и заявката гърми с 500.
+    const args: unknown[] = [q.days];
+    const where: string[] = ['price > 0', `observed_date >= (now() - ($1::int || ' days')::interval)::date`];
     if (q.q) {
       args.push('%' + q.q + '%');
       where.push(`product ilike $${args.length}`);
@@ -142,7 +144,7 @@ export default async function publicDataRoutes(app: FastifyInstance): Promise<vo
         group by lower(product)
         order by count(*) desc, max(observed_on) desc
         limit ${q.limit}`,
-      [...args, q.days]
+      args
     );
 
     return {
