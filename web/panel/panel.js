@@ -3779,12 +3779,22 @@ async function loadPlans(force) {
 
   box.querySelectorAll('[data-p-del]').forEach(function (btn) {
     btn.onclick = async function () {
-      if (!confirm('Да махна ли групата от графика?')) return;
-      try {
-        await api('/fb-receipts/plans/' + Number(btn.dataset.pDel), { method: 'DELETE' });
-        toast('Групата е махната от графика.', 'ok');
-        void loadPlans(true);
-      } catch (e) { toast(e.message, 'err'); }
+      const id = Number(btn.dataset.pDel);
+      const plan = (fbPlanData.plans || []).filter(function (x) { return Number(x.id) === id; })[0] || {};
+      confirmAction({
+        title: 'Махни групата от графика',
+        message: 'Групата спира да се обхожда автоматично. Вече публикуваното остава в приложението.',
+        details: ['Група: ' + esc(plan.name || plan.group_url || ('#' + id))],
+        confirmLabel: 'Махни',
+        onConfirm: async function () {
+          closeModal();
+          try {
+            await api('/fb-receipts/plans/' + id, { method: 'DELETE' });
+            toast('Групата е махната от графика.', 'ok');
+            void loadPlans(true);
+          } catch (e) { toast(e.message, 'err'); }
+        },
+      });
     };
   });
 }
