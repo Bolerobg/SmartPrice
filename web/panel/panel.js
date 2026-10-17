@@ -3578,6 +3578,217 @@ async function fbCandAct(id, action) {
   }
 }
 
+/* ===== ⏱️ График на обиколките (по група) ===== */
+let fbPlanData = null;
+
+function planRow(p) {
+  const last = p.last_run_at ? String(p.last_run_at).slice(0, 16).replace('T', ' ') : 'още не е пускана';
+  const dueBadge = p.due ? '<span class="pill pill-green">време е</span>' : '<span class="pill pill-dim">' + esc(p.reason || '—') + '</span>';
+  return '<tr>' +
+    '<td>' +
+      '<label style="display:flex;gap:6px;align-items:center;cursor:pointer">' +
+        '<input type="checkbox" data-p-en="' + p.id + '" ' + (p.enabled ? 'checked' : '') + '>' +
+        '<span style="font-weight:700">' + esc(p.name || '—') + '</span></label>' +
+      '<div class="hint" style="margin:2px 0 0;word-break:break-all">' + esc(p.group_url) + '</div>' +
+      '<div class="hint" style="margin:2px 0 0">' + dueBadge + ' · днес ' + num(p.posts_today) + ' поста · обиколки ' +
+        num(p.runs_today) + '/' + num(p.runs_per_day) + ' · всичко ' + num(p.total_posts) + ' · последно: ' + esc(last) + '</div>' +
+      (p.notes ? '<div class="hint" style="margin:2px 0 0">' + esc(p.notes) + '</div>' : '') +
+    '</td>' +
+    '<td><input type="number" min="1" max="100" style="width:62px" data-p-posts="' + p.id + '" value="' + Number(p.posts_per_run) + '"></td>' +
+    '<td><input type="number" min="1" max="12" style="width:54px" data-p-runs="' + p.id + '" value="' + Number(p.runs_per_day) + '"></td>' +
+    '<td><input style="width:150px" data-p-hours="' + p.id + '" value="' + esc(p.hours) + '" title="Часове, разделени със запетая, напр. 07:30, 19:30"></td>' +
+    '<td><input type="number" min="0" max="2000" style="width:66px" data-p-max="' + p.id + '" value="' + Number(p.max_posts_per_day) + '" title="0 = без таван"></td>' +
+    '<td><input type="number" min="1" max="10" style="width:54px" data-p-prio="' + p.id + '" value="' + Number(p.priority) + '" title="1 = най-нисък, 10 = първо се пуска"></td>' +
+    '<td><input style="width:104px" data-p-city="' + p.id + '" value="' + esc(p.default_city || '') + '" placeholder="София"></td>' +
+    '<td style="white-space:nowrap">' +
+      '<button class="btn btn-sm btn-ok" data-p-save="' + p.id + '" title="Запази">💾</button> ' +
+      '<button class="btn btn-sm" data-p-run="' + p.id + '" title="Пусни сега">▶</button> ' +
+      '<button class="btn btn-sm btn-ghost" data-p-del="' + p.id + '" title="Махни от графика">✕</button>' +
+    '</td>' +
+  '</tr>';
+}
+
+async function loadPlans(force) {
+  const box = document.getElementById('fb-plan-box');
+  if (!box) return;
+  if (force !== false || !fbPlanData) {
+    try {
+      fbPlanData = await api('/fb-receipts/plans');
+    } catch (e) {
+      box.innerHTML = '<div class="hint" style="margin:0">Грешка: ' + esc(e.message) + '</div>';
+      return;
+    }
+  }
+  const d = fbPlanData || {};
+  const cfg = d.settings || {};
+  const status = d.status || {};
+  const plans = Array.isArray(d.plans) ? d.plans : [];
+  const dueCount = plans.filter(function (x) { return x.due; }).length;
+
+  box.innerHTML =
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">' +
+      '<span class="pill ' + (cfg.autoEnabled ? 'pill-green' : 'pill-red') + '">автоматика: ' + (cfg.autoEnabled ? 'включена' : 'спряна') + '</span>' +
+      '<span class="pill pill-dim">днес: ' + num(status.postsToday || 0) + ' поста · ' + num(status.runsToday || 0) + ' обиколки</span>' +
+      '<span class="pill pill-dim">групи: ' + num(plans.length) + ' (включени ' + num(plans.filter(function (x) { return x.enabled; }).length) + ')</span>' +
+      '<span class="pill ' + (dueCount ? 'pill-cyan' : 'pill-dim') + '">чакат ред: ' + num(dueCount) + '</span>' +
+      (status.running ? '<span class="pill pill-green">диспечер: върви</span>' : '<span class="pill pill-dim">диспечер: свободен</span>') +
+      '<button class="btn btn-sm btn-ok" id="fb-plan-dispatch">▶ Пусни чакащите сега</button>' +
+      '<button class="btn btn-sm btn-ghost" id="fb-plan-refresh">🔄 презареди</button>' +
+    '</div>' +
+
+    '<div class="form-grid" style="margin-bottom:10px">' +
+      '<label class="field" style="max-width:120px"><span>Включи автоматиката</span><input type="checkbox" id="fb-plan-auto" ' + (cfg.autoEnabled ? 'checked' : '') + '></label>' +
+      '<label class="field" style="max-width:150px"><span>Таван постове на ден (общо)</span><input type="number" min="0" max="5000" id="fb-plan-cap" value="' + Number(cfg.dailyPostCap || 0) + '"></label>' +
+      '<label class="field" style="max-width:150px"><span>Случайно закъснение (мин)</span><input type="number" min="0" max="60" id="fb-plan-jitter" value="' + Number(cfg.jitterMin || 0) + '"></label>' +
+      '<label class="field" style="max-width:170px"><span>Спри при опашка над</span><input type="number" min="0" max="5000" id="fb-plan-queue" value="' + Number(cfg.maxPendingQueue || 0) + '"></label>' +
+      '<label class="field" style="max-width:120px"><span>Нощна пауза от</span><input id="fb-plan-night-from" value="' + esc(cfg.nightFrom || '23:00') + '"></label>' +
+      '<label class="field" style="max-width:120px"><span>до</span><input id="fb-plan-night-to" value="' + esc(cfg.nightTo || '07:00') + '"></label>' +
+      '<label class="field" style="max-width:150px"><span>Нощна пауза</span><input type="checkbox" id="fb-plan-night" ' + (cfg.nightPause ? 'checked' : '') + '></label>' +
+      '<label class="field" style="max-width:170px"><span>Пълен стоп до (дата)</span><input id="fb-plan-paused" value="' + esc(cfg.pausedUntil || '') + '" placeholder="2026-11-01 или празно"></label>' +
+      '<label class="field" style="max-width:220px"><span>Причина за стопа</span><input id="fb-plan-pause-reason" value="' + esc(cfg.pauseReason || '') + '" placeholder="напр. отпуска"></label>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">' +
+      '<button class="btn btn-sm btn-ok" id="fb-plan-save-settings">💾 Запази настройките</button>' +
+      '<span class="hint" style="margin:0">Диспечерът се пуска сам на всеки 10 минути от сървъра и обикаля само групите, на които им е дошло времето.</span>' +
+    '</div>' +
+
+    '<div class="form-grid" style="margin-bottom:12px;padding:10px 12px;border:1px solid rgba(148,163,184,.25);border-radius:12px">' +
+      '<div class="field full"><span style="font-weight:700">➕ Добави / обнови група в графика</span></div>' +
+      '<label class="field" style="grid-column:span 2"><span>Адрес на групата</span><input id="fb-plan-url" placeholder="https://www.facebook.com/groups/3111975342346393"></label>' +
+      '<label class="field" style="max-width:200px"><span>Име (по избор)</span><input id="fb-plan-name" placeholder="Обяви София"></label>' +
+      '<label class="field" style="max-width:120px"><span>Поста на обиколка</span><input type="number" min="1" max="100" id="fb-plan-posts" value="10"></label>' +
+      '<label class="field" style="max-width:110px"><span>Обиколки на ден</span><input type="number" min="1" max="12" id="fb-plan-runs" value="2"></label>' +
+      '<label class="field" style="max-width:200px"><span>Часове</span><input id="fb-plan-hours" value="07:30, 19:30"></label>' +
+      '<label class="field" style="max-width:110px"><span>Приоритет 1-10</span><input type="number" min="1" max="10" id="fb-plan-prio" value="5"></label>' +
+      '<label class="field" style="max-width:140px"><span>Град по подразбиране</span><input id="fb-plan-city" value="София"></label>' +
+      '<div class="field" style="display:flex;align-items:flex-end"><button class="btn btn-sm btn-ok" id="fb-plan-add">➕ Добави в графика</button></div>' +
+    '</div>' +
+
+    '<div style="overflow-x:auto"><table class="table"><thead><tr>' +
+      '<th>Група</th><th>Поста/обиколка</th><th>Обиколки/ден</th><th>Часове</th><th>Макс/ден</th><th>Приоритет</th><th>Град</th><th></th>' +
+    '</tr></thead><tbody>' +
+    (plans.length ? plans.map(planRow).join('') : '<tr><td colspan="8"><span class="hint">Още няма групи в графика. Добави първата от формата по-горе.</span></td></tr>') +
+    '</tbody></table></div>';
+
+  const $ = function (id) { return document.getElementById(id); };
+
+  if ($('fb-plan-refresh')) $('fb-plan-refresh').onclick = function () { void loadPlans(true); };
+
+  if ($('fb-plan-dispatch')) $('fb-plan-dispatch').onclick = async function () {
+    try {
+      const r = await api('/fb-receipts/plans/dispatch', { method: 'POST', body: JSON.stringify({ force: true }) });
+      if (!r.ok) toast(r.reason || 'Не можа да се пусне.', 'err');
+      else toast('Пуснати ' + r.started.length + ' групи' + (r.skipped.length ? ' · пропуснати ' + r.skipped.length : '') + '.', 'ok');
+      void loadPlans(true);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  if ($('fb-plan-save-settings')) $('fb-plan-save-settings').onclick = async function () {
+    try {
+      await api('/fb-receipts/plans/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          autoEnabled: document.getElementById('fb-plan-auto').checked,
+          dailyPostCap: Number(document.getElementById('fb-plan-cap').value),
+          jitterMin: Number(document.getElementById('fb-plan-jitter').value),
+          maxPendingQueue: Number(document.getElementById('fb-plan-queue').value),
+          nightPause: document.getElementById('fb-plan-night').checked,
+          nightFrom: document.getElementById('fb-plan-night-from').value,
+          nightTo: document.getElementById('fb-plan-night-to').value,
+          pausedUntil: document.getElementById('fb-plan-paused').value.trim() || null,
+          pauseReason: document.getElementById('fb-plan-pause-reason').value.trim() || null,
+        }),
+      });
+      toast('Настройките на графика са запазени.', 'ok');
+      void loadPlans(true);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  if ($('fb-plan-add')) $('fb-plan-add').onclick = async function () {
+    const url = document.getElementById('fb-plan-url').value.trim();
+    if (!url) { toast('Дай адрес на група.', 'err'); return; }
+    try {
+      await api('/fb-receipts/plans', {
+        method: 'POST',
+        body: JSON.stringify({
+          group_url: url,
+          name: document.getElementById('fb-plan-name').value.trim() || undefined,
+          posts_per_run: Number(document.getElementById('fb-plan-posts').value),
+          runs_per_day: Number(document.getElementById('fb-plan-runs').value),
+          hours: document.getElementById('fb-plan-hours').value,
+          priority: Number(document.getElementById('fb-plan-prio').value),
+          default_city: document.getElementById('fb-plan-city').value.trim() || undefined,
+          enabled: true,
+        }),
+      });
+      toast('Групата е в графика.', 'ok');
+      void loadPlans(true);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  box.querySelectorAll('[data-p-save]').forEach(function (btn) {
+    btn.onclick = async function () {
+      const id = Number(btn.dataset.pSave);
+      const plan = (fbPlanData.plans || []).filter(function (x) { return Number(x.id) === id; })[0];
+      if (!plan) return;
+      const val = function (attr) { const el = box.querySelector('[data-' + attr + '="' + id + '"]'); return el ? el.value : ''; };
+      try {
+        await api('/fb-receipts/plans', {
+          method: 'POST',
+          body: JSON.stringify({
+            group_url: plan.group_url,
+            name: plan.name || undefined,
+            posts_per_run: Number(val('p-posts')),
+            runs_per_day: Number(val('p-runs')),
+            hours: val('p-hours'),
+            max_posts_per_day: Number(val('p-max')),
+            priority: Number(val('p-prio')),
+            default_city: val('p-city').trim() || undefined,
+            enabled: plan.enabled,
+          }),
+        });
+        toast('Записано.', 'ok');
+        void loadPlans(true);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+
+  box.querySelectorAll('[data-p-en]').forEach(function (el) {
+    el.onchange = async function () {
+      try {
+        await api('/fb-receipts/plans/' + Number(el.dataset.pEn) + '/enabled', {
+          method: 'POST',
+          body: JSON.stringify({ enabled: el.checked }),
+        });
+        toast(el.checked ? 'Групата е включена.' : 'Групата е изключена.', 'ok');
+        void loadPlans(true);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+
+  box.querySelectorAll('[data-p-run]').forEach(function (btn) {
+    btn.onclick = async function () {
+      btn.disabled = true;
+      try {
+        await api('/fb-receipts/plans/' + Number(btn.dataset.pRun) + '/run', { method: 'POST', body: JSON.stringify({}) });
+        toast('Обиколката стартира — след минута ще видиш новите записи в опашката.', 'ok');
+        setTimeout(function () { void loadPlans(true); }, 15000);
+      } catch (e) { toast(e.message, 'err'); } finally { btn.disabled = false; }
+    };
+  });
+
+  box.querySelectorAll('[data-p-del]').forEach(function (btn) {
+    btn.onclick = async function () {
+      if (!confirm('Да махна ли групата от графика?')) return;
+      try {
+        await api('/fb-receipts/plans/' + Number(btn.dataset.pDel), { method: 'DELETE' });
+        toast('Групата е махната от графика.', 'ok');
+        void loadPlans(true);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
 function stopFbReceiptsPoll() {
   if (fbReceiptsJobPoll) {
     clearInterval(fbReceiptsJobPoll);
@@ -3658,6 +3869,12 @@ async function renderFbReceipts(box) {
               : '— (само „Оферти и цени“ по подразбиране)'
           }</strong></span>
         </div>
+      </div>
+
+      <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(168,85,247,.35);border-radius:12px;background:rgba(168,85,247,.06)">
+        <span><strong>⏱️ График на обиколките</strong> — за всяка група: колко поста да свали, колко пъти на ден,
+        в кои часове, таван на ден, приоритет и град. Сървърът пуска сам само групите, на които им е дошло времето.</span>
+        <div id="fb-plan-box" style="margin-top:10px"></div>
       </div>
 
       <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(56,189,248,.35);border-radius:12px;background:rgba(56,189,248,.07)">
@@ -4096,6 +4313,7 @@ async function renderFbReceipts(box) {
     };
   }
   void loadFbCandidates();
+  void loadPlans(false);
 }
 
 function renderFbJobCard(j) {

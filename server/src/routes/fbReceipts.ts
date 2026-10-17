@@ -14,6 +14,16 @@ import {
   startDiscoveryInBackground,
 } from '../lib/fbGroupDiscovery.js';
 import {
+  deletePlan,
+  dispatchDueGroupsInBackground,
+  getDispatchStatus,
+  listPlanViews,
+  runPlanNow,
+  savePlanSettings,
+  setPlanEnabled,
+  upsertPlan,
+} from '../lib/fbGroupPlan.js';
+import {
   approveFbReceiptItem,
   checkQueueImages,
   fbBudgetAllows,
@@ -618,6 +628,113 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       ip: req.ip,
     });
     return result;
+  });
+
+  /* ===== ⏱️ График на обиколките (по група) ===== */
+
+  /** Списък с плановете (колко поста, колко пъти на ден, в кои часове) + глобални настройки. */
+  app.get('/api/admin/fb-receipts/plans', async (req) => {
+    await requireAdminPanel(req);
+    const [view, status, cost] = await Promise.all([listPlanViews(), getDispatchStatus(), getFbCost()]);
+    return { ...view, status, cost };
+  });
+
+  /** Създаване/редакция на план за група. */
+  app.post('/api/admin/fb-receipts/plans', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        group_url: z.string().trim().min(10).max(600),
+        name: z.string().trim().max(200).optional(),
+        enabled: z.boolean().optional(),
+        posts_per_run: z.coerce.number().int().min(1).max(100).optional(),
+        max_posts_per_day: z.coerce.number().int().min(0).max(2000).optional(),
+        runs_per_day: z.coerce.number().int().min(1).max(12).optional(),
+        hours: z.string().trim().max(200).optional(),
+        min_interval_min: z.coerce.number().int().min(5).max(1440).optional(),
+        priority: z.coerce.number().int().min(1).max(10).optional(),
+        default_city: z.string().trim().max(80).optional(),
+        notes: z.string().trim().max(500).optional(),
+      })
+      .parse(req.body ?? {});
+    const plan = await upsertPlan(input);
+    await audit({ admin, action: 'fb_receipts.plan_save', details: { groupUrl: plan.group_url }, ip: req.ip });
+    return { ok: true, plan };
+  });
+
+  /** Глобални настройки на графика (спиране, таван, нощна пауза, закъснение, пауза до дата). */
+  app.post('/api/admin/fb-receipts/plans/settings', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        autoEnabled: z.boolean().optional(),
+        dailyPostCap: z.coerce.number().int().min(0).max(5000).optional(),
+        nightPause: z.boolean().optional(),
+        nightFrom: z.string().trim().max(5).optional(),
+        nightTo: z.string().trim().max(5).optional(),
+        jitterMin: z.coerce.number().int().min(0).max(60).optional(),
+        maxPendingQueue: z.coerce.number().int().min(0).max(5000).optional(),
+        pausedUntil: z.string().trim().max(20).nullable().optional(),
+        pauseReason: z.string().trim().max(200).nullable().optional(),
+      })
+      .parse(req.body ?? {});
+    const settings = await savePlanSettings(input);
+    await audit({ admin, action: 'fb_receipts.plan_settings', details: { autoEnabled: settings.autoEnabled }, ip: req.ip });
+    return { ok: true, settings };
+  });
+
+  /** Пускане на диспечера (ползва се от cron на всеки 10 минути). */
+  app.post('/api/admin/fb-receipts/plans/dispatch', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        force: z.boolean().optional(),
+        maxGroups: z.coerce.number().int().min(1).max(20).optional(),
+      })
+      .parse(req.body ?? {});
+    const res = await dispatchDueGroupsInBackground({ adminId: admin.id, force: input.force, maxGroups: input.maxGroups });
+    await audit({
+      admin,
+      action: 'fb_receipts.plan_dispatch',
+      details: { started: res.started.length, reason: res.reason ?? null },
+      ip: req.ip,
+    });
+    return res;
+  });
+
+  /** Състояние на диспечера (върви ли, какво стана последния път, днешни броячи). */
+  app.get('/api/admin/fb-receipts/plans/status', async (req) => {
+    await requireAdminPanel(req);
+    return getDispatchStatus();
+  });
+
+  /** Включване/изключване на група. */
+  app.post('/api/admin/fb-receipts/plans/:id/enabled', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
+    const input = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+    const res = await setPlanEnabled(params.id, input.enabled);
+    await audit({ admin, action: 'fb_receipts.plan_toggle', details: { id: params.id, enabled: input.enabled }, ip: req.ip });
+    return res;
+  });
+
+  /** Пускане на една група веднага. */
+  app.post('/api/admin/fb-receipts/plans/:id/run', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
+    const res = await runPlanNow(params.id, admin.id);
+    if (!res.ok) throw badRequest(res.reason ?? 'Не успя да се пусне.');
+    await audit({ admin, action: 'fb_receipts.plan_run', details: { id: params.id }, ip: req.ip });
+    return res;
+  });
+
+  /** Махане на групата от графика. */
+  app.delete('/api/admin/fb-receipts/plans/:id', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
+    const res = await deletePlan(params.id);
+    await audit({ admin, action: 'fb_receipts.plan_delete', details: { id: params.id }, ip: req.ip });
+    return res;
   });
 
   /** Пуска обиколка на ВСИЧКИ запазени групи (една след друга, с пауза между тях). */

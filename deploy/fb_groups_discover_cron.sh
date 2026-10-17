@@ -12,7 +12,7 @@ set -u
 [ -f /root/.fb_admin_env ] && . /root/.fb_admin_env
 
 BASE="https://smartprice.bg"
-MAX="${DISCOVER_MAX_ITEMS:-60}"
+MAX="${DISCOVER_MAX_ITEMS:-30}"
 
 TOKEN=$(curl -s -X POST "$BASE/api/admin/login" -H 'Content-Type: application/json' \
   -d "{\"email\":\"kolyo.hristov@gmail.com\",\"password\":\"$FB_ADMIN_PASS\"}" \
