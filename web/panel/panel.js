@@ -152,6 +152,7 @@ const PAGES = {
   categories: ['Категории', 'Етикети и думи за търсене'],
   assistant: ['Ценко (AI съветник)', 'Какво знае Ценко и какво питат хората'],
   scraper: ['Скрапер на магазини', 'Даваш линк и брой продукти — системата вади снимки, цени и описания'],
+  fb_receipts: ['Фейсбук бележки', 'Сваляне на касови бележки и постове от публични Facebook групи с AI разчитане и одобрение'],
   referrals: ['Покани', 'Кой кого е поканил и кой е получил точки'],
   favorites: ['Любими', 'Кои оферти хората пазят най-често'],
   security: ['Сигурност', 'Ненормална активност и аларми по имейл'],
@@ -242,6 +243,7 @@ async function render(page, force = false) {
     if (page === 'categories') return await renderCategories(box, force);
     if (page === 'assistant') return await renderAssistant(box, force);
     if (page === 'scraper') return await renderScraper(box, force);
+    if (page === 'fb_receipts') return await renderFbReceipts(box, force);
     if (page === 'referrals') return await renderReferrals(box, force);
     if (page === 'favorites') return await renderFavorites(box, force);
     if (page === 'security') return await renderSecurity(box, force);
@@ -3496,6 +3498,659 @@ python import_receipts.py --file receipts.json --commit  # внася наист
         <code>SMART_PRICE_ADMIN_PASSWORD</code>. Никъде не се записва във файл.
       </div>
     </div>`;
+}
+
+/* ------------------------------------------- Фейсбук касови бележки */
+
+let fbReceiptsFilter = 'pending';
+let fbReceiptsSelected = new Set();
+let fbReceiptsJobPoll = null;
+let fbReceiptsLastGroupUrl = 'https://www.facebook.com/groups/3111975342346393';
+let fbReceiptsLastCount = 10;
+let fbReceiptsLastCity = 'София';
+
+function stopFbReceiptsPoll() {
+  if (fbReceiptsJobPoll) {
+    clearInterval(fbReceiptsJobPoll);
+    fbReceiptsJobPoll = null;
+  }
+}
+
+async function renderFbReceipts(box) {
+  stopFbReceiptsPoll();
+  const data = await api(`/fb-receipts/info?status=${encodeURIComponent(fbReceiptsFilter)}&limit=60`);
+  const cfg = data.config || {};
+  const counts = data.counts || { pending: 0, approved: 0, rejected: 0, not_receipt: 0 };
+  const jobs = data.jobs || [];
+  const items = data.items || [];
+  const runningJob = jobs.find((j) => j.status === 'running');
+
+  // Генерираме 1-клик Bookmarklet / браузърен колектор, който изпраща видимите постове от отворена ФБ група директно към панела
+  const apiOrigin = window.location.origin;
+  const collectorScript = `(async()=>{try{const articles=[...document.querySelectorAll('[role="article"]')];const posts=[];const seen=new Set();for(const a of articles){const imgs=[...a.querySelectorAll('img')].map(i=>i.src).filter(s=>s&&/scontent|fbcdn/i.test(s)&&!/emoji|p50x50|s100x100|rsrc\\.php/i.test(s));if(!imgs.length)continue;const key=imgs[0];if(seen.has(key))continue;seen.add(key);const textEl=a.querySelector('[data-ad-preview="message"],[dir="auto"]');const text=(a.innerText||'').split('\\n').filter(l=>l.trim().length>3&&!/^(Like|Comment|Share|Харесва ми|Коментар|Споделяне)$/i.test(l.trim())).slice(0,12).join('\\n');const linkEl=[...a.querySelectorAll('a[href*="/posts/"],a[href*="story_fbid"],a[href*="/photo"]')][0];posts.push({postUrl:linkEl?linkEl.href:location.href,text:textEl?textEl.innerText:text,imageUrls:imgs.slice(0,3)});if(posts.length>=25)break;}if(!posts.length){alert('Не намерих постове със снимки на екрана. Скролни малко надолу в групата и опитай пак.');return;}const r=await fetch('${apiOrigin}/api/admin/fb-receipts/ingest',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${state.token}'},body:JSON.stringify({groupUrl:location.href,posts})});const d=await r.json();if(!r.ok)throw new Error(d?.error?.message||'Грешка');alert('SmartPrice: Разчетени за одобрение: '+d.queued+' бележки (пропуснати: '+d.skipped+')');}catch(e){alert('Грешка: '+e.message);}})();`;
+  const bookmarkletHref = `javascript:${encodeURIComponent(collectorScript)}`;
+
+  box.innerHTML = `
+    <div class="grid grid-4" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Чакат одобрение</div><div class="kpi-value gold">${num(counts.pending)}</div><div class="kpi-sub">разчетени бележки</div></div>
+      <div class="card kpi"><div class="kpi-label">Одобрени и публикувани</div><div class="kpi-value green">${num(counts.approved)}</div><div class="kpi-sub">в приложението</div></div>
+      <div class="card kpi"><div class="kpi-label">Отхвърлени</div><div class="kpi-value">${num(counts.rejected)}</div><div class="kpi-sub">${num(counts.not_receipt)} без касов бон</div></div>
+      <div class="card kpi"><div class="kpi-label">AI Vision OCR</div><div class="kpi-value cyan">${cfg.ocrAvailable ? 'активен' : 'липсва ключ'}</div><div class="kpi-sub">${esc(cfg.ocrModel || '—')}</div></div>
+    </div>
+
+    <div class="card" style="border-color:rgba(6,182,212,.45);margin-bottom:14px">
+      <div class="card-title">📘 Сваляне на касови бележки от публична Facebook група</div>
+      <div class="hint" style="margin:6px 0 12px">
+        Дай адрес на публична Facebook група (напр. <code>https://www.facebook.com/groups/3111975342346393</code>).
+        Системата сваля постовете със снимки и текста към тях, разпознава с AI Vision какво има на касовата бележка
+        (търговец, ЕИК, артикули, сума в €) и ги слага в <strong>„Чакащи одобрение“</strong> по-долу. Нищо не се публикува без твоето одобрение.
+      </div>
+
+      <div class="form-grid">
+        <label class="field full"><span>Адрес на публична Facebook група (или пост)</span>
+          <input id="fb-group-url" value="${esc(fbReceiptsLastGroupUrl)}" placeholder="https://www.facebook.com/groups/3111975342346393"></label>
+        <label class="field" style="max-width:200px"><span>Колко поста да провери</span>
+          <input id="fb-count" type="number" min="1" max="100" value="${Number(fbReceiptsLastCount || 10)}"></label>
+        <label class="field" style="max-width:220px"><span>Град по подразбиране</span>
+          <input id="fb-city" value="${esc(fbReceiptsLastCity)}" placeholder="София"></label>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center">
+        <button class="btn btn-primary" id="fb-run-btn">▶ Свали и разчети бележките</button>
+        <button class="btn" id="fb-manual-btn">➕ Подай пост / снимка на бележка</button>
+        <span class="hint" style="margin:0">
+          Връзка с Facebook:
+          ${cfg.hasApifyToken ? `<span class="pill pill-green">Apify активен (${esc(cfg.apifyTokenMasked)})</span>` : '<span class="pill pill-dim">Apify не е зададен</span>'}
+          ${cfg.hasFbCookie ? '<span class="pill pill-cyan">FB Cookie активен</span>' : ''}
+        </span>
+      </div>
+
+      <details style="margin-top:12px"${!cfg.hasApifyToken && !cfg.hasFbCookie ? ' open' : ''}>
+        <summary style="cursor:pointer;color:var(--muted);font-size:13.5px;padding:6px 0">
+          ⚙️ Настройки за Facebook (Apify API ключ / FB Cookie / 1-клик бутон за браузър)
+        </summary>
+        <div class="form-grid" style="margin-top:10px">
+          <label class="field">
+            <span>Apify API Token (препоръчано за 100% автоматично сваляне от сървъра)</span>
+            <input id="fb-apify-token" type="password" placeholder="${cfg.hasApifyToken ? 'Вече има записан токен (остави празно или въведи нов)' : 'apify_api_...'}" autocomplete="off">
+            <span class="hint" style="margin-top:4px">Безплатна регистрация в <a href="https://console.apify.com/ settings/integrations" target="_blank" rel="noopener">console.apify.com ↗</a> (ползва актьор <code>apify/facebook-groups-scraper</code>).</span>
+          </label>
+          <label class="field">
+            <span>Facebook Cookie (по избор — за директно четене без Apify)</span>
+            <input id="fb-cookie-input" type="password" placeholder="${cfg.hasFbCookie ? 'Вече има записан cookie' : 'c_user=...; xs=...'}" autocomplete="off">
+            <span class="hint" style="margin-top:4px">Ако нямаш Apify ключ, можеш да поставиш Cookie от браузъра си или да ползваш 1-клик бутона долу.</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:center">
+          <button class="btn btn-sm btn-ok" id="fb-save-settings">💾 Запази настройките</button>
+          <a class="btn btn-sm" href="${bookmarkletHref}" onclick="event.preventDefault();toast('Плъзни този бутон в лентата с отметки (Bookmarks Bar) на браузъра си и го натисни, докато си във Facebook групата!','warn')" style="cursor:grab;border-color:rgba(6,182,212,.5)">📌 Прати от FB група → SmartPrice (плъзни в Отметки)</a>
+          <button class="btn btn-sm btn-ghost" id="fb-copy-collector">📋 Копирай скрипт за браузър (F12)</button>
+        </div>
+      </details>
+    </div>
+
+    <div id="fb-job-status">${runningJob ? renderFbJobCard(runningJob) : jobs[0] ? renderFbJobCard(jobs[0]) : ''}</div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>🧾 Опашка за преглед и одобрение</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm ${fbReceiptsFilter === 'pending' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="pending">⏳ Чакащи (${num(counts.pending)})</button>
+          <button class="btn btn-sm ${fbReceiptsFilter === 'approved' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="approved">✅ Одобрени (${num(counts.approved)})</button>
+          <button class="btn btn-sm ${fbReceiptsFilter === 'rejected' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="rejected">✕ Отхвърлени (${num(counts.rejected)})</button>
+          <button class="btn btn-sm ${fbReceiptsFilter === 'not_receipt' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="not_receipt">🖼 Без бележка (${num(counts.not_receipt)})</button>
+          <button class="btn btn-sm ${fbReceiptsFilter === 'all' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="all">Всички</button>
+        </div>
+      </div>
+
+      ${
+        fbReceiptsFilter === 'pending' && items.length > 0
+          ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;align-items:center">
+               <button class="btn btn-ok" id="fb-approve-sel">✅ Одобри избраните (<span id="fb-sel-cnt">${fbReceiptsSelected.size}</span>)</button>
+               <button class="btn btn-primary" id="fb-approve-all">✅ Одобри всички чакащи (${num(counts.pending)})</button>
+               <button class="btn btn-danger" id="fb-reject-sel">✕ Отхвърли избраните</button>
+               <button class="btn btn-ghost" id="fb-sel-all">Избери всички</button>
+               <button class="btn btn-ghost" id="fb-sel-none">Изчисти</button>
+             </div>`
+          : ''
+      }
+
+      <div style="margin-top:12px">
+        ${
+          items.length
+            ? items.map((it) => renderFbQueueItemCard(it)).join('')
+            : `<div class="empty" style="padding:28px 12px">Няма записи в този списък. Пусни сваляне от групата горе или подай пост със снимка на бележка.</div>`
+        }
+      </div>
+    </div>`;
+
+  /* -------------------------------------------------- събития */
+
+  document.querySelectorAll('[data-fb-tab]').forEach((btn) => {
+    btn.onclick = () => {
+      fbReceiptsFilter = btn.dataset.fbTab;
+      fbReceiptsSelected = new Set();
+      render('fb_receipts', true);
+    };
+  });
+
+  $('#fb-save-settings')?.addEventListener('click', async () => {
+    const apifyToken = $('#fb-apify-token').value.trim();
+    const fbCookie = $('#fb-cookie-input').value.trim();
+    const body = {};
+    if (apifyToken) body.apifyToken = apifyToken;
+    if (fbCookie) body.fbCookie = fbCookie;
+    if (!Object.keys(body).length) {
+      return toast('Въведи Apify токен или FB Cookie, за да ги запазя', 'warn');
+    }
+    try {
+      await api('/fb-receipts/settings', { method: 'POST', body });
+      toast('Настройките за Facebook са запазени');
+      render('fb_receipts', true);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  });
+
+  $('#fb-copy-collector')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(collectorScript);
+      toast('Скриптът е копиран! Отвори FB групата, натисни F12 → Console, постави го и натисни Enter.');
+    } catch {
+      prompt('Копирай този ред и го пусни в Console (F12) върху отворената Facebook група:', collectorScript);
+    }
+  });
+
+  $('#fb-run-btn').onclick = async () => {
+    const groupUrl = $('#fb-group-url').value.trim();
+    const count = Number($('#fb-count').value) || 10;
+    const defaultCity = $('#fb-city').value.trim() || 'София';
+    if (!groupUrl) return toast('Въведи адрес на Facebook група', 'warn');
+
+    fbReceiptsLastGroupUrl = groupUrl;
+    fbReceiptsLastCount = count;
+    fbReceiptsLastCity = defaultCity;
+
+    const btn = $('#fb-run-btn');
+    btn.disabled = true;
+    btn.textContent = 'Свалям и разчитам…';
+    try {
+      await api('/fb-receipts/jobs', {
+        method: 'POST',
+        body: { groupUrl, count, defaultCity },
+      });
+      toast('Задачата за сваляне на бележки стартира');
+      await render('fb_receipts', true);
+    } catch (e) {
+      toast(e.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '▶ Свали и разчети бележките';
+    }
+  };
+
+  $('#fb-manual-btn').onclick = () => openManualFbReceiptModal();
+
+  // Чекбоксове за масов избор
+  document.querySelectorAll('[data-fb-check]').forEach((cb) => {
+    cb.onchange = () => {
+      const id = String(cb.dataset.fbCheck);
+      if (cb.checked) fbReceiptsSelected.add(id);
+      else fbReceiptsSelected.delete(id);
+      const cnt = $('#fb-sel-cnt');
+      if (cnt) cnt.textContent = String(fbReceiptsSelected.size);
+    };
+  });
+
+  $('#fb-sel-all')?.addEventListener('click', () => {
+    document.querySelectorAll('[data-fb-check]').forEach((cb) => {
+      cb.checked = true;
+      fbReceiptsSelected.add(String(cb.dataset.fbCheck));
+    });
+    const cnt = $('#fb-sel-cnt');
+    if (cnt) cnt.textContent = String(fbReceiptsSelected.size);
+  });
+
+  $('#fb-sel-none')?.addEventListener('click', () => {
+    fbReceiptsSelected = new Set();
+    document.querySelectorAll('[data-fb-check]').forEach((cb) => {
+      cb.checked = false;
+    });
+    const cnt = $('#fb-sel-cnt');
+    if (cnt) cnt.textContent = '0';
+  });
+
+  $('#fb-approve-sel')?.addEventListener('click', async () => {
+    if (!fbReceiptsSelected.size) return toast('Избери поне една бележка с чекбокса', 'warn');
+    try {
+      const res = await api('/fb-receipts/queue/approve-bulk', {
+        method: 'POST',
+        body: { ids: [...fbReceiptsSelected].map(Number) },
+      });
+      toast(`Одобрени и публикувани: ${res.approved}`);
+      fbReceiptsSelected = new Set();
+      render('fb_receipts', true);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  });
+
+  $('#fb-approve-all')?.addEventListener('click', () => {
+    confirmAction({
+      title: 'Одобряване на всички чакащи бележки',
+      message: `Сигурен ли си, че искаш да публикуваш всички ${num(counts.pending)} чакащи бележки?`,
+      details: [
+        'Всяка бележка ще бъде публикувана под профила „SmartPrice Редакция“ с разчетените артикули и текст.',
+      ],
+      confirmLabel: 'Публикувай всички',
+      danger: false,
+      onConfirm: async () => {
+        const res = await api('/fb-receipts/queue/approve-bulk', {
+          method: 'POST',
+          body: { allPending: true },
+        });
+        toast(`Публикувани: ${res.approved}`);
+        closeModal();
+        render('fb_receipts', true);
+      },
+    });
+  });
+
+  $('#fb-reject-sel')?.addEventListener('click', async () => {
+    if (!fbReceiptsSelected.size) return toast('Избери какво да отхвърлиш', 'warn');
+    try {
+      await api('/fb-receipts/queue/reject', {
+        method: 'POST',
+        body: { ids: [...fbReceiptsSelected].map(Number) },
+      });
+      toast('Избраните записи са отхвърлени');
+      fbReceiptsSelected = new Set();
+      render('fb_receipts', true);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  });
+
+  // Единични бутони: Одобри, Редактирай и публикувай, Отхвърли
+  document.querySelectorAll('[data-fb-approve]').forEach((b) => {
+    b.onclick = async () => {
+      const id = b.dataset.fbApprove;
+      b.disabled = true;
+      b.textContent = 'Публикувам…';
+      try {
+        await api(`/fb-receipts/queue/${encodeURIComponent(id)}/approve`, { method: 'POST', body: {} });
+        toast('Бележката е одобрена и публикувана в SmartPrice!');
+        render('fb_receipts', true);
+      } catch (e) {
+        toast(e.message, 'error');
+        b.disabled = false;
+        b.textContent = '✅ Одобри и публикувай';
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-fb-edit]').forEach((b) => {
+    b.onclick = () => {
+      const item = items.find((x) => String(x.id) === String(b.dataset.fbEdit));
+      if (item) openEditFbReceiptModal(item);
+    };
+  });
+
+  document.querySelectorAll('[data-fb-reject]').forEach((b) => {
+    b.onclick = async () => {
+      const id = Number(b.dataset.fbReject);
+      try {
+        await api('/fb-receipts/queue/reject', { method: 'POST', body: { ids: [id] } });
+        toast('Отхвърлено');
+        render('fb_receipts', true);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  });
+
+  // Ако има вървяща задача — следим я на всеки 2.5 сек
+  if (runningJob) {
+    fbReceiptsJobPoll = setInterval(async () => {
+      if (state.page !== 'fb_receipts') return stopFbReceiptsPoll();
+      try {
+        const res = await api(`/fb-receipts/jobs/${runningJob.id}`);
+        const j = res.job;
+        const jobBox = $('#fb-job-status');
+        if (jobBox && j) jobBox.innerHTML = renderFbJobCard(j);
+        if (!j || j.status !== 'running') {
+          stopFbReceiptsPoll();
+          render('fb_receipts', true);
+        }
+      } catch {
+        stopFbReceiptsPoll();
+      }
+    }, 2500);
+  }
+}
+
+function renderFbJobCard(j) {
+  const running = j.status === 'running';
+  return `
+    <div class="card" style="border-color:${running ? 'rgba(6,182,212,.55)' : j.status === 'failed' ? 'rgba(244,63,94,.45)' : 'rgba(34,197,94,.45)'}">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>
+          ${running ? '<span class="spinner"></span> Върви сваляне' : j.status === 'done' ? '✅ Последна задача' : '⚠️ Задачата спря'}
+          · <span class="mono" style="font-size:13px">${esc(j.group_url)}</span>
+          ${j.strategy ? `<span class="pill pill-dim">режим: ${esc(j.strategy)}</span>` : ''}
+        </span>
+        <span class="hint" style="margin:0">${ago(j.created_at)}</span>
+      </div>
+      <div class="hint" style="margin-top:6px">
+        Открити постове със снимки: <strong>${num(j.discovered)}</strong> ·
+        Разчетени касови бележки: <strong>${num(j.receipts_found)}</strong> ·
+        Пропуснати (без бон / дубликати): <strong>${num(j.skipped)}</strong> ·
+        Грешки: <strong>${num(j.failed)}</strong>
+        ${j.error ? `<br><span style="color:#FB7185">${esc(j.error)}</span>` : ''}
+      </div>
+      ${
+        Array.isArray(j.log) && j.log.length
+          ? `<details style="margin-top:8px"${running ? ' open' : ''}>
+               <summary style="cursor:pointer;color:var(--muted);font-size:12.5px">Дневник на задачата (${j.log.length})</summary>
+               <pre style="max-height:170px;overflow:auto;background:rgba(148,163,184,.08);border-radius:10px;padding:10px;font-size:12px;line-height:1.55;margin:6px 0 0">${esc(j.log.join('\n'))}</pre>
+             </details>`
+          : ''
+      }
+    </div>`;
+}
+
+function renderFbQueueItemCard(it) {
+  const receiptItems = Array.isArray(it.items) ? it.items : [];
+  const isGreen = it.polarity === 'green';
+  const imgUrl = it.local_image_url || it.original_image_url;
+
+  return `
+    <div class="card" style="background:var(--card-2,rgba(148,163,184,.05));margin-bottom:12px;border-color:${
+      it.status === 'approved'
+        ? 'rgba(34,197,94,.4)'
+        : it.status === 'pending'
+          ? 'rgba(251,191,36,.35)'
+          : 'rgba(148,163,184,.18)'
+    }">
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          ${
+            it.status === 'pending'
+              ? `<input type="checkbox" style="width:18px;height:18px;margin-top:4px" data-fb-check="${esc(it.id)}"${
+                  fbReceiptsSelected.has(String(it.id)) ? ' checked' : ''
+                }>`
+              : ''
+          }
+          <a href="${esc(imgUrl)}" target="_blank" rel="noopener" title="Отвори снимката на касовата бележка в пълен размер">
+            <img src="${esc(imgUrl)}" loading="lazy" style="width:130px;height:170px;object-fit:cover;border-radius:10px;border:1px solid rgba(148,163,184,.25)">
+          </a>
+        </div>
+
+        <div style="flex:1;min-width:280px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+            <div>
+              <span class="pill ${isGreen ? 'pill-green' : 'pill-red'}">${isGreen ? '🟢 Находка / Оферта' : '🔴 Червен флаг / Сигнал'}</span>
+              <span class="pill pill-dim">${esc(SCRAPE_CAT_LABELS[it.category] || it.category)}</span>
+              <span class="pill pill-cyan">📍 ${esc(it.city || 'София')} · ${esc(it.place_name || it.merchant_name)}</span>
+              ${
+                it.status === 'approved'
+                  ? `<span class="pill pill-green">Публикувано ${it.post_code ? `(#${esc(it.post_code)})` : ''}</span>`
+                  : it.status === 'rejected'
+                    ? '<span class="pill pill-red">Отхвърлено</span>'
+                    : it.status === 'not_receipt'
+                      ? `<span class="pill pill-dim">Не е бележка: ${esc(it.skip_reason || '')}</span>`
+                      : '<span class="pill pill-gold">Чака одобрение</span>'
+              }
+            </div>
+            <div style="font-size:18px;font-weight:800;color:#38BDF8">
+              ${money(it.total_amount)}
+              ${
+                it.original_currency === 'BGN' && it.original_amount
+                  ? `<span class="hint" style="font-size:12px;font-weight:500">(${Number(it.original_amount).toFixed(2)} лв. на бона)</span>`
+                  : ''
+              }
+            </div>
+          </div>
+
+          <div style="font-weight:800;font-size:15.5px;margin-top:8px">${esc(it.title)}</div>
+          <div class="hint" style="white-space:pre-wrap;margin:4px 0 8px;color:#E2E8F0">${esc(it.description)}</div>
+
+          ${
+            it.fb_post_text
+              ? `<div style="background:rgba(15,23,42,.55);border-left:3px solid #38BDF8;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:12.5px">
+                   <div class="dim" style="margin-bottom:2px">💬 Оригинален текст от Facebook поста ${it.fb_author_name ? `(${esc(it.fb_author_name)})` : ''}:</div>
+                   <div style="white-space:pre-wrap">${esc(it.fb_post_text.slice(0, 600))}${it.fb_post_text.length > 600 ? '…' : ''}</div>
+                 </div>`
+              : ''
+          }
+
+          <div class="hint" style="margin-bottom:8px">
+            🧾 <strong>Търговец от бона:</strong> ${esc(it.merchant_name || '—')}
+            ${it.merchant_tax_id ? ` · <strong>ЕИК:</strong> ${esc(it.merchant_tax_id)}` : ''}
+            ${it.receipt_date ? ` · <strong>Дата:</strong> ${esc(it.receipt_date)} ${esc(it.receipt_time || '')}` : ''}
+            · <strong>Сигурност на OCR:</strong> ${Math.round((Number(it.confidence) || 0) * 100)}%
+            ${it.fb_post_url ? ` · <a href="${esc(it.fb_post_url)}" target="_blank" rel="noopener">Отвори FB поста ↗</a>` : ''}
+          </div>
+
+          ${
+            receiptItems.length
+              ? `<div style="background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.16);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+                   <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">Разпознати артикули от касовата бележка (${receiptItems.length}):</div>
+                   <table style="font-size:12.5px">
+                     <thead><tr><th>Артикул</th><th>К-во</th><th>Ед. цена</th><th>Общо</th><th>Бележка</th></tr></thead>
+                     <tbody>
+                       ${receiptItems
+                         .map(
+                           (line) => `<tr>
+                         <td><strong>${esc(line.name)}</strong></td>
+                         <td>${Number(line.quantity || 1)}</td>
+                         <td>${money(line.unitPrice)}</td>
+                         <td><strong>${money(line.totalPrice)}</strong></td>
+                         <td class="dim">${esc(line.highlightReason || '—')}</td>
+                       </tr>`
+                         )
+                         .join('')}
+                     </tbody>
+                   </table>
+                 </div>`
+              : '<div class="hint" style="margin-bottom:8px">Няма разбити отделни редове — разчетена е общата сума.</div>'
+          }
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${
+              it.status !== 'approved'
+                ? `<button class="btn btn-sm btn-ok" data-fb-approve="${esc(it.id)}">✅ Одобри и публикувай</button>
+                   <button class="btn btn-sm btn-primary" data-fb-edit="${esc(it.id)}">✏️ Редактирай и публикувай</button>`
+                : ''
+            }
+            ${
+              it.status === 'pending' || it.status === 'not_receipt'
+                ? `<button class="btn btn-sm btn-danger" data-fb-reject="${esc(it.id)}">✕ Отхвърли</button>`
+                : ''
+            }
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/** Прозорец за редакция на разчетената бележка преди нейното публикуване. */
+function openEditFbReceiptModal(it) {
+  const receiptItems = Array.isArray(it.items) ? it.items : [];
+  const itemsText = receiptItems
+    .map((l) => `${l.name} | ${l.quantity ?? 1} | ${Number(l.unitPrice ?? 0).toFixed(2)} | ${Number(l.totalPrice ?? 0).toFixed(2)}${l.highlightReason ? ` | ${l.highlightReason}` : ''}`)
+    .join('\n');
+
+  const html = `
+    <div class="form-grid">
+      <label class="field full"><span>Заглавие на публикацията</span>
+        <input id="fbe-title" value="${esc(it.title || '')}"></label>
+      <label class="field full"><span>Описание (текст от поста + обобщение)</span>
+        <textarea id="fbe-desc" rows="4">${esc(it.description || '')}</textarea></label>
+      <label class="field"><span>Тип (Полярност)</span>
+        <select id="fbe-pol">
+          <option value="red"${it.polarity === 'red' ? ' selected' : ''}>🔴 Червен флаг / Висока цена</option>
+          <option value="green"${it.polarity === 'green' ? ' selected' : ''}>🟢 Добра оферта / Находка</option>
+        </select></label>
+      <label class="field"><span>Категория</span>
+        <select id="fbe-cat">
+          ${Object.entries(SCRAPE_CAT_LABELS)
+            .map(([k, v]) => `<option value="${k}"${it.category === k ? ' selected' : ''}>${esc(v)}</option>`)
+            .join('')}
+        </select></label>
+      <label class="field"><span>Място / Заведение / Магазин</span>
+        <input id="fbe-place" value="${esc(it.place_name || '')}"></label>
+      <label class="field"><span>Град</span>
+        <input id="fbe-city" value="${esc(it.city || 'София')}"></label>
+      <label class="field"><span>Обща сума (€)</span>
+        <input id="fbe-total" type="number" step="0.01" min="0.01" value="${Number(it.total_amount || 0).toFixed(2)}"></label>
+      <label class="field"><span>Търговец по касов бон</span>
+        <input id="fbe-merchant" value="${esc(it.merchant_name || '')}"></label>
+      <label class="field"><span>Дата на бона (DD.MM.YYYY)</span>
+        <input id="fbe-date" value="${esc(it.receipt_date || '')}"></label>
+      <label class="field"><span>Час (HH:MM)</span>
+        <input id="fbe-time" value="${esc(it.receipt_time || '')}"></label>
+      <label class="field full">
+        <span>Артикули от касовата бележка (по един на ред: <code>Име | К-во | Ед. цена (€) | Общо (€) | Бележка</code>)</span>
+        <textarea id="fbe-items" rows="6" class="mono" style="font-size:12.5px">${esc(itemsText)}</textarea>
+      </label>
+    </div>`;
+
+  openModal(
+    'Редакция и публикуване на касова бележка',
+    html,
+    [
+      {
+        id: 'fbe-save',
+        label: '✅ Одобри и публикувай',
+        cls: 'btn-ok',
+        onClick: async () => {
+          const parsedLines = ($('#fbe-items').value || '')
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => {
+              const parts = line.split('|').map((s) => s.trim());
+              const name = parts[0] || '';
+              const quantity = Number(parts[1]) || 1;
+              const unitPrice = Number(parts[2]) || 0;
+              const totalPrice = Number(parts[3]) || Number((quantity * unitPrice).toFixed(2));
+              const highlightReason = parts[4] || null;
+              return { name, quantity, unitPrice, totalPrice, highlightReason };
+            })
+            .filter((l) => l.name);
+
+          const body = {
+            title: $('#fbe-title').value.trim(),
+            description: $('#fbe-desc').value.trim(),
+            polarity: $('#fbe-pol').value,
+            category: $('#fbe-cat').value,
+            placeName: $('#fbe-place').value.trim(),
+            city: $('#fbe-city').value.trim(),
+            totalAmount: Number($('#fbe-total').value),
+            merchantName: $('#fbe-merchant').value.trim(),
+            receiptDate: $('#fbe-date').value.trim() || null,
+            receiptTime: $('#fbe-time').value.trim() || null,
+            items: parsedLines,
+          };
+
+          try {
+            await api(`/fb-receipts/queue/${encodeURIComponent(it.id)}/approve`, {
+              method: 'POST',
+              body,
+            });
+            toast('Публикувано успешно!');
+            closeModal();
+            render('fb_receipts', true);
+          } catch (e) {
+            toast(e.message, 'error');
+          }
+        },
+      },
+      { id: 'fbe-cancel', label: 'Отказ', cls: 'btn-ghost', onClick: closeModal },
+    ],
+    true
+  );
+}
+
+/** Ръчно подаване на пост от Facebook (снимка на касова бележка + текст на поста) за AI разчитане. */
+function openManualFbReceiptModal() {
+  const html = `
+    <div class="hint" style="margin-bottom:10px">
+      Качи снимка на касова бележка от компютъра си (или постави линк към снимката от Facebook) и копирай текста на поста.
+      AI Vision ще разчете всички артикули от касовата бележка и ще я постави в опашката за одобрение.
+    </div>
+    <div class="form-grid">
+      <label class="field full"><span>Снимка на касовата бележка (избери файл или постави URL долу)</span>
+        <input type="file" id="fbm-file" accept="image/jpeg,image/png,image/webp"></label>
+      <label class="field full"><span>Или директен адрес (URL) на снимката</span>
+        <input id="fbm-img-url" placeholder="https://scontent..."></label>
+      <label class="field full"><span>Текст, с който е направен постът във Facebook</span>
+        <textarea id="fbm-text" rows="4" placeholder="Постави тук текста на автора от Facebook групата…"></textarea></label>
+      <label class="field"><span>Линк към поста / групата</span>
+        <input id="fbm-post-url" value="${esc(fbReceiptsLastGroupUrl)}" placeholder="https://www.facebook.com/groups/3111975342346393"></label>
+      <label class="field"><span>Град по подразбиране</span>
+        <input id="fbm-city" value="${esc(fbReceiptsLastCity || 'София')}"></label>
+    </div>`;
+
+  openModal(
+    '➕ Подай пост с касова бележка за AI разчитане',
+    html,
+    [
+      {
+        id: 'fbm-submit',
+        label: '🤖 Разчети с AI и прати за одобрение',
+        cls: 'btn-primary',
+        onClick: async () => {
+          const fileInput = $('#fbm-file');
+          let imageUrl = $('#fbm-img-url').value.trim();
+          const text = $('#fbm-text').value.trim();
+          const postUrl = $('#fbm-post-url').value.trim() || fbReceiptsLastGroupUrl;
+          const defaultCity = $('#fbm-city').value.trim() || 'София';
+
+          if (fileInput?.files?.[0]) {
+            imageUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result));
+              reader.onerror = () => reject(new Error('Неуспешно четене на файла'));
+              reader.readAsDataURL(fileInput.files[0]);
+            });
+          }
+
+          if (!imageUrl) {
+            return toast('Избери снимка на касова бележка или постави нейния адрес', 'warn');
+          }
+
+          const btn = $('#fbm-submit');
+          btn.disabled = true;
+          btn.textContent = 'Разчитам с AI…';
+          try {
+            const res = await api('/fb-receipts/ingest', {
+              method: 'POST',
+              body: {
+                groupUrl: postUrl,
+                defaultCity,
+                posts: [{ postUrl, text, imageUrls: [imageUrl] }],
+              },
+            });
+            closeModal();
+            if (res.queued > 0) {
+              fbReceiptsFilter = 'pending';
+              toast('Касовата бележка е разчетена и чака твоето одобрение!');
+            } else {
+              toast('Снимката беше проверена (виж секция „Без бележка“ или „Чакащи“).', 'warn');
+            }
+            render('fb_receipts', true);
+          } catch (e) {
+            toast(e.message, 'error');
+            btn.disabled = false;
+            btn.textContent = '🤖 Разчети с AI и прати за одобрение';
+          }
+        },
+      },
+      { id: 'fbm-cancel', label: 'Отказ', cls: 'btn-ghost', onClick: closeModal },
+    ],
+    true
+  );
 }
 
 const WIN_STATUS = {

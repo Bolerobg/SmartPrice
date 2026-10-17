@@ -41,6 +41,7 @@ const schema = z.object({
   OPENROUTER_API_KEY: z.string().optional().default(''),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
   OCR_MODEL: z.string().default('google/gemini-2.5-flash'),
+  APIFY_API_TOKEN: z.string().optional().default(''),
 
   // --- AI съветникът в приложението („Ценко“) -------------------------
   // Ползва DeepSeek API директно (не OpenRouter), защото моделът е тяхен.

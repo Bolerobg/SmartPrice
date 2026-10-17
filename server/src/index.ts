@@ -24,6 +24,7 @@ import referralRoutes from './routes/referrals.js';
 import adminRoutes from './routes/admin.js';
 import assistantRoutes from './routes/assistant.js';
 import scraperRoutes from './routes/scraper.js';
+import fbReceiptRoutes from './routes/fbReceipts.js';
 import { startScraperWorker } from './lib/scraper.js';
 import { startSecurityMonitor } from './lib/security.js';
 import { seedDemoData } from './seed.js';
@@ -33,7 +34,7 @@ export async function buildApp() {
     logger: isProd
       ? { level: 'info' }
       : { level: 'debug', transport: undefined },
-    bodyLimit: 2 * 1024 * 1024,
+    bodyLimit: 15 * 1024 * 1024,
     trustProxy: true,
   });
 
@@ -182,6 +183,8 @@ export async function buildApp() {
   await app.register(assistantRoutes);
   // Скраперът на онлайн магазини (само от админ панела)
   await app.register(scraperRoutes);
+  // Сваляне и AI разчитане на касови бележки от публични Facebook групи (с одобрение)
+  await app.register(fbReceiptRoutes);
 
   /* ---------------------------------------------------------------------
    *  Спрени/изтрити профили и активност.
