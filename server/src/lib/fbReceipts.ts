@@ -37,6 +37,7 @@ export interface ParsedReceiptLine {
 }
 
 export interface AiReceiptAnalysis {
+  kind: 'receipt' | 'price_signal' | 'not_relevant';
   isReceipt: boolean;
   skipReason?: string | null;
   polarity: 'green' | 'red';
@@ -471,22 +472,30 @@ export async function analyzeFbReceiptWithAi(params: {
     'Подава ти се СНИМКА от пост във Facebook група и ТЕКСТЪТ към поста, написан от автора.',
     '',
     'Твоята задача:',
-    '1. Провери дали на снимката има КАСОВА БЕЛЕЖКА (фискален бон), СМЕТКА от заведение/ресторант, ФАКТУРА или ЕТИКЕТ С ЦЕНА от магазин.',
-    '   - Ако снимката е мем, селфи, пейзаж или няма никаква бележка/сметка/цени, върни "isReceipt": false и "skipReason" с кратко обяснение.',
+    '1. Реши КАКВО показва снимката и върни "kind":',
+    '   - "receipt" — касова бележка (фискален бон), сметка от заведение/ресторант или фактура.',
+    '   - "price_signal" — СИГНАЛ ЗА ЦЕНА: снимка с цена (етикет, рафт, меню, табела, продукт), дори БЕЗ формален бон, но в комбинация с текст на поста, в който авторът СЕ ОПЛАКВА (скъпо, вдигнаха цената, малък грамаж, скрита такса, измама) или хвали цената.',
+    '   - "not_relevant" — мем, селфи, пейзаж, снимка без никаква цена и без текст за цена.',
+    '2. ЗАДЪЛЖИТЕЛНО за "price_signal" — трябва да е ЯСНО МЯСТОТО: "placeName" (магазин/обект) И "city" (град в България) И "citySource".',
+    '   - "citySource": "receipt" (градът се чете от бележката/табелата/менюто), "post" (споменат е в текста на поста), "none" (никъде не личи).',
+    '   - Ако "citySource" е "none" ИЛИ не можеш да определиш "placeName" → върни "kind": "not_relevant", "isReceipt": false, "skipReason": "Няма разпознаваем град/място". НЕ измисляй град и не ползвай град по подразбиране.',
+    '   - Само когато мястото Е ясно и има реална цена (totalAmount > 0) → "isReceipt": true (това е билетът за опашката за одобрение).',
     '2. Прочети САМО това, което реално виждаш на касовата бележка/сметката: търговец (merchantName), ЕИК (merchantTaxId), дата (DD.MM.YYYY), час (HH:MM), обща сума (totalAmount), валута ("BGN" или "EUR") и всички артикули по редове (items).',
     '3. Комбинирай ТЕКСТА НА ПОСТА със СНИМКАТА НА БЕЛЕЖКАТА:',
-    '   - "polarity": "red" (ако авторът се оплаква от висока цена, надценка, скрита такса, малък грамаж или измама) или "green" (ако споделя добра оферта, ниска цена или изгодна покупка).',
+    '   - "polarity": "red" (ако авторът се оплаква от висока цена, надценка, скрита такса, малък грамаж или измама) или "green" (ако споделя добра оферта, ниска цена или изгодна покупка). При "price_signal" почти винаги е "red" — "green" само ако изрично хвали цената.',
     '   - "category": точно една от: "restaurants" | "hotels_airbnb" | "supermarket" | "cafes_bars" | "services_tech" | "other".',
     '   - "title": ясно и грабващо заглавие на български (до 110 знака), което отразява какво е купено/коментирано и на каква цена/място.',
     '   - "description": запази смисъла и историята от текста на поста във Facebook + добави кратко обобщение какво се вижда на касовата бележка. Махни лични имена или телефони.',
     '   - "placeName": разбираемо име на магазина или заведението (напр. "Lidl", "Kaufland", "Ресторант ...", или името на фирмата от бона).',
-    `   - "city": градът в България (от адреса на касовата бележка или от текста на поста; ако никъде не пише град, върни "${fallbackCity}").`,
+    `   - "city": градът в България. За "receipt": от бележката или от текста; ако никъде не пише — "${fallbackCity}". За "price_signal": САМО истинският град (иначе "not_relevant").`,
     '   - "address": точен адрес/улица от касовата бележка, ако се чете, иначе null.',
     '',
     'Върни СТРИКТНО валиден JSON с тази форма:',
     '{',
+    '  "kind": "receipt" | "price_signal" | "not_relevant",',
     '  "isReceipt": boolean,',
     '  "skipReason": string | null,',
+    '  "citySource": "receipt" | "post" | "none",',
     '  "polarity": "green" | "red",',
     '  "category": "restaurants" | "hotels_airbnb" | "supermarket" | "cafes_bars" | "services_tech" | "other",',
     '  "title": string,',
@@ -558,6 +567,21 @@ export async function analyzeFbReceiptWithAi(params: {
   }
 
   const isReceipt = Boolean(parsed.isReceipt);
+  const kindRaw = String(parsed.kind ?? '').trim();
+  const kind: 'receipt' | 'price_signal' | 'not_relevant' =
+    kindRaw === 'receipt' || kindRaw === 'price_signal' || kindRaw === 'not_relevant'
+      ? kindRaw
+      : isReceipt
+        ? 'receipt'
+        : 'not_relevant';
+  const citySourceRaw = String(parsed.citySource ?? '').trim();
+  const citySource: 'receipt' | 'post' | 'none' =
+    citySourceRaw === 'post' || citySourceRaw === 'none'
+      ? citySourceRaw
+      : citySourceRaw === 'receipt' || kind === 'receipt'
+        ? 'receipt'
+        : 'none';
+  const placeOk = (v: string) => Boolean(v) && v !== 'Неразчетен търговец';
   const rawCurrency = String(parsed.currency ?? 'BGN').toUpperCase() === 'EUR' ? 'EUR' : 'BGN';
   const isBgn = rawCurrency === 'BGN';
   const toEur = (val: number) => Number((val / BGN_PER_EUR).toFixed(2));
@@ -623,9 +647,27 @@ export async function analyzeFbReceiptWithAi(params: {
     aiDesc || cleanPostText || `Касова бележка от ${placeName} (${city}) на обща стойност ${totalAmountEur.toFixed(2)} €.`
   );
 
+  // Мястото е ЗАДЪЛЖИТЕЛНО за сигналите с цена (червени флагове): без град и обект
+  // офертата не е полезна за хората → изобщо не влиза в опашката.
+  const locationOk = citySource !== 'none' && placeOk(placeName) && Boolean(city);
+  const hasNumbers = totalAmountEur > 0 || items.length > 0;
+  const accepted =
+    kind === 'receipt'
+      ? isReceipt && hasNumbers
+      : kind === 'price_signal'
+        ? locationOk && totalAmountEur > 0
+        : false;
+
   return {
-    isReceipt: isReceipt && (totalAmountEur > 0 || items.length > 0),
-    skipReason: str(parsed.skipReason, 240) ?? (!isReceipt ? 'Снимката не съдържа касова бележка или цени.' : null),
+    kind,
+    isReceipt: accepted,
+    skipReason:
+      str(parsed.skipReason, 240) ??
+      (accepted
+        ? null
+        : kind === 'price_signal'
+          ? 'Няма разпознаваем град/място — не влиза в червените флагове'
+          : 'Снимката не съдържа касова бележка или цени.'),
     polarity,
     category,
     title: title.slice(0, 200),
@@ -795,14 +837,16 @@ export async function processRawFbPosts(params: {
             ]);
             await logJob(
               params.jobId,
-              `✅ Разчетена бележка: „${analysis.title}“ — ${analysis.totalAmountEur.toFixed(2)} € (${analysis.items.length} артикула)`
+              analysis.kind === 'price_signal'
+                ? `🔴 Сигнал за цена (${analysis.polarity === 'green' ? 'добра цена' : 'червен флаг'}): „${analysis.title}“ — ${analysis.totalAmountEur.toFixed(2)} € · ${analysis.city}`
+                : `✅ Разчетена бележка: „${analysis.title}“ — ${analysis.totalAmountEur.toFixed(2)} € (${analysis.items.length} артикула)`
             );
           }
         } else {
           skipped++;
           if (params.jobId) {
             await query(`update fb_receipt_jobs set skipped = skipped + 1 where id = $1`, [params.jobId]);
-            await logJob(params.jobId, `⏭ Пропусната снимка (не е касова бележка): ${analysis.skipReason ?? ''}`);
+            await logJob(params.jobId, `⏭ Пропуснато (${analysis.kind === 'price_signal' ? 'сигнал без ясно място' : 'не е касова бележка'}): ${analysis.skipReason ?? ''}`);
           }
         }
       } catch (err) {
