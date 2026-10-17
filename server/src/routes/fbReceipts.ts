@@ -6,7 +6,10 @@ import { audit, requireAdminPanel } from '../lib/admin.js';
 import {
   approveFbReceiptItem,
   checkQueueImages,
+  FB_TOPICS,
   getFbGroups,
+  getFbTopics,
+  saveFbTopics,
   getFbScraperConfig,
   runAllFbGroups,
   saveFbGroups,
@@ -23,6 +26,9 @@ const CATEGORIES = [
   'supermarket',
   'cafes_bars',
   'services_tech',
+  'real_estate',
+  'shops_places',
+  'private_sellers',
   'other',
 ] as const;
 
@@ -60,10 +66,12 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       .object({
         status: z.enum(['pending', 'approved', 'rejected', 'not_receipt', 'all']).default('pending'),
         limit: z.coerce.number().int().min(1).max(200).default(50),
+        /** Филтър по тема (интерес): deals, services, masters, real_estate, shops_places, private_sellers. */
+        topic: z.string().trim().max(40).optional(),
       })
       .parse(req.query ?? {});
 
-    const [cfg, counts, jobs, queue] = await Promise.all([
+    const [cfg, counts, jobs, queue, enabledTopics] = await Promise.all([
       getFbScraperConfig(),
       one<{
         pending: number;
@@ -95,16 +103,18 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
                 q.total_amount::float as total_amount,
                 q.original_amount::float as original_amount,
                 q.original_currency, q.confidence::float as confidence,
-                q.ai_model, q.items, q.post_id, q.created_at::text, q.reviewed_at::text,
+                q.ai_model, q.items, q.post_id, q.topic, q.created_at::text, q.reviewed_at::text,
                 p.public_code as post_code,
            p.signal_count::int as signal_count
            from fb_receipt_queue q
            left join posts p on p.id = q.post_id
           where ($1 = 'all' or q.status = $1)
+            and ($3::text is null or coalesce(q.topic, 'deals') = $3)
           order by q.created_at desc
           limit $2`,
-        [q.status, q.limit]
+        [q.status, q.limit, q.topic ?? null]
       ),
+      getFbTopics(),
     ]);
 
     return {
@@ -117,6 +127,16 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
         commentsEnabled: cfg.commentsEnabled,
         autoApprove: cfg.autoApprove,
         autoApproveMin: cfg.autoApproveMin,
+      },
+      topics: {
+        enabled: enabledTopics.map((t) => t.key),
+        all: FB_TOPICS.map((t) => ({
+          key: t.key,
+          title: t.title,
+          emoji: t.emoji,
+          hint: t.hint,
+          category: t.category,
+        })),
       },
       counts: counts ?? { pending: 0, approved: 0, rejected: 0, not_receipt: 0 },
       jobs,
@@ -334,6 +354,38 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
   });
 
   /** Отхвърляне на една или няколко бележки от опашката. */
+  /** Кои теми (интереси) се скрапват в момента. */
+  app.get('/api/admin/fb-receipts/topics', async (req) => {
+    await requireAdminPanel(req);
+    const enabled = await getFbTopics();
+    const on = enabled.map((t) => t.key);
+    return {
+      enabled: on,
+      topics: FB_TOPICS.map((t) => ({
+        key: t.key,
+        title: t.title,
+        emoji: t.emoji,
+        hint: t.hint,
+        category: t.category,
+        enabled: on.includes(t.key),
+      })),
+    };
+  });
+
+  /** Запис на избраните теми (интереси) — какво да търсим във Facebook групите. */
+  app.post('/api/admin/fb-receipts/topics', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z.object({ keys: z.array(z.string().trim().max(40)).max(20) }).parse(req.body ?? {});
+    const topics = await saveFbTopics(input.keys);
+    await audit({
+      admin,
+      action: 'fb_receipts.topics',
+      details: { enabled: topics.map((t) => t.key) },
+      ip: req.ip,
+    });
+    return { ok: true, enabled: topics.map((t) => t.key) };
+  });
+
   /** Запазените групи за автоматични обиколки. */
   app.get('/api/admin/fb-receipts/groups', async (req) => {
     await requireAdminPanel(req);

@@ -92,6 +92,27 @@ export const CATEGORIES: CategoryInfo[] = [
     description: 'Майстори, сервизи, електроника и битови разходи',
   },
   {
+    id: 'real_estate',
+    label: 'Имоти, наеми и продажби',
+    shortLabel: 'Имоти',
+    icon: 'home',
+    description: 'Наеми, продажби, цени на квадрат и скрити разходи по имот',
+  },
+  {
+    id: 'shops_places',
+    label: 'Обекти, магазини и заведения',
+    shortLabel: 'Обекти',
+    icon: 'storefront',
+    description: 'Нови и затворени обекти, обслужване, хигиена и цени',
+  },
+  {
+    id: 'private_sellers',
+    label: 'Частни продавачи и пазар',
+    shortLabel: 'Частни продавачи',
+    icon: 'people',
+    description: 'Обяви от частни лица, сергии, пазар и втора употреба',
+  },
+  {
     id: 'other',
     label: 'Други стоки, обекти и услуги',
     shortLabel: 'Други',

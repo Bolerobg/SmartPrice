@@ -90,7 +90,8 @@ const DEFAULTS: Required<Pick<ScrapeOptions,
 };
 
 export const SCRAPE_CATEGORIES = [
-  'restaurants', 'hotels_airbnb', 'supermarket', 'cafes_bars', 'services_tech', 'other',
+  'restaurants', 'hotels_airbnb', 'supermarket', 'cafes_bars', 'services_tech',
+  'real_estate', 'shops_places', 'private_sellers', 'other',
 ] as const;
 
 // ВАЖНО: HTTP заглавията приемат само ASCII. Кирилица тук чупи всяка заявка

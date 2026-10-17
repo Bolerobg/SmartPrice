@@ -15,10 +15,95 @@ const CATEGORIES = [
   'supermarket',
   'cafes_bars',
   'services_tech',
+  'real_estate',
+  'shops_places',
+  'private_sellers',
   'other',
 ] as const;
 
 export type ReceiptCategory = (typeof CATEGORIES)[number];
+
+/**
+ * ТЕМИ (интереси) — какво търсим във Facebook групите. Избират се от панела,
+ * а AI-ят обработва всяка тема по същия начин: преразказ на български, псевдоним
+ * вместо име, ясно място (град + обект), само България и само чисти снимки.
+ */
+export interface FbTopic {
+  key: string;
+  title: string;
+  emoji: string;
+  /** Категория в приложението, в която влиза офертата (null = AI-ят решава, както при офертите). */
+  category: ReceiptCategory | null;
+  /** Какво точно да търси AI-ят за тази тема. */
+  hint: string;
+}
+
+export const FB_TOPICS: FbTopic[] = [
+  {
+    key: 'deals',
+    title: 'Оферти и цени',
+    emoji: '🏷️',
+    category: null,
+    hint: 'касови бележки, етикети и рафтове с цени, менюта, сметки, скрити такси, промоции и шринкфлация',
+  },
+  {
+    key: 'services',
+    title: 'Услуги',
+    emoji: '🔧',
+    category: 'services_tech',
+    hint: 'цени на услуги: ремонт и майсторлък, автосервиз, почистване, зъболекар и лекар, фризьор и козметика, уроци, куриер, интернет и телефон',
+  },
+  {
+    key: 'masters',
+    title: 'Майстори и занаятчии',
+    emoji: '👷',
+    category: 'services_tech',
+    hint: 'препоръки и предупреждения за конкретен майстор/фирма с ЦЕНА на труда или на материалите („искаха ми X € за …“)',
+  },
+  {
+    key: 'real_estate',
+    title: 'Имоти',
+    emoji: '🏠',
+    category: 'real_estate',
+    hint: 'наеми, продажби, цени на квадратен метър, брокерски такси и скрити разходи по имот',
+  },
+  {
+    key: 'shops_places',
+    title: 'Обекти и магазини',
+    emoji: '🏪',
+    category: 'shops_places',
+    hint: 'нови или затворени обекти, впечатления от магазин или заведение (обслужване, хигиена, ремонт) — с цена, ако има',
+  },
+  {
+    key: 'private_sellers',
+    title: 'Частни продавачи',
+    emoji: '🧍',
+    category: 'private_sellers',
+    hint: 'обяви от частни лица, сергии, пазар, втора употреба — с цена и място',
+  },
+];
+
+export const FB_TOPIC_KEYS: string[] = FB_TOPICS.map((t) => t.key);
+
+/** Кои теми са включени (настройка `fb_topics`). По подразбиране само „Оферти и цени“. */
+export async function getFbTopics(): Promise<FbTopic[]> {
+  const saved = (await getSetting('fb_topics', 'deals')).trim();
+  if (saved === 'all') return FB_TOPICS;
+  const keys = saved
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const on = FB_TOPICS.filter((t) => keys.includes(t.key));
+  return on.length ? on : FB_TOPICS.filter((t) => t.key === 'deals');
+}
+
+/** Запис на избраните теми. Празен списък → връщаме се към „Оферти и цени“. */
+export async function saveFbTopics(keys: string[]): Promise<FbTopic[]> {
+  const chosen = FB_TOPICS.filter((t) => keys.includes(t.key)).map((t) => t.key);
+  const final = chosen.length ? chosen : ['deals'];
+  await setSetting('fb_topics', final.join(','));
+  return FB_TOPICS.filter((t) => final.includes(t.key));
+}
 
 export interface RawFbPost {
   postId?: string;
@@ -40,7 +125,9 @@ export interface ParsedReceiptLine {
 }
 
 export interface AiReceiptAnalysis {
-  kind: 'receipt' | 'price_signal' | 'not_relevant';
+  kind: 'receipt' | 'price_signal' | 'offer' | 'not_relevant';
+  /** Ключ на темата, в която влиза постът (или 'not_relevant'). */
+  topic: string;
   isReceipt: boolean;
   /** false, ако на снимката личи, че е от Facebook (интерфейс, профили, лого). */
   imageClean: boolean;
@@ -894,6 +981,7 @@ export async function analyzeFbReceiptWithAi(params: {
     throw new Error('Липсва OPENROUTER_API_KEY в конфигурацията за AI разчитане на касови бележки.');
   }
 
+  const topics = await getFbTopics();
   const cleanPostText = maskSensitiveText(params.fbPostText).slice(0, 2500);
   const fallbackCity = (params.defaultCity || 'София').trim() || 'София';
 
@@ -901,11 +989,16 @@ export async function analyzeFbReceiptWithAi(params: {
     'Ти си експертен OCR и анализатор за SmartPrice BG — приложение за реални цени, касови бележки и потребителски сигнали в България.',
     'Подава ти се СНИМКА от пост във Facebook група и ТЕКСТЪТ към поста, написан от автора.',
     '',
+    'АКТИВНИ ТЕМИ (интереси) — приемаме само постове, които влизат в някоя от тях:',
+    ...topics.map((t) => `   • "${t.key}" — ${t.title}: ${t.hint}.`),
+    'Ако постът не влиза в нитоя от активните теми → "topic": "not_relevant" и "kind": "not_relevant".',
+    '',
     'Твоята задача:',
     '1. Реши КАКВО показва снимката и върни "kind":',
     '   - "receipt" — касова бележка (фискален бон), сметка от заведение/ресторант или фактура.',
     '   - "price_signal" — СИГНАЛ ЗА ЦЕНА: снимка с цена (етикет, рафт, меню, табела, продукт), дори БЕЗ формален бон, но в комбинация с текст на поста, в който авторът СЕ ОПЛАКВА (скъпо, вдигнаха цената, малък грамаж, скрита такса, измама) или хвали цената.',
-    '   - "not_relevant" — мем, селфи, пейзаж, снимка без никаква цена и без текст за цена.',
+    '   - "offer" — пост от ДРУГА активна тема (услуга, имот, обект, майстор, частен продавач): има ЯСНО място (град + обект/фирма) и ЯСНА цена (сума в € или лв. за услугата, наема или стоката). Тогава "topic" е ключът на темата.',
+    '   - "not_relevant" — мем, селфи, пейзаж, снимка без никаква цена и без текст за цена, или пост извън активните теми.',
     '2. ЗАДЪЛЖИТЕЛНО за "price_signal" — трябва да е ЯСНО МЯСТОТО: "placeName" (магазин/обект) И "city" (град в България) И "citySource".',
     '   - "citySource": "receipt" (градът се чете от бележката/табелата/менюто), "post" (споменат е в текста на поста), "none" (никъде не личи).',
     '   - Ако "citySource" е "none" ИЛИ не можеш да определиш "placeName" → върни "kind": "not_relevant", "isReceipt": false, "skipReason": "Няма разпознаваем град/място". НЕ измисляй град и не ползвай град по подразбиране.',
@@ -933,7 +1026,8 @@ export async function analyzeFbReceiptWithAi(params: {
     '',
     'Върни СТРИКТНО валиден JSON с тази форма:',
     '{',
-    '  "kind": "receipt" | "price_signal" | "not_relevant",',
+    '  "kind": "receipt" | "price_signal" | "offer" | "not_relevant",',
+    '  "topic": string,',
     '  "isReceipt": boolean,',
     '  "skipReason": string | null,',
     '  "citySource": "receipt" | "post" | "none",',
@@ -1001,12 +1095,25 @@ export async function analyzeFbReceiptWithAi(params: {
 
   const isReceipt = Boolean(parsed.isReceipt);
   const kindRaw = String(parsed.kind ?? '').trim();
-  const kind: 'receipt' | 'price_signal' | 'not_relevant' =
-    kindRaw === 'receipt' || kindRaw === 'price_signal' || kindRaw === 'not_relevant'
+  const kind: 'receipt' | 'price_signal' | 'offer' | 'not_relevant' =
+    kindRaw === 'receipt' || kindRaw === 'price_signal' || kindRaw === 'offer' || kindRaw === 'not_relevant'
       ? kindRaw
       : isReceipt
         ? 'receipt'
         : 'not_relevant';
+  // Тема (интерес): коя от активните теми покрива постът. „deals“ е както досега
+  // (бележки и сигнали за цена); останалите теми влизат с kind "offer".
+  const topicRaw = String(parsed.topic ?? '').trim();
+  const dealsOn = topics.some((t) => t.key === 'deals');
+  const topicKey: string =
+    kind === 'receipt' || kind === 'price_signal'
+      ? dealsOn
+        ? 'deals'
+        : 'not_relevant'
+      : topicRaw && topicRaw !== 'deals' && topics.some((t) => t.key === topicRaw)
+        ? topicRaw
+        : 'not_relevant';
+  const topicObj = topics.find((t) => t.key === topicKey) ?? null;
   const citySourceRaw = String(parsed.citySource ?? '').trim();
   const citySource: 'receipt' | 'post' | 'none' =
     citySourceRaw === 'post' || citySourceRaw === 'none'
@@ -1072,7 +1179,10 @@ export async function analyzeFbReceiptWithAi(params: {
       : itemsSumEur;
 
   const catRaw = String(parsed.category ?? 'other').trim() as ReceiptCategory;
-  const category: ReceiptCategory = (CATEGORIES as readonly string[]).includes(catRaw) ? catRaw : 'other';
+  // За темите с фиксирана категория (услуги, имоти, обекти, частни продавачи) тя печели,
+  // за да не попадат офертите в „Други“.
+  const category: ReceiptCategory =
+    topicObj?.category ?? ((CATEGORIES as readonly string[]).includes(catRaw) ? catRaw : 'other');
   const polarity: 'green' | 'red' = parsed.polarity === 'green' ? 'green' : 'red';
 
   const merchantName = str(parsed.merchantName, 200) ?? str(parsed.placeName, 200) ?? 'Неразчетен търговец';
@@ -1095,16 +1205,21 @@ export async function analyzeFbReceiptWithAi(params: {
   const locationOk = citySource !== 'none' && placeOk(placeName) && Boolean(city);
   const hasNumbers = totalAmountEur > 0 || items.length > 0;
   const accepted =
-    isForeign || !imageClean || tooOld
+    isForeign || !imageClean || tooOld || !topicObj
       ? false
-      : kind === 'receipt'
-        ? isReceipt && hasNumbers
-        : kind === 'price_signal'
-          ? locationOk && totalAmountEur > 0
-          : false;
+      : topicKey === 'deals'
+        ? kind === 'receipt'
+          ? isReceipt && hasNumbers
+          : kind === 'price_signal'
+            ? locationOk && totalAmountEur > 0
+            : false
+        : // Другите теми (услуги, имоти, обекти, майстори, частни продавачи): искаме
+          // ясно място и ясна цена — приложението сравнява цени, не публикува обяви без цена.
+          locationOk && totalAmountEur > 0;
 
   return {
     kind,
+    topic: topicKey,
     imageClean,
     imageTraces,
     isReceipt: accepted,
@@ -1118,6 +1233,8 @@ export async function analyzeFbReceiptWithAi(params: {
             ? `Снимката издава Facebook (${imageTraces ?? 'интерфейс/данни'}) — приложението показва само чисти снимки`
           : isForeign
             ? 'Не е от България — не влиза в приложението'
+          : !topicObj
+            ? `Не влиза в избраните теми (${topics.map((t) => t.key).join(', ')})`
           : kind === 'price_signal'
             ? 'Няма разпознаваем град/място — не влиза в червените флагове'
             : 'Снимката не съдържа касова бележка или цени.'),
@@ -1231,9 +1348,9 @@ async function processCommentSignals(params: {
              original_image_url, local_image_url, image_sha256, status, skip_reason,
              polarity, category, title, description, place_name, city, address,
              merchant_name, merchant_tax_id, receipt_date, receipt_time,
-             total_amount, original_amount, original_currency, confidence, ai_model, items
+             total_amount, original_amount, original_currency, confidence, ai_model, items, topic
            ) values (
-             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28::jsonb
+             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28::jsonb,$29
            ) returning id::text`,
           [
             params.jobId ?? null,
@@ -1264,6 +1381,7 @@ async function processCommentSignals(params: {
             analysis.confidenceScore,
             analysis.model,
             JSON.stringify(analysis.items),
+            analysis.topic,
           ]
         );
         perPost++;
@@ -1538,12 +1656,12 @@ export async function processRawFbPosts(params: {
              status, skip_reason, polarity, category, title, description,
              place_name, city, address, merchant_name, merchant_tax_id,
              receipt_date, receipt_time, total_amount, original_amount,
-             original_currency, confidence, ai_model, items
+             original_currency, confidence, ai_model, items, topic
            ) values (
              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
              $11,$12,$13,$14,$15,$16,
              $17,$18,$19,$20,$21,
-             $22,$23,$24,$25,$26,$27,$28,$29::jsonb
+             $22,$23,$24,$25,$26,$27,$28,$29::jsonb,$30
            ) returning id::text`,
           [
             params.jobId ?? null,
@@ -1575,6 +1693,7 @@ export async function processRawFbPosts(params: {
             analysis.confidenceScore,
             analysis.model,
             JSON.stringify(analysis.items),
+            analysis.topic,
           ]
         );
 
@@ -1740,6 +1859,7 @@ export async function runFbGroupJob(
           const auto = await many<{ id: string }>(
             `select id::text from fb_receipt_queue
               where status = 'pending' and local_image_url is not null and confidence >= $1
+                and coalesce(topic, 'deals') = 'deals'
               order by confidence desc limit 25`,
             [cfgNow.autoApproveMin]
           );
@@ -1827,6 +1947,7 @@ export async function approveFbReceiptItem(
     receipt_time: string | null;
     total_amount: string;
     confidence: string;
+    topic: string | null;
     ai_model: string | null;
     items: ParsedReceiptLine[] | null;
   }>(`select * from fb_receipt_queue where id = $1`, [queueId]);
@@ -1841,7 +1962,9 @@ export async function approveFbReceiptItem(
   const title = (overrides?.title ?? row.title).trim().slice(0, 200);
   const description = (overrides?.description ?? row.description).trim().slice(0, 4000);
   const polarity: 'green' | 'red' = overrides?.polarity ?? (row.polarity === 'green' ? 'green' : 'red');
-  const category = overrides?.category ?? row.category ?? 'other';
+  // Темата на сигнала може да наложи категория (услуги / имоти / обекти / частни продавачи).
+  const topicObj = FB_TOPICS.find((t) => t.key === row.topic) ?? null;
+  const category = overrides?.category ?? topicObj?.category ?? row.category ?? 'other';
   const placeName = (overrides?.placeName ?? row.place_name ?? row.merchant_name).trim().slice(0, 200) || 'Магазин';
   const city = (overrides?.city ?? row.city).trim().slice(0, 80) || 'София';
   const address = (overrides?.address !== undefined ? overrides.address : row.address)?.trim().slice(0, 300) || null;

@@ -3503,6 +3503,16 @@ python import_receipts.py --file receipts.json --commit  # внася наист
 /* ------------------------------------------- Фейсбук касови бележки */
 
 let fbReceiptsFilter = 'pending';
+let fbReceiptsTopic = '';
+/** Заглавия на темите (интересите) — за етикетите в опашката. */
+const FB_TOPIC_TITLES = {
+  deals: '🏷️ Оферти и цени',
+  services: '🔧 Услуги',
+  masters: '👷 Майстори',
+  real_estate: '🏠 Имоти',
+  shops_places: '🏪 Обекти',
+  private_sellers: '🧍 Частни продавачи',
+};
 let fbReceiptsPolarity = '';
 let fbReceiptsSelected = new Set();
 let fbReceiptsJobPoll = null;
@@ -3519,7 +3529,11 @@ function stopFbReceiptsPoll() {
 
 async function renderFbReceipts(box) {
   stopFbReceiptsPoll();
-  const data = await api(`/fb-receipts/info?status=${encodeURIComponent(fbReceiptsFilter)}&limit=60`);
+  const data = await api(
+    `/fb-receipts/info?status=${encodeURIComponent(fbReceiptsFilter)}&limit=60&topic=${encodeURIComponent(fbReceiptsTopic)}`
+  );
+  const topicsAll = Array.isArray(data?.topics?.all) ? data.topics.all : [];
+  const topicsEnabled = Array.isArray(data?.topics?.enabled) ? data.topics.enabled : [];
   const cfg = data.config || {};
   const counts = data.counts || { pending: 0, approved: 0, rejected: 0, not_receipt: 0 };
   const jobs = data.jobs || [];
@@ -3540,11 +3554,13 @@ async function renderFbReceipts(box) {
     </div>
 
     <div class="card" style="border-color:rgba(6,182,212,.45);margin-bottom:14px">
-      <div class="card-title">📘 Сваляне на касови бележки от публична Facebook група</div>
+      <div class="card-title">📘 Сваляне от публична Facebook група (оферти, услуги, имоти, обекти, майстори…)</div>
       <div class="hint" style="margin:6px 0 12px">
         Дай адрес на публична Facebook група (напр. <code>https://www.facebook.com/groups/3111975342346393</code>).
-        Системата сваля постовете със снимки и текста към тях, разпознава с AI Vision какво има на касовата бележка
-        (търговец, ЕИК, артикули, сума в €) и ги слага в <strong>„Чакащи одобрение“</strong> по-долу. Нищо не се публикува без твоето одобрение.
+        Системата сваля постовете със снимки и текста към тях, чете с AI какво има на снимката
+        (касова бележка, етикет с цена, табела, обява, обект) и го преразказва в стила на SmartPrice —
+        с ясно място (град + обект), псевдоним вместо име и цени в €. Влиза само това, което покрива
+        <strong>избраните по-долу теми</strong>, и нищо не се публикува без твоето одобрение.
       </div>
 
       <div class="form-grid">
@@ -3556,8 +3572,36 @@ async function renderFbReceipts(box) {
           <input id="fb-city" value="${esc(fbReceiptsLastCity)}" placeholder="София"></label>
       </div>
 
+      <div class="field full" style="margin-top:12px">
+        <span><strong>Какво да търсим във Facebook групите (теми)</strong> — всяка тема се обработва по същия начин:
+        AI-ят преразказва на български, слага псевдоним вместо име, иска ясно място (град + обект) и прави цените в €.
+        Пост без ясно място или без цена не влиза.</span>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px;margin-top:8px">
+          ${topicsAll
+            .map(
+              (tp) => `<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid rgba(148,163,184,.25);border-radius:10px;cursor:pointer">
+              <input type="checkbox" class="fb-topic-key" value="${esc(tp.key)}" ${topicsEnabled.includes(tp.key) ? 'checked' : ''} style="margin-top:3px">
+              <span>
+                <span style="font-weight:700">${tp.emoji || ''} ${esc(tp.title)}</span>
+                <span class="hint" style="display:block;margin-top:2px">${esc(tp.hint || '')}</span>
+              </span>
+            </label>`
+            )
+            .join('')}
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:center">
+          <button class="btn btn-sm btn-ok" id="fb-save-topics">💾 Запази темите</button>
+          <button class="btn btn-sm btn-ghost" id="fb-topics-all">Избери всички теми</button>
+          <span class="hint" style="margin:0">Включени сега: <strong>${
+            topicsEnabled.length
+              ? topicsEnabled.map((k) => FB_TOPIC_TITLES[k] || k).join(' · ')
+              : '— (само „Оферти и цени“ по подразбиране)'
+          }</strong></span>
+        </div>
+      </div>
+
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center">
-        <button class="btn btn-primary" id="fb-run-btn">▶ Свали и разчети бележките</button>
+        <button class="btn btn-primary" id="fb-run-btn">▶ Свали и обработи постовете</button>
         <button class="btn" id="fb-manual-btn">➕ Подай пост / снимка на бележка</button>
         <span class="hint" style="margin:0">
           Връзка с Facebook:
@@ -3618,6 +3662,18 @@ async function renderFbReceipts(box) {
           <button class="btn btn-sm ${fbReceiptsPolarity === 'green' ? 'btn-primary' : 'btn-ghost'}" data-fb-pol="green">🟢 Топ находки</button>
         </div>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+        <span class="hint" style="margin:0">Тема:</span>
+        <button class="btn btn-sm ${fbReceiptsTopic === '' ? 'btn-primary' : 'btn-ghost'}" data-fb-topic="">Всички теми</button>
+        ${
+          (topicsEnabled.length ? topicsEnabled : Object.keys(FB_TOPIC_TITLES))
+            .map(
+              (k) =>
+                `<button class="btn btn-sm ${fbReceiptsTopic === k ? 'btn-primary' : 'btn-ghost'}" data-fb-topic="${esc(k)}">${FB_TOPIC_TITLES[k] || esc(k)}</button>`
+            )
+            .join('')
+        }
+      </div>
 
       ${
         fbReceiptsFilter === 'pending' && items.length > 0
@@ -3652,6 +3708,37 @@ async function renderFbReceipts(box) {
       render('fb_receipts', true);
     };
   });
+
+  document.querySelectorAll('[data-fb-topic]').forEach((btn) => {
+    btn.onclick = () => {
+      fbReceiptsTopic = btn.dataset.fbTopic || '';
+      fbReceiptsSelected = new Set();
+      render('fb_receipts', true);
+    };
+  });
+
+  const saveTopicsBtn = document.getElementById('fb-save-topics');
+  if (saveTopicsBtn) {
+    saveTopicsBtn.onclick = async () => {
+      const keys = [...document.querySelectorAll('.fb-topic-key:checked')].map((el) => el.value);
+      try {
+        await api('/fb-receipts/topics', { method: 'POST', body: JSON.stringify({ keys }) });
+        toast('Темите са запазени.', 'ok');
+        render('fb_receipts', true);
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    };
+  }
+  const topicsAllBtn = document.getElementById('fb-topics-all');
+  if (topicsAllBtn) {
+    topicsAllBtn.onclick = () => {
+      document.querySelectorAll('.fb-topic-key').forEach((el) => {
+        el.checked = true;
+      });
+      toast('Избрани са всички теми — натисни „Запази темите“.', 'ok');
+    };
+  }
 
   document.querySelectorAll('[data-fb-pol]').forEach((btn) => {
     btn.onclick = () => {
@@ -3919,6 +4006,11 @@ function renderFbQueueItemCard(it) {
             <div>
               <span class="pill ${isGreen ? 'pill-green' : 'pill-red'}">${isGreen ? '🟢 Находка / Оферта' : '🔴 Червен флаг / Сигнал'}</span>
               <span class="pill pill-dim">${esc(SCRAPE_CAT_LABELS[it.category] || it.category)}</span>
+              ${
+                it.topic && it.topic !== 'deals'
+                  ? `<span class="pill pill-cyan">${FB_TOPIC_TITLES[it.topic] || esc(it.topic)}</span>`
+                  : ''
+              }
               <span class="pill pill-cyan">📍 ${esc(it.city || 'София')} · ${esc(it.place_name || it.merchant_name)}</span>
               ${
                 it.status === 'approved'
