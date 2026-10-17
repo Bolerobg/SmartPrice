@@ -1643,6 +1643,46 @@ export function extractGenericDescription(html: string): string | undefined {
   return firstP ? htmlToText(firstP[1]!) : undefined;
 }
 
+/** Маха шаблонни „опашки“ от SEO описания/фийдове: „… на цена 12.19€ произведен от BIOTRADE“. */
+export function stripSeoTails(text: string): string {
+  let out = text;
+  out = out.replace(
+    /\s*(?:на\s+цена|за\s+цена|price)\s*:?\s*\d[\d\s.,]*\s*(?:€|EUR|лв\.?|BGN|£|\$)\s*(?:произведен[ао]?\s+от|от|by)\s*[^.;|]{1,60}\.?\s*$/i,
+    ' '
+  );
+  out = out.replace(/\s*произведен[ао]?\s+от\s+[^.;|]{1,60}\.?\s*$/i, ' ');
+  return out.replace(/\s{2,}/g, ' ').trim();
+}
+
+/** Истинското описание от продуктовата страница — ползва се, когато мета/JSON-LD описанието е
+ *  късо или шаблонно. Познатите контейнери (PrestaShop, Woo, Magento, OpenCart, Shopify). */
+export function extractRichDescription(html: string): string | undefined {
+  const sels = [
+    '#description',
+    '#tab-description',
+    '.product-description',
+    '.product-details .description',
+    '.product-attribute-description',
+    '[itemprop="description"]',
+    '.woocommerce-Tabs-panel--description',
+    '.woocommerce-product-details__short-description',
+    '.product-info__description',
+    '.pdp-description',
+    '.product__description',
+    '.rte',
+  ];
+  const candidates: string[] = [];
+  for (const sel of sels) {
+    const raw = selectFirst(html, sel);
+    if (!raw) continue;
+    const text = htmlToText(raw);
+    if (text.length >= 180 && text.length < 8000) candidates.push(text);
+  }
+  if (!candidates.length) return undefined;
+  candidates.sort((a, b) => b.length - a.length);
+  return candidates[0];
+}
+
 /* ------------------------------------------------------ страница продукт */
 
 export function parseProductPage(html: string, pageUrl: string, selectors: Record<string, string> = {}): RawProduct {
@@ -1662,13 +1702,18 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
     (meta.title ? htmlToText(meta.title) : undefined) ??
     micro.title;
 
-  const rawDesc =
+  let rawDesc =
     fromSel('description') ??
     product?.description ??
     meta['og:description'] ??
     meta.description ??
     extractGenericDescription(html) ??
     micro.title;
+  // Мета/JSON-LD описанието често е късо или шаблонно (а на Magento носи изтекъл CSS).
+  // Под 200 знака → вземи истинското описание от продуктовата страница.
+  if (typeof rawDesc !== 'string' || rawDesc.length < 200) {
+    rawDesc = extractRichDescription(html) ?? rawDesc;
+  }
 
   const imageFromSel = resolveUrl(fromSel('image'), pageUrl);
   const image =
@@ -1813,7 +1858,7 @@ export async function enrichWithAi(
   const payload = items.map((it, index) => ({
     index,
     originalTitle: (it.title ?? '').slice(0, 200),
-    originalDescription: (it.description ?? '').slice(0, 600),
+    originalDescription: (it.description ?? '').slice(0, 1200),
     breadcrumb: it.breadcrumb ?? null,
     price: it.price ?? null,
     shop: shopLabel,
@@ -2802,7 +2847,7 @@ export async function runJob(jobId: string): Promise<void> {
         stripShopMentions(
           ai?.description ??
             (p.description
-              ? p.description.slice(0, 1200)
+              ? stripSeoTails(p.description).slice(0, 1200)
               : `${title} — цена от онлайн магазин.`),
           job.domain
         ).slice(0, 4000);
