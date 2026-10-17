@@ -2007,12 +2007,20 @@ export async function approveFbReceiptItem(
     }
 
     // ЕИК → име/адрес на търговеца (VIES, безплатно) и геокод, за да сочи картата точно.
+    // Ако ЕИК-ът е прочетен, но VIES не знае нищо за него (фирмата не е регистрирана по ДДС),
+    // го казваме честно в офертата, вместо да мълчим.
     const vies = await viesLookup(row.merchant_tax_id);
+    const eikDigits = String(row.merchant_tax_id ?? '').replace(/\D/g, '');
+    const viesNote = vies
+      ? `Търговец по ДДС: ${vies.name}${vies.address ? ', ' + vies.address : ''}`
+      : isValidEik(eikDigits)
+        ? `ЕИК ${eikDigits} — няма данни в регистъра по ДДС на ЕС (VIES); вероятно търговецът не е регистриран по ДДС.`
+        : null;
     const geo =
       (await geocodeAddress([address || vies?.address || '', placeName, city].filter(Boolean).join(', '))) ??
       (await geocodeAddress(`${placeName}, ${city}`)) ??
       (await geocodeAddress(city));
-    if (geo || vies) {
+    if (geo || viesNote) {
       await client.query(
         `update posts
             set latitude = coalesce($2, latitude),
@@ -2025,7 +2033,7 @@ export async function approveFbReceiptItem(
           geo?.lat ?? null,
           geo?.lng ?? null,
           geo ? `https://www.google.com/maps?q=${geo.lat},${geo.lng}` : null,
-          vies ? `Търговец по ДДС: ${vies.name}${vies.address ? ', ' + vies.address : ''}`.slice(0, 300) : null,
+          viesNote ? viesNote.slice(0, 300) : null,
         ]
       );
     }
