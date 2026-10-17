@@ -208,7 +208,7 @@
               '<span class="pill g">средна ' + eur(s.avg) + '</span>' +
               '<span class="pill c">медиана ' + eur(s.median) + '</span>' +
               '<span class="pill d">от ' + eur(s.min) + ' до ' + eur(s.max) + '</span>' +
-              '<span class="pill d">' + (s.observations || 0) + ' наблюдения</span>' +
+              '<span class="pill d">' + (s.observations || 0) + ((s.observations || 0) === 1 ? ' наблюдение' : ' наблюдения') + '</span>' +
               '<span class="pill d">' + esc(s.first_seen || '—') + ' → ' + esc(s.last_seen || '—') + '</span>' +
             '</div>' +
             '<h2 style="margin:14px 0 4px;font-size:15px">По месеци (медиана)</h2>' +
@@ -224,7 +224,8 @@
             '<h2 style="margin:22px 0 6px;font-size:15px">Готово за цитиране</h2>' +
             '<div class="quote" id="quote">Според SmartPrice (общностни цени в България) <strong>' + esc(d.product) + '</strong> струва средно <strong>' +
               eur(s.avg) + '</strong> (медиана ' + eur(s.median) + ', от ' + eur(s.min) + ' до ' + eur(s.max) + '), по ' + (s.observations || 0) +
-              ' наблюдения в ' + (d.byCity || []).length + ' града; последно наблюдение: ' + esc(s.last_seen || '—') + '.</div>' +
+              ((s.observations || 0) === 1 ? ' наблюдение в ' : ' наблюдения в ') + (d.byCity || []).length +
+              ((d.byCity || []).length === 1 ? ' град' : ' града') + '; последно наблюдение: ' + esc(s.last_seen || '—') + '.</div>' +
             '<div class="row" style="margin-top:8px">' +
               '<button id="cp">📋 Копирай текста</button>' +
               '<a class="pill d" href="/api/public/prices/' + esc(slug) + '" target="_blank" rel="noopener">JSON за този продукт ↗</a>' +
