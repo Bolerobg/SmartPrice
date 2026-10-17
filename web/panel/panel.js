@@ -57,22 +57,35 @@ async function api(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
 
-  const res = await fetch(`/api/admin${path}`, {
-    method: options.method || 'GET',
-    headers,
-    // Приема и готов JSON низ, и обикновен обект — иначе тялото се
-    // кодира два пъти и сървърът отговаря „Подадените данни са невалидни“.
-    body:
-      options.body === undefined || options.body === null
-        ? undefined
-        : typeof options.body === 'string'
-          ? options.body
-          : JSON.stringify(options.body),
-  });
+  const body =
+    options.body === undefined || options.body === null
+      ? undefined
+      : typeof options.body === 'string'
+        ? options.body
+        : JSON.stringify(options.body);
+
+  let res;
+  try {
+    res = await fetch(`/api/admin${path}`, {
+      method: options.method || 'GET',
+      headers,
+      body,
+    });
+  } catch (e) {
+    throw new Error('Няма връзка със сървъра. Провери интернет връзката и опитай пак.');
+  }
+
+  // Сървърът се рестартира при деплой (502/503/504). Не показваме HTML грешката,
+  // а изчакваме малко и опитваме още веднъж — така бутоните в панела оцеляват.
+  if ((res.status === 502 || res.status === 503 || res.status === 504) && !options.retried) {
+    await new Promise((r) => setTimeout(r, 2500));
+    return api(path, Object.assign({}, options, { retried: true }));
+  }
 
   let data = null;
   const text = await res.text();
-  if (text) {
+  const looksLikeHtml = /^\s*</.test(text);
+  if (text && !looksLikeHtml) {
     try {
       data = JSON.parse(text);
     } catch {
@@ -84,7 +97,15 @@ async function api(path, options = {}) {
     logout(true);
     throw new Error(data?.error?.message || 'Сесията изтече. Влез отново.');
   }
-  if (!res.ok) throw new Error(data?.error?.message || `Грешка ${res.status}`);
+  if (!res.ok) {
+    const friendly =
+      res.status === 502 || res.status === 503 || res.status === 504
+        ? 'Сървърът се презарежда (грешка ' + res.status + '). Опитай пак след минута.'
+        : looksLikeHtml
+          ? 'Сървърът върна неочакван отговор (грешка ' + res.status + '). Опитай пак.'
+          : null;
+    throw new Error(friendly || data?.error?.message || `Грешка ${res.status}`);
+  }
   return data;
 }
 
