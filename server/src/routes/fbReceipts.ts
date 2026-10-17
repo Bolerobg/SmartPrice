@@ -93,7 +93,8 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
                 q.original_amount::float as original_amount,
                 q.original_currency, q.confidence::float as confidence,
                 q.ai_model, q.items, q.post_id, q.created_at::text, q.reviewed_at::text,
-                p.public_code as post_code
+                p.public_code as post_code,
+           p.signal_count::int as signal_count
            from fb_receipt_queue q
            left join posts p on p.id = q.post_id
           where ($1 = 'all' or q.status = $1)

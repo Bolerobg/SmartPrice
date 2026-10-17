@@ -1729,6 +1729,33 @@ export async function approveFbReceiptItem(
   }
 
   const authorId = await officialProfileId();
+
+  // Групиране: ако същият обект в същия град вече има публикувана оферта на СЪЩАТА цена,
+  // не правим дубликат — вдигаме брояча „N души сигнализират“ и свързваме сигнала с нея.
+  // ВНИМАНИЕ: не сравняваме с lower() в SQL — при locale C Postgres не сгъва кирилица.
+  // Затова вадим кандидатите по цена и сравняваме имената в JavaScript (toLowerCase работи с кирилица).
+  const candidates = await many<{ id: string; place_name: string | null; city: string | null }>(
+    `select id::text, place_name, city from posts
+      where source = 'receipt_basket' and coalesce(price_paid, 0) = $1
+      order by created_at asc
+      limit 25`,
+    [pricePaid]
+  );
+  const norm = (v: string | null | undefined) => (v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const existingPost = placeName.trim()
+    ? candidates.find((c) => norm(c.place_name) === norm(placeName) && norm(c.city) === norm(city))
+    : undefined;
+  if (existingPost) {
+    await query('update posts set signal_count = signal_count + 1 where id = $1', [existingPost.id]);
+    await query(
+      `update fb_receipt_queue
+          set status = 'approved', post_id = $2, reviewed_at = now(), reviewed_by = $3
+        where id = $1 and status in ('pending', 'not_receipt')`,
+      [row.id, existingPost.id, adminId]
+    );
+    return { postId: existingPost.id, alreadyApproved: true };
+  }
+
   const tags = [
     polarity === 'green' ? '#ТопНаходка' : '#ЧервенФлаг',
     '#КасоваБележка',
