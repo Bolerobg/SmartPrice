@@ -3504,6 +3504,7 @@ python import_receipts.py --file receipts.json --commit  # внася наист
 
 let fbReceiptsFilter = 'pending';
 let fbReceiptsTopic = '';
+let fbFlaggedOnly = false;
 /** Заглавия на темите (интересите) — за етикетите в опашката. */
 const FB_TOPIC_TITLES = {
   deals: '🏷️ Оферти и цени',
@@ -3534,6 +3535,8 @@ async function renderFbReceipts(box) {
   );
   const topicsAll = Array.isArray(data?.topics?.all) ? data.topics.all : [];
   const topicsEnabled = Array.isArray(data?.topics?.enabled) ? data.topics.enabled : [];
+  const cost = data?.cost || {};
+  const flaggedCount = (data?.items || []).filter((it) => it.flagged).length;
   const cfg = data.config || {};
   const counts = data.counts || { pending: 0, approved: 0, rejected: 0, not_receipt: 0 };
   const jobs = data.jobs || [];
@@ -3600,6 +3603,20 @@ async function renderFbReceipts(box) {
         </div>
       </div>
 
+      <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(250,204,21,.35);border-radius:12px;background:rgba(250,204,21,.06)">
+        <span><strong>💰 Дневен бюджет за Apify</strong> — спираме обиколките, когато се похарчи лимитът за деня.</span>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px">
+          <span class="pill ${Number(cost.todayUsd || 0) >= Number(cost.limitUsd || 0) ? 'pill-red' : 'pill-green'}">
+            днес: $${Number(cost.todayUsd || 0).toFixed(2)} от $${Number(cost.limitUsd || 0.5).toFixed(2)}
+          </span>
+          <span class="pill pill-dim">този месец: $${Number(cost.monthUsd || 0).toFixed(2)}</span>
+          <span class="pill pill-dim">днес: ${Number(cost.todayPosts || 0)} поста · ${Number(cost.todayAi || 0)} AI заявки</span>
+          <input id="fb-daily-limit" type="number" min="0" max="50" step="0.05" value="${Number(cost.limitUsd || 0.5)}" style="width:110px">
+          <button class="btn btn-sm btn-ok" id="fb-save-cost">💾 Запази лимита</button>
+          <span class="hint" style="margin:0">Съвет: при план $5/месец в Apify дръж лимита ~$0.15 на ден.</span>
+        </div>
+      </div>
+
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center">
         <button class="btn btn-primary" id="fb-run-btn">▶ Свали и обработи постовете</button>
         <button class="btn" id="fb-manual-btn">➕ Подай пост / снимка на бележка</button>
@@ -3660,6 +3677,7 @@ async function renderFbReceipts(box) {
           <button class="btn btn-sm ${fbReceiptsFilter === 'all' ? 'btn-primary' : 'btn-ghost'}" data-fb-tab="all">Всички</button>
           <button class="btn btn-sm ${fbReceiptsPolarity === 'red' ? 'btn-primary' : 'btn-ghost'}" data-fb-pol="red">🔴 Червени флагове</button>
           <button class="btn btn-sm ${fbReceiptsPolarity === 'green' ? 'btn-primary' : 'btn-ghost'}" data-fb-pol="green">🟢 Топ находки</button>
+          <button class="btn btn-sm ${fbFlaggedOnly ? 'btn-primary' : 'btn-ghost'}" id="fb-flag-filter">⚠️ С предупреждения${flaggedCount ? ` (${flaggedCount})` : ''}</button>
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
@@ -3692,6 +3710,7 @@ async function renderFbReceipts(box) {
           items.length
             ? items
                 .filter((it) => !fbReceiptsPolarity || it.polarity === fbReceiptsPolarity)
+                .filter((it) => !fbFlaggedOnly || it.flagged)
                 .map((it) => renderFbQueueItemCard(it))
                 .join('')
             : `<div class="empty" style="padding:28px 12px">Няма записи в този списък. Пусни сваляне от групата горе или подай пост със снимка на бележка.</div>`
@@ -3716,6 +3735,28 @@ async function renderFbReceipts(box) {
       render('fb_receipts', true);
     };
   });
+
+  const flagFilter = document.getElementById('fb-flag-filter');
+  if (flagFilter) {
+    flagFilter.onclick = () => {
+      fbFlaggedOnly = !fbFlaggedOnly;
+      render('fb_receipts', true);
+    };
+  }
+
+  const saveCostBtn = document.getElementById('fb-save-cost');
+  if (saveCostBtn) {
+    saveCostBtn.onclick = async () => {
+      const limitUsd = Number(document.getElementById('fb-daily-limit').value);
+      try {
+        await api('/fb-receipts/cost', { method: 'POST', body: JSON.stringify({ limitUsd }) });
+        toast('Дневният лимит е запазен: $' + limitUsd.toFixed(2), 'ok');
+        render('fb_receipts', true);
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    };
+  }
 
   const saveTopicsBtn = document.getElementById('fb-save-topics');
   if (saveTopicsBtn) {
@@ -4006,6 +4047,11 @@ function renderFbQueueItemCard(it) {
             <div>
               <span class="pill ${isGreen ? 'pill-green' : 'pill-red'}">${isGreen ? '🟢 Находка / Оферта' : '🔴 Червен флаг / Сигнал'}</span>
               <span class="pill pill-dim">${esc(SCRAPE_CAT_LABELS[it.category] || it.category)}</span>
+              ${
+                it.flagged
+                  ? `<span class="pill pill-gold">⚠️ Провери: ${esc((it.flags || []).join('; ')).slice(0, 120)}</span>`
+                  : ''
+              }
               ${
                 it.topic && it.topic !== 'deals'
                   ? `<span class="pill pill-cyan">${FB_TOPIC_TITLES[it.topic] || esc(it.topic)}</span>`

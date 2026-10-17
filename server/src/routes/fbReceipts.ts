@@ -6,7 +6,11 @@ import { audit, requireAdminPanel } from '../lib/admin.js';
 import {
   approveFbReceiptItem,
   checkQueueImages,
+  fbBudgetAllows,
   FB_TOPICS,
+  getFbCost,
+  queueQualityFlags,
+  saveFbDailyLimitUsd,
   getFbGroups,
   getFbTopics,
   saveFbTopics,
@@ -117,6 +121,19 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       getFbTopics(),
     ]);
 
+    // Жълти флагове: автоматични проверки преди публикуване (цена, дубликати, място, ЕИК…).
+    const enriched = await Promise.all(
+      queue.map(async (it) => {
+        try {
+          const flags = await queueQualityFlags(it as Record<string, never>);
+          return { ...it, flags, flagged: flags.length > 0 };
+        } catch {
+          return { ...it, flags: [] as string[], flagged: false };
+        }
+      })
+    );
+    const cost = await getFbCost();
+
     return {
       config: {
         hasApifyToken: cfg.hasApifyToken,
@@ -138,9 +155,10 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
           category: t.category,
         })),
       },
+      cost,
       counts: counts ?? { pending: 0, approved: 0, rejected: 0, not_receipt: 0 },
       jobs,
-      items: queue,
+      items: enriched,
     };
   });
 
@@ -180,6 +198,9 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
         defaultCity: z.string().trim().max(80).default('София'),
       })
       .parse(req.body ?? {});
+
+    const budget = await fbBudgetAllows();
+    if (!budget.allowed) throw badRequest(budget.reason ?? 'Дневният лимит е достигнат.');
 
     let parsedUrl: { canonicalUrl: string; groupId: string };
     try {
@@ -386,6 +407,26 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
     return { ok: true, enabled: topics.map((t) => t.key) };
   });
 
+  /** Дневен бюджет за Apify: колко е похарчено и какъв е лимитът. */
+  app.get('/api/admin/fb-receipts/cost', async (req) => {
+    await requireAdminPanel(req);
+    return await getFbCost();
+  });
+
+  /** Задаване на дневния лимит (в долари). */
+  app.post('/api/admin/fb-receipts/cost', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z.object({ limitUsd: z.coerce.number().min(0).max(50) }).parse(req.body ?? {});
+    const limitUsd = await saveFbDailyLimitUsd(input.limitUsd);
+    await audit({
+      admin,
+      action: 'fb_receipts.cost_limit',
+      details: { limitUsd },
+      ip: req.ip,
+    });
+    return { ok: true, limitUsd };
+  });
+
   /** Запазените групи за автоматични обиколки. */
   app.get('/api/admin/fb-receipts/groups', async (req) => {
     await requireAdminPanel(req);
@@ -415,6 +456,9 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
         defaultCity: z.string().trim().max(80).default('София'),
       })
       .parse(req.body ?? {});
+
+    const budget = await fbBudgetAllows();
+    if (!budget.allowed) throw badRequest(budget.reason ?? 'Дневният лимит е достигнат.');
 
     const res = await runAllFbGroups({
       adminId: admin.id,

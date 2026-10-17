@@ -511,6 +511,7 @@ async function attachFbComments(
   const commentsUsd = await fetchApifyRunUsage(apifyToken, 'apify~facebook-comments-scraper');
   if (commentsUsd !== null) {
     await onLog('Apify разход за коментарите: $' + commentsUsd.toFixed(4));
+    await addFbSpend({ usd: commentsUsd });
   }
   let n = 0;
   targets.forEach((t, i) => {
@@ -530,6 +531,172 @@ function looksLikePriceSignal(text: string): boolean {
   const price = /(\d[\d\s.,]*)\s*(€|лв\.?|EUR|BGN|евро|лева|евроцента)/i.test(t);
   const complaint = /скъп|измам|надцен|вдигна|повиши|такс|грамаж|необоснов|лъж|промоция|завиши/i.test(t);
   return price || complaint;
+}
+
+/* ================= Дневен бюджет за Apify ================= */
+
+/** Дневен лимит в долари (настройка `fb_daily_usd_limit`, по подразбиране $0.50). */
+export async function getFbDailyLimitUsd(): Promise<number> {
+  const raw = await getSetting('fb_daily_usd_limit', '0.5');
+  const v = Number(raw);
+  return Number.isFinite(v) && v > 0 ? v : 0.5;
+}
+
+export async function saveFbDailyLimitUsd(input: number): Promise<number> {
+  const v = Math.max(0, Math.min(50, Number(input) || 0));
+  await setSetting('fb_daily_usd_limit', String(v));
+  return v;
+}
+
+interface SpendDay {
+  usd: number;
+  posts: number;
+  ai: number;
+}
+
+async function readSpendDays(): Promise<Record<string, SpendDay>> {
+  try {
+    const raw = await getSetting('fb_spend_days', '{}');
+    const obj = JSON.parse(raw) as Record<string, SpendDay>;
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Добавя разход към днешния ден (пази последните 30 дни). */
+export async function addFbSpend(part: { usd?: number; posts?: number; ai?: number }): Promise<void> {
+  const days = await readSpendDays();
+  const day = new Date().toISOString().slice(0, 10);
+  const cur = days[day] ?? { usd: 0, posts: 0, ai: 0 };
+  cur.usd = Number((cur.usd + (part.usd ?? 0)).toFixed(4));
+  cur.posts += part.posts ?? 0;
+  cur.ai += part.ai ?? 0;
+  days[day] = cur;
+  const trimmed: Record<string, SpendDay> = {};
+  for (const k of Object.keys(days).sort().slice(-30)) trimmed[k] = days[k]!;
+  await setSetting('fb_spend_days', JSON.stringify(trimmed));
+}
+
+/** Колко е похарчено днес и този месец. */
+export async function getFbCost(): Promise<{
+  limitUsd: number;
+  todayUsd: number;
+  todayPosts: number;
+  todayAi: number;
+  monthUsd: number;
+  days: Array<{ day: string; usd: number; posts: number; ai: number }>;
+}> {
+  const [limitUsd, days] = await Promise.all([getFbDailyLimitUsd(), readSpendDays()]);
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const list = Object.entries(days)
+    .map(([day, v]) => ({ day, usd: Number(v.usd ?? 0), posts: Number(v.posts ?? 0), ai: Number(v.ai ?? 0) }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  return {
+    limitUsd,
+    todayUsd: days[today]?.usd ?? 0,
+    todayPosts: days[today]?.posts ?? 0,
+    todayAi: days[today]?.ai ?? 0,
+    monthUsd: Number(list.filter((d) => d.day.startsWith(month)).reduce((a, d) => a + d.usd, 0).toFixed(4)),
+    days: list.slice(-14),
+  };
+}
+
+/** Има ли още бюджет за днес (ползва се преди пускане на обиколка). */
+export async function fbBudgetAllows(): Promise<{
+  allowed: boolean;
+  todayUsd: number;
+  limitUsd: number;
+  reason?: string;
+}> {
+  const c = await getFbCost();
+  if (c.limitUsd > 0 && c.todayUsd >= c.limitUsd) {
+    return {
+      allowed: false,
+      todayUsd: c.todayUsd,
+      limitUsd: c.limitUsd,
+      reason:
+        'Дневният лимит за Apify е достигнат ($' +
+        c.todayUsd.toFixed(2) +
+        ' от $' +
+        c.limitUsd.toFixed(2) +
+        '). Вдигни го от панела (ФБ Бележки → Дневен бюджет) или изчакай утре.',
+    };
+  }
+  return { allowed: true, todayUsd: c.todayUsd, limitUsd: c.limitUsd };
+}
+
+/** Брой AI заявки в текущата обиколка (за дневника на разхода). */
+let aiCallsInRun = 0;
+
+export function takeAiCalls(): number {
+  const n = aiCallsInRun;
+  aiCallsInRun = 0;
+  return n;
+}
+
+/* ============ Проверки преди публикуване (жълти флагове) ============ */
+
+/**
+ * Автоматични проверки на запис от опашката. Връща списък с предупреждения —
+ * показват се в панела, а авто-одобрението се спира, ако има поне едно.
+ */
+export async function queueQualityFlags(row: {
+  title?: string | null;
+  description?: string | null;
+  place_name?: string | null;
+  city?: string | null;
+  category?: string | null;
+  merchant_tax_id?: string | null;
+  receipt_date?: string | null;
+  total_amount?: number | string | null;
+  confidence?: number | string | null;
+}): Promise<string[]> {
+  const flags: string[] = [];
+  const title = String(row.title ?? '').trim();
+  const desc = String(row.description ?? '').trim();
+  const place = String(row.place_name ?? '').trim();
+  const city = String(row.city ?? '').trim();
+  const cat = String(row.category ?? 'other');
+  const price = Number(row.total_amount ?? 0) || 0;
+  const conf = Number(row.confidence ?? 0) || 0;
+
+  if (title.length < 12) flags.push('Твърде кратко заглавие');
+  if (desc.length < 40) flags.push('Твърде кратко описание');
+  if (!place) flags.push('Липсва място');
+  else if (/^(магазин|обект|обектът|неразчетен|неизвестен|майстор|друг|разни)/i.test(place)) {
+    flags.push('Мястото е общо („' + place + '“)');
+  }
+  if (!city) flags.push('Липсва град');
+  if (conf > 0 && conf < 0.6) flags.push('Ниска увереност на AI (' + Math.round(conf * 100) + '%)');
+  const tax = String(row.merchant_tax_id ?? '').replace(/\D/g, '');
+  if (tax && !isValidEik(tax)) flags.push('ЕИК не изглежда реален: ' + tax);
+  const y = yearFromDate(String(row.receipt_date ?? '') || null);
+  if (y !== null && y > new Date().getFullYear()) flags.push('Дата в бъдещето');
+
+  if (price > 0) {
+    // Цена спрямо обичайното за категорията (медиана на публикуваното).
+    const st = await one<{ med: number | null; n: number }>(
+      `select percentile_cont(0.5) within group (order by p.price_paid)::float as med, count(*)::int as n
+         from posts p where p.category = $1 and p.price_paid > 0`,
+      [cat]
+    ).catch(() => null);
+    if (st && st.n >= 5 && st.med && st.med > 0) {
+      const ratio = price / st.med;
+      if (ratio >= 5) flags.push('Цената е ' + ratio.toFixed(0) + '× над обичайното за категорията');
+      else if (ratio <= 0.15) flags.push('Цената е подозрително ниска за категорията');
+    }
+    // Много подобна вече публикувана оферта (същият град и цена).
+    const dup = await one<{ code: string | null; title: string }>(
+      `select public_code as code, title from posts
+        where city = $1 and price_paid = $2 and similarity(title, $3) > 0.55
+        limit 1`,
+      [city, price, title]
+    ).catch(() => null);
+    if (dup) flags.push('Прилича на вече публикувана оферта' + (dup.code ? ' #' + dup.code : ''));
+  }
+  return flags;
 }
 
 /** Колко е изяла последната обиколка на даден Apify актьор (в долари). */
@@ -585,6 +752,9 @@ async function fetchViaApify(
   const runUsd = await fetchApifyRunUsage(apifyToken, 'apify~facebook-groups-scraper');
   if (runUsd !== null) {
     await onLog('Apify разход за тази обиколка: $' + runUsd.toFixed(4));
+  }
+  if (runUsd !== null || rawItems.length) {
+    await addFbSpend({ usd: runUsd ?? 0, posts: rawItems.length });
   }
 
   const posts: RawFbPost[] = [];
@@ -1101,6 +1271,8 @@ export async function analyzeFbReceiptWithAi(params: {
   if (!content) {
     throw new Error('Vision моделът не върна съдържание.');
   }
+
+  aiCallsInRun += 1; // за дневника на разхода
 
   let parsed: Record<string, unknown>;
   try {
@@ -1784,6 +1956,20 @@ export async function runFbGroupJob(
       throw new Error('AI OCR не е активен: липсва OPENROUTER_API_KEY в .env.');
     }
 
+    // Дневен бюджет: не пускаме нова обиколка, ако лимитът за Apify е достигнат.
+    const budget = await fbBudgetAllows();
+    if (!budget.allowed) {
+      await logJob(jobId, '⛔ ' + (budget.reason ?? 'Дневният лимит е достигнат.'));
+      await query(`update fb_receipt_jobs set status = 'failed', error = $2, finished_at = now() where id = $1`, [
+        jobId,
+        (budget.reason ?? 'Дневният лимит е достигнат.').slice(0, 400),
+      ]);
+      return;
+    }
+    if (budget.limitUsd > 0 && budget.todayUsd >= budget.limitUsd * 0.8) {
+      await logJob(jobId, `⚠️ Похарчено днес: $${budget.todayUsd.toFixed(2)} от $${budget.limitUsd.toFixed(2)}.`);
+    }
+
     const { canonicalUrl, groupId } = parseFbGroupUrl(job.group_url);
     await logJob(jobId, `Стартирам обиколка на Facebook група: ${canonicalUrl}`);
 
@@ -1880,21 +2066,47 @@ export async function runFbGroupJob(
           [jobId]
         );
         if (approver?.created_by) {
-          const auto = await many<{ id: string }>(
-            `select id::text from fb_receipt_queue
+          const auto = await many<{
+            id: string;
+            title: string | null;
+            description: string | null;
+            place_name: string | null;
+            city: string | null;
+            category: string | null;
+            merchant_tax_id: string | null;
+            receipt_date: string | null;
+            total_amount: number | null;
+            confidence: number | null;
+          }>(
+            `select id::text, title, description, place_name, city, category, merchant_tax_id,
+                    receipt_date, total_amount::float as total_amount, confidence::float as confidence
+               from fb_receipt_queue
               where status = 'pending' and local_image_url is not null and confidence >= $1
                 and coalesce(topic, 'deals') = 'deals'
               order by confidence desc limit 25`,
             [cfgNow.autoApproveMin]
           );
           let approved = 0;
+          let heldForReview = 0;
           for (const row of auto) {
             try {
+              // Авто-одобрение само за чисти записи — при жълт флаг отива при човека.
+              const flags = await queueQualityFlags(row);
+              if (flags.length) {
+                heldForReview++;
+                continue;
+              }
               const done = await approveFbReceiptItem(row.id, approver.created_by);
               if (done) approved++;
             } catch {
               /* не мина — остава за ръчно одобрение */
             }
+          }
+          if (heldForReview) {
+            await logJob(
+              jobId,
+              `✋ ${heldForReview} сигнала останаха за преглед (имат предупреждения).`
+            );
           }
           if (auto.length) {
             await logJob(
@@ -1908,9 +2120,14 @@ export async function runFbGroupJob(
       await logJob(jobId, `Авто-одобрение (предупреждение): ${(err as Error).message.slice(0, 120)}`);
     }
 
+    const aiUsed = takeAiCalls();
+    if (aiUsed) await addFbSpend({ ai: aiUsed });
+
     await logJob(
       jobId,
-      `Готово! Чакат одобрение: ${res.queued} бележки · пропуснати: ${res.skipped} · грешки: ${res.failed}.`
+      `Готово! Чакат одобрение: ${res.queued} бележки · пропуснати: ${res.skipped} · грешки: ${res.failed}` +
+        (aiUsed ? ` · AI заявки: ${aiUsed}` : '') +
+        '.'
     );
     await query(
       `update fb_receipt_jobs set status = 'done', finished_at = now() where id = $1`,
