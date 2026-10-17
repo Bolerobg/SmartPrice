@@ -37,6 +37,12 @@ const CATEGORIES = [
   'other',
 ] as const;
 
+function hashCode(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return h;
+}
+
 const lineItemSchema = z.object({
   name: z.string().trim().min(1).max(200),
   quantity: z.coerce.number().positive().max(10000).default(1),
@@ -426,6 +432,72 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       ip: req.ip,
     });
     return { ok: true, limitUsd };
+  });
+
+  /**
+   * Внасяне на обяви от ВЪНШЕН източник (bazar.bg, imot.bg, alo.bg…).
+   * Всяка обява минава през СЪЩИЯ AI като Facebook постовете: тема, преразказ в стила на
+   * SmartPrice, ясно място, цени в €, чиста снимка → влиза в опашката за одобрение.
+   */
+  app.post('/api/admin/sources/ingest', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        source: z.string().trim().min(2).max(40),
+        defaultCity: z.string().trim().max(80).default('София'),
+        items: z
+          .array(
+            z.object({
+              url: z.string().trim().min(8).max(600),
+              title: z.string().trim().min(3).max(300),
+              price: z.coerce.number().positive().max(1_000_000),
+              currency: z.enum(['BGN', 'EUR']).default('BGN'),
+              city: z.string().trim().max(80).optional(),
+              description: z.string().trim().max(4000).optional(),
+              imageUrl: z.string().trim().min(8).max(1200).optional(),
+              postedAt: z.string().trim().max(80).optional(),
+            })
+          )
+          .min(1)
+          .max(30),
+      })
+      .parse(req.body ?? {});
+
+    // Обикновени постове със снимка + текст — същият път като Facebook, само друг източник.
+    const posts = input.items.map((it) => {
+      const bgn = it.currency === 'BGN' ? ` (${it.price.toFixed(2)} лв.)` : '';
+      const where = it.city ? `Място: ${it.city}. ` : '';
+      return {
+        postId: 'src-' + input.source + '-' + (it.url.match(/(\d{5,})/) ?? [, Math.abs(hashCode(it.url)).toString()])[1],
+        postUrl: it.url,
+        text:
+          `Обява от ${input.source}: ${it.title}. ${where}` +
+          `Цена: ${it.price.toFixed(2)} ${it.currency}${bgn}. ` +
+          (it.description ? it.description : ''),
+        imageUrls: it.imageUrl ? [it.imageUrl] : [],
+        postedAt: it.postedAt,
+      };
+    }).filter((p) => p.imageUrls.length > 0); // без снимка не влиза (приложението показва снимка)
+
+    if (!posts.length) {
+      throw badRequest('Нито една обява няма снимка — приложението показва офертите със снимка.');
+    }
+
+    const res = await processRawFbPosts({
+      groupUrl: `https://${input.source}/`,
+      posts,
+      defaultCity: input.defaultCity,
+      maxReceipts: posts.length,
+    });
+
+    await audit({
+      admin,
+      action: 'sources.ingest',
+      details: { source: input.source, submitted: input.items.length, queued: res.queued, skipped: res.skipped, failed: res.failed },
+      ip: req.ip,
+    });
+
+    return { ok: true, source: input.source, ...res };
   });
 
   /** Ценови аларми: колко са активни и какво е изпратено напоследък. */
