@@ -260,9 +260,11 @@ export default function ProfileScreen() {
                       : 'Обнови данните от сървъра'}
               </Text>
             </TouchableOpacity>
+          </View>
 
-            <PushNotificationsCard />
+          <PushNotificationsCard />
 
+          <View style={styles.monetizationActions}>
             <TouchableOpacity
               style={styles.testNudgeBtn}
               onPress={() => router.push('/change-password' as never)}
