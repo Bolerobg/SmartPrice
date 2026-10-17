@@ -6,7 +6,10 @@ import { audit, requireAdminPanel } from '../lib/admin.js';
 import {
   approveFbReceiptItem,
   checkQueueImages,
+  getFbGroups,
   getFbScraperConfig,
+  runAllFbGroups,
+  saveFbGroups,
   parseFbGroupUrl,
   processRawFbPosts,
   runFbGroupJob,
@@ -331,6 +334,63 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
   });
 
   /** Отхвърляне на една или няколко бележки от опашката. */
+  /** Запазените групи за автоматични обиколки. */
+  app.get('/api/admin/fb-receipts/groups', async (req) => {
+    await requireAdminPanel(req);
+    return { groups: await getFbGroups() };
+  });
+
+  /** Запис на списъка с групи (един адрес на ред). */
+  app.post('/api/admin/fb-receipts/groups', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z.object({ urls: z.array(z.string().max(600)).max(50) }).parse(req.body ?? {});
+    const groups = await saveFbGroups(input.urls);
+    await audit({
+      admin,
+      action: 'fb_receipts.groups',
+      details: { count: groups.length },
+      ip: req.ip,
+    });
+    return { ok: true, groups, skipped: input.urls.length - groups.length };
+  });
+
+  /** Пуска обиколка на ВСИЧКИ запазени групи (една след друга, с пауза между тях). */
+  app.post('/api/admin/fb-receipts/run-all', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        count: z.coerce.number().int().min(1).max(100).default(20),
+        defaultCity: z.string().trim().max(80).default('София'),
+      })
+      .parse(req.body ?? {});
+
+    const res = await runAllFbGroups({
+      adminId: admin.id,
+      count: input.count,
+      defaultCity: input.defaultCity,
+    });
+
+    void (async () => {
+      for (const s of res.started) {
+        try {
+          await runFbGroupJob(s.jobId, { defaultCity: input.defaultCity });
+        } catch {
+          /* грешката се записва в самата задача */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20_000));
+      }
+    })();
+
+    await audit({
+      admin,
+      action: 'fb_receipts.run_all',
+      details: { started: res.started.length },
+      ip: req.ip,
+    });
+
+    return { ok: true, started: res.started.length, skipped: res.skipped.length, groups: res.started };
+  });
+
   /** Проверка на снимките в опашката за следи от Facebook (интерфейс, профили, лого). */
   app.post('/api/admin/fb-receipts/queue/check-images', async (req) => {
     const admin = await requireAdminPanel(req);

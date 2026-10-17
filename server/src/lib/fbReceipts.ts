@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { many, one, query, tx } from '../db.js';
 import { env, features } from '../env.js';
 import { getSetting, setSetting } from './settings.js';
+import { parseUnit } from './scraper.js';
 import { putImage, publicUrl } from './storage.js';
 import { officialProfileId, pickUserAgent } from './scraper.js';
 
@@ -92,6 +93,63 @@ export function parseFbGroupUrl(rawUrl: string): { canonicalUrl: string; groupId
     ? `https://www.facebook.com/groups/${groupId}`
     : `https://www.facebook.com/${u.pathname.replace(/^\/+/, '')}`;
   return { canonicalUrl, groupId };
+}
+
+
+/** Списък с групи за автоматични обиколки (един адрес на ред). */
+export async function getFbGroups(): Promise<string[]> {
+  const saved = await getSetting('fb_groups', '');
+  return saved
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter((s) => /facebook\.com\/groups\//i.test(s));
+}
+
+export async function saveFbGroups(urls: string[]): Promise<string[]> {
+  const clean: string[] = [];
+  for (const raw of urls) {
+    const url = String(raw || '').trim();
+    if (!url) continue;
+    try {
+      const parsed = parseFbGroupUrl(url);
+      if (!clean.includes(parsed.canonicalUrl)) clean.push(parsed.canonicalUrl);
+    } catch {
+      /* невалиден адрес — прескачаме */
+    }
+  }
+  await setSetting('fb_groups', clean.join('\n'));
+  return clean;
+}
+
+/**
+ * Пуска обиколка на ВСИЧКИ запазени групи, една след друга (без да удряме Facebook наведнъж).
+ * Връща веднага — задачите вървят във фона.
+ */
+export async function runAllFbGroups(params: {
+  adminId: string;
+  count?: number;
+  defaultCity?: string;
+}): Promise<{ started: Array<{ groupUrl: string; jobId: string }>; skipped: string[] }> {
+  const groups = await getFbGroups();
+  const started: Array<{ groupUrl: string; jobId: string }> = [];
+  const skipped: string[] = [];
+  // Само създаваме задачите — изпълнението е в извикващия (една след друга, с пауза).
+  for (const groupUrl of groups) {
+    try {
+      const parsed = parseFbGroupUrl(groupUrl);
+      const job = await one<{ id: string }>(
+        `insert into fb_receipt_jobs (group_url, group_id, status, target_count, created_by)
+         values ($1, $2, 'running', $3, $4)
+         returning id::text`,
+        [parsed.canonicalUrl, parsed.groupId, params.count ?? 20, params.adminId]
+      );
+      if (job) started.push({ groupUrl: parsed.canonicalUrl, jobId: job.id });
+      else skipped.push(groupUrl);
+    } catch {
+      skipped.push(groupUrl);
+    }
+  }
+  return { started, skipped };
 }
 
 /** Чете настройките за Facebook скрапера (Apify токен и по избор FB cookie). */
@@ -1805,6 +1863,50 @@ export async function approveFbReceiptItem(
       ]
     );
     const newPostId = postRes.rows[0]!.id;
+
+    // Единична цена (€/кг, €/л) от грамажа в заглавието/артикулите — за да може да се сравнява.
+    let unitQty: number | null = null;
+    let unitType: string | null = null;
+    let perUnit: number | null = null;
+    const unit = parseUnit(`${title} ${cleanItems.map((i) => i.name).join(' ')}`);
+    const QTY_TO_KG: Record<string, number> = { g: 1000, kg: 1, ml: 1000, l: 1, pcs: 1 };
+    const unitQtyRaw = typeof unit.quantity === 'number' ? unit.quantity : 0;
+    const unitKey = typeof unit.unit === 'string' ? unit.unit : '';
+    if (unitKey && QTY_TO_KG[unitKey] !== undefined && unitQtyRaw > 0) {
+      unitType = unitKey;
+      unitQty = unitQtyRaw;
+      perUnit = Number(((pricePaid / unitQtyRaw) * QTY_TO_KG[unitKey]!).toFixed(4));
+    }
+
+    // „Уж промоция“: ако същият продукт в същия град вече е бил на същата или по-ниска цена,
+    // обявената „промоция“ не е промоция. Пазим го като флаг (колоната съществува в базата).
+    const words = title
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 4);
+    let fakePromo = false;
+    if (words.length) {
+      const prev = await client.query<{ min_price: string | null }>(
+        `select min(ph.price)::text as min_price
+           from price_history ph
+           join posts pp on pp.id = ph.post_id
+          where pp.city = $1 and pp.id <> $2
+            and pp.title ilike '%' || $3 || '%'
+            and ph.price < $4`,
+        [city, newPostId, words[0]!, pricePaid]
+      );
+      const minPrev = Number(prev.rows[0]?.min_price ?? 0);
+      const claimsDeal = /промоц|намал|отстъпк|изгодн|евтин/i.test(`${title} ${description}`);
+      // Обявява „промоция“, а в приложението същият продукт в този град вече е бил по-евтин.
+      fakePromo = claimsDeal && minPrev > 0 && minPrev < pricePaid;
+    }
+
+    if (unitQty !== null || fakePromo) {
+      await client.query(
+        'update posts set unit_quantity = $2, unit_type = $3, price_per_unit = $4, is_fake_promo = $5 where id = $1',
+        [newPostId, unitQty, unitType, perUnit, fakePromo]
+      );
+    }
 
     await client.query(
       `insert into price_history (post_id, price, status, reported_by)
