@@ -1734,8 +1734,13 @@ export async function approveFbReceiptItem(
   // не правим дубликат — вдигаме брояча „N души сигнализират“ и свързваме сигнала с нея.
   // ВНИМАНИЕ: не сравняваме с lower() в SQL — при locale C Postgres не сгъва кирилица.
   // Затова вадим кандидатите по цена и сравняваме имената в JavaScript (toLowerCase работи с кирилица).
-  const candidates = await many<{ id: string; place_name: string | null; city: string | null }>(
-    `select id::text, place_name, city from posts
+  const candidates = await many<{
+    id: string;
+    place_name: string | null;
+    city: string | null;
+    signal_count: number;
+  }>(
+    `select id::text, place_name, city, signal_count::int as signal_count from posts
       where source = 'receipt_basket' and coalesce(price_paid, 0) = $1
       order by created_at asc
       limit 25`,
@@ -1746,7 +1751,19 @@ export async function approveFbReceiptItem(
     ? candidates.find((c) => norm(c.place_name) === norm(placeName) && norm(c.city) === norm(city))
     : undefined;
   if (existingPost) {
-    await query('update posts set signal_count = signal_count + 1 where id = $1', [existingPost.id]);
+    // Брояч + видим етикет в приложението (таговете се показват и на картата, и в офертата).
+    const nextCount = (existingPost.signal_count ?? 1) + 1;
+    await query(
+      `update posts
+          set signal_count = $2,
+              tags = (
+                select coalesce(array_agg(t), '{}')
+                  from unnest(coalesce(tags, '{}'::text[])) as t
+                 where t !~ '^#[0-9]+Сигнал'
+              ) || $3::text
+        where id = $1`,
+      [existingPost.id, nextCount, '#' + nextCount + 'Сигнала']
+    );
     await query(
       `update fb_receipt_queue
           set status = 'approved', post_id = $2, reviewed_at = now(), reviewed_by = $3
