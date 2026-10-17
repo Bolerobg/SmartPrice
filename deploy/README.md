@@ -7,6 +7,7 @@
 | Деплой на код (push → продукция) | Hermes cron „SmartPrice deploy“ → `~/AppData/Local/hermes/scripts/smartprice_deploy.py` | на всеки 20 мин, ако има нов комит в `main` |
 | Мониторинг и аларми в Telegram | Hermes cron „SmartPrice pazar“ → `smartprice_watchdog.py` | на всеки 30 мин, мълчи когато всичко е наред |
 | Нощно резервно копие на базата | `deploy/backup.sh` (crontab на VPS-а) | всеки ден в 04:10 |
+| Качване на бекъпа в Google Drive | Hermes cron „SmartPrice backup to Drive“ → `smartprice_gdrive_backup.py` | на всеки час (:40, 05–22 ч), тихо при успех |
 | Обиколка на Facebook групите | crontab на VPS-а | всеки ден в 07:30 и 19:30 |
 | Изчистване на кеша на панела | в `smartprice_deploy.py` (Cloudflare API) | след всеки успешен деплой |
 
@@ -44,3 +45,12 @@ hermes cron list
   **Zone: Cache Purge: Purge** + **Zone: Zone: Read** (+ Cache Rules: Edit).
 - Nginx дава `no-store` за `/panel/`, но Cloudflare Cache Rule презаписва хедъра на 30 дни —
   затова след деплой се пуска purge и потребителите виждат новия панел веднага.
+
+## Резервни копия в Google Drive
+- Папка: `My Drive/backupdisk` на `kolyo.hristov@gmail.com`
+  (`https://drive.google.com/drive/folders/1rxUPc3LzkqJihsQ54xITtmE0wsBdNkeb`).
+- Верига: VPS → тази машина (scp) → Mac (`~/Library/CloudStorage/GoogleDrive-kolyo.hristov@gmail.com/My Drive/backupdisk`)
+  → Drive за Desktop качва файла в облака сам.
+- Пази последните **14** копия, тихо е, когато няма какво да прави; съобщава само ако
+  бекъпът на VPS-а е стар или последното копие в Drive е над 48 ч.
+- Ако Mac-ът спи — пропуска и пробва следващия час (затова е на всеки час, а не веднъж).
