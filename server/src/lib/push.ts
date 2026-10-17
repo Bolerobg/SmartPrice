@@ -4,7 +4,11 @@
  * Ключовете се генерират първия път и се пазят в настройките (не в кода).
  * Пращаме до всички абонаменти на човека; мъртвите (404/410) се махат сами.
  */
-import * as webpush from 'web-push';
+import { createRequire } from 'node:module';
+// web-push е CommonJS — при ESM изходът не дава именуваните функции през namespace
+// import, затова го взимаме през createRequire (иначе: generateVAPIDKeys is not a function).
+const require = createRequire(import.meta.url);
+const webpush = require('web-push') as typeof import('web-push');
 import { many, one, query } from '../db.js';
 import { getSetting, setSetting } from './settings.js';
 
