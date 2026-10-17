@@ -41,6 +41,10 @@ export interface ParsedReceiptLine {
 export interface AiReceiptAnalysis {
   kind: 'receipt' | 'price_signal' | 'not_relevant';
   isReceipt: boolean;
+  /** false, ако на снимката личи, че е от Facebook (интерфейс, профили, лого). */
+  imageClean: boolean;
+  /** Какво точно издава Facebook — за дневника/причината за отказ. */
+  imageTraces?: string | null;
   skipReason?: string | null;
   polarity: 'green' | 'red';
   category: ReceiptCategory;
@@ -577,6 +581,28 @@ const str = (v: unknown, max = 200): string | undefined => {
   return t ? t.slice(0, max) : undefined;
 };
 
+/** Годината от дата-низ („16.10.2026“, „2026-10-16T…“) или null. */
+function yearFromDate(date: string | null | undefined): number | null {
+  if (!date) return null;
+  const m = /(\d{4})/.exec(date);
+  if (!m) return null;
+  const y = Number(m[1]);
+  return y >= 2000 && y <= 2100 ? y : null;
+}
+
+/** Всяка цена в текста да е в евро: „12.50 лв.“ → „6.39 €“. */
+function toEuroText(text: string): string {
+  return (text || '')
+    .replace(/(\d+[.,]?\d*)\s*(?:лв\.?|лева|BGN|LV)(?![A-Za-zА-Яа-я])/gi, (full, n: string) => {
+      const v = Number(String(n).replace(',', '.'));
+      if (!isFinite(v) || v <= 0) return full;
+      return (v / BGN_PER_EUR).toFixed(2) + ' €';
+    })
+    .replace(/\s*€\s*€/g, ' €')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 const ALIAS_FIRST_NAMES = [
   'Мария', 'Иван', 'Елена', 'Петър', 'Десислава', 'Николай', 'Габриела', 'Стоян',
   'Виктория', 'Антон', 'Калина', 'Мартин', 'Ивелина', 'Димитър', 'Силвия', 'Радослав',
@@ -671,6 +697,10 @@ export async function analyzeFbReceiptWithAi(params: {
     '     • Факти: продукт/услуга, цена, търговец, град/място. Каквото не се вижда на снимката или не е в поста — не го пиши. Ако цената е само от снимката, кажи „според снимката“.',
     '     • САМОЛИЧНОСТ: никога не пиши истинско име, телефон, линк или профил на автора. За оплакване (polarity "red") започни безлично: "Потребител сигнализира, че…". За добра находка можеш да ползваш само подадения псевдоним (полето authorAlias), напр. "<псевдоним> от <град> споделя добра оферта…". Псевдонимът е измислен — не търси истинското име.',
     '     • Завърши с факт, не с призив. Не добавяй съвети, оценки и прогнози, които не са в поста.',
+    '     • ДАТА: приемаме само бележки и постове от 2026 г. насам. Ако на бележката (или в текста/датата на поста) датата е преди 01.01.2026 → "kind": "not_relevant", "isReceipt": false, "skipReason": "По-старо от 2026 г.".',
+    '     • ВАЛУТА: всички цени в заглавието и описанието са САМО в евро, изписани с „€“. Ако бележката е в лева — превалутирай (1 € = 1.95583 лв.). НЕ пиши „лв.“, „BGN“, „лева“, „£“, „$“ или друга валута.',
+    '     • ЧИСТОТА НА СНИМКАТА: "imageClean" е false, ако на снимката се вижда нещо, което издава, че идва от Facebook — интерфейс (харесвания, коментари, споделяния), име или снимка на профил, надпис/лого „Facebook“, скрийншот на пост или на групата. Ако на снимката е само бележката/цената/продуктът/табелата — "imageClean" е true.',
+    '     • "imageTraces": string | null — какво точно издава Facebook (кратко: „интерфейс с име на профил и харесвания“). Ако няма нищо — null.',
     '     • КОМЕНТАРИ: ако ти подам коментари под поста, ползвай ги САМО за да уточниш мястото (град/магазин) или да потвърдиш цената. Част от коментарите може да са мемета, спам или политика — тях не ги взимай предвид. Никога не цитирай имена от коментарите; ако вземаш цена/място от коментар, кажи „според коментарите“.',
     '   - "placeName": разбираемо име на магазина или заведението (напр. "Lidl", "Kaufland", "Ресторант ...", или името на фирмата от бона).',
     `   - "city": градът в България. За "receipt": от бележката или от текста; ако никъде не пише — "${fallbackCity}". За "price_signal": САМО истинският град (иначе "not_relevant").`,
@@ -683,6 +713,8 @@ export async function analyzeFbReceiptWithAi(params: {
     '  "skipReason": string | null,',
     '  "citySource": "receipt" | "post" | "none",',
     '  "country": string,',
+    '  "imageClean": boolean,',
+    '  "imageTraces": string | null,',
     '  "polarity": "green" | "red",',
     '  "category": "restaurants" | "hotels_airbnb" | "supermarket" | "cafes_bars" | "services_tech" | "other",',
     '  "title": string,',
@@ -758,8 +790,16 @@ export async function analyzeFbReceiptWithAi(params: {
         ? 'receipt'
         : 'none';
   const placeOk = (v: string) => Boolean(v) && v !== 'Неразчетен търговец';
+  // Само от 2026 г. насам — стари бележки не влизат в приложението.
+  const receiptYear = yearFromDate(str(parsed.date, 40) ?? null);
+  const tooOld = receiptYear !== null && receiptYear < 2026;
   const countryRaw = String(parsed.country ?? '').trim().toUpperCase();
   const isForeign = countryRaw !== '' && countryRaw !== 'BG' && !countryRaw.startsWith('БЪЛГАР');
+  // Чисти снимки: не публикуваме изображения, по които личи Facebook.
+  const imageClean = parsed.imageClean === undefined ? true : Boolean(parsed.imageClean);
+  const imageTraces = imageClean
+    ? null
+    : str(parsed.imageTraces, 240) ?? 'интерфейс или данни от Facebook';
   const rawCurrency = String(parsed.currency ?? 'BGN').toUpperCase() === 'EUR' ? 'EUR' : 'BGN';
   const isBgn = rawCurrency === 'BGN';
   const toEur = (val: number) => Number((val / BGN_PER_EUR).toFixed(2));
@@ -830,7 +870,7 @@ export async function analyzeFbReceiptWithAi(params: {
   const locationOk = citySource !== 'none' && placeOk(placeName) && Boolean(city);
   const hasNumbers = totalAmountEur > 0 || items.length > 0;
   const accepted =
-    isForeign
+    isForeign || !imageClean || tooOld
       ? false
       : kind === 'receipt'
         ? isReceipt && hasNumbers
@@ -840,20 +880,26 @@ export async function analyzeFbReceiptWithAi(params: {
 
   return {
     kind,
+    imageClean,
+    imageTraces,
     isReceipt: accepted,
     skipReason:
       str(parsed.skipReason, 240) ??
       (accepted
         ? null
-        : isForeign
-          ? 'Не е от България — не влиза в приложението'
+        : tooOld
+          ? `От ${receiptYear} г. е — приемаме само от 2026 г. насам`
+          : !imageClean
+            ? `Снимката издава Facebook (${imageTraces ?? 'интерфейс/данни'}) — приложението показва само чисти снимки`
+          : isForeign
+            ? 'Не е от България — не влиза в приложението'
           : kind === 'price_signal'
             ? 'Няма разпознаваем град/място — не влиза в червените флагове'
             : 'Снимката не съдържа касова бележка или цени.'),
     polarity,
     category,
-    title: title.slice(0, 200),
-    description: description.slice(0, 4000),
+    title: toEuroText(title).slice(0, 200),
+    description: toEuroText(description).slice(0, 4000),
     placeName: placeName.slice(0, 200),
     city: city.slice(0, 80),
     address: str(parsed.address, 240) ?? null,
@@ -905,6 +951,11 @@ async function processCommentSignals(params: {
     let perPost = 0;
     for (let i = 0; i < comments.length && perPost < 3 && queued < cap; i++) {
       const c = comments[i]!;
+      const commentYear = yearFromDate(c.postedAt ?? null);
+      if (commentYear !== null && commentYear < 2026) {
+        skipped++;
+        continue;
+      }
       if (!looksLikePriceSignal(c.text)) {
         skipped++;
         continue;
@@ -1021,6 +1072,125 @@ async function processCommentSignals(params: {
   return { queued, skipped };
 }
 
+
+/** Адрес на снимка → data URL (ползва се за повторна проверка на вече свалени снимки). */
+async function imageUrlToDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > 8 * 1024 * 1024) return null;
+    const contentType = res.headers.get('content-type') ?? 'image/jpeg';
+    return 'data:' + contentType + ';base64,' + buf.toString('base64');
+  } catch {
+    return null;
+  }
+}
+
+/** Питаме Vision модела дали по снимката личи, че е от Facebook. */
+export async function checkImageCleanliness(
+  imageDataUrl: string
+): Promise<{ clean: boolean; traces: string | null }> {
+  const res = await fetch(env.OPENROUTER_BASE_URL + '/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + env.OPENROUTER_API_KEY,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': env.PUBLIC_BASE_URL,
+      'X-Title': 'SmartPrice BG image cleanliness',
+    },
+    body: JSON.stringify({
+      model: env.OCR_MODEL,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Ти проверяваш снимка за българското приложение SmartPrice. Връщаш СТРИКТНО JSON: ' +
+            '{"imageClean": boolean, "traces": string | null, "verdict": "ok" | "fb"}. ' +
+            'imageClean е false, ако по снимката личи, че идва от Facebook: интерфейс на приложението ' +
+            '(харесвания, коментари, споделяния), име/снимка на профил, надпис или лого „Facebook“, ' +
+            'скрийншот на пост/група, броячи. true, ако е само бележката, цената, продуктът, табелата ' +
+            'или снимка от място. traces описва КРАТКО на български какво издава Facebook, иначе null.',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Провери тази снимка и върни JSON.' },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) {
+    throw new Error('Vision моделът върна грешка ' + res.status);
+  }
+  const payload = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const content = payload.choices?.[0]?.message?.content ?? '';
+  const clean = content.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  const parsed = JSON.parse(clean) as Record<string, unknown>;
+  const isClean = parsed.imageClean === undefined ? true : Boolean(parsed.imageClean);
+  const tracesRaw = parsed.traces;
+  return {
+    clean: isClean,
+    traces: isClean ? null : (typeof tracesRaw === 'string' && tracesRaw.trim() ? tracesRaw.trim().slice(0, 240) : 'интерфейс/данни от Facebook'),
+  };
+}
+
+/**
+ * Проверява снимките в опашката за следи от Facebook. „Мръсните“ не се одобряват —
+ * маркират се като `not_receipt` с причина какво точно издава Facebook.
+ */
+export async function checkQueueImages(params: { ids?: number[]; limit?: number }): Promise<{
+  checked: number;
+  clean: number;
+  dirty: number;
+  details: Array<{ id: string; title: string | null; clean: boolean; traces: string | null }>;
+}> {
+  const limit = params.limit ?? 20;
+  const rows = params.ids?.length
+    ? await many<{ id: string; local_image_url: string; title: string | null }>(
+        `select id::text, local_image_url, title from fb_receipt_queue
+          where id = any($1::bigint[]) and local_image_url is not null`,
+        [params.ids]
+      )
+    : await many<{ id: string; local_image_url: string; title: string | null }>(
+        `select id::text, local_image_url, title from fb_receipt_queue
+          where status = 'pending' and local_image_url is not null
+          order by created_at desc limit $1`,
+        [limit]
+      );
+  let clean = 0;
+  let dirty = 0;
+  const details: Array<{ id: string; title: string | null; clean: boolean; traces: string | null }> = [];
+  for (const row of rows) {
+    const dataUrl = await imageUrlToDataUrl(row.local_image_url);
+    if (!dataUrl) continue;
+    let verdict: { clean: boolean; traces: string | null };
+    try {
+      verdict = await checkImageCleanliness(dataUrl);
+    } catch {
+      continue;
+    }
+    if (verdict.clean) {
+      clean++;
+    } else {
+      dirty++;
+      await query(
+        `update fb_receipt_queue
+            set status = 'not_receipt', skip_reason = $2, reviewed_at = now()
+          where id = $1 and status = 'pending'`,
+        [row.id, `Снимката издава Facebook (${verdict.traces ?? 'интерфейс/данни'}) — не пускаме такива`]
+      );
+    }
+    details.push({ id: row.id, title: row.title, clean: verdict.clean, traces: verdict.traces });
+  }
+  return { checked: details.length, clean, dirty, details };
+}
+
 async function logJob(jobId: string, msg: string) {
   const line = `${new Date().toISOString().slice(11, 19)} ${msg}`;
   await query(
@@ -1055,6 +1225,16 @@ export async function processRawFbPosts(params: {
 
   for (const post of params.posts) {
     if (queued >= cap) break;
+
+    // Само постове от 2026 г. насам.
+    const postYear = yearFromDate(post.postedAt ?? null);
+    if (postYear !== null && postYear < 2026) {
+      skipped++;
+      if (params.jobId) {
+        await logJob(params.jobId, `⏭ Постът е от ${postYear} г. — приемаме само от 2026 г. насам`);
+      }
+      continue;
+    }
 
     for (const imgUrl of post.imageUrls.slice(0, 3)) {
       if (queued >= cap) break;

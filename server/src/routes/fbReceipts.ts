@@ -5,6 +5,7 @@ import { badRequest, notFound } from '../lib/errors.js';
 import { audit, requireAdminPanel } from '../lib/admin.js';
 import {
   approveFbReceiptItem,
+  checkQueueImages,
   getFbScraperConfig,
   parseFbGroupUrl,
   processRawFbPosts,
@@ -323,6 +324,28 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
   });
 
   /** Отхвърляне на една или няколко бележки от опашката. */
+  /** Проверка на снимките в опашката за следи от Facebook (интерфейс, профили, лого). */
+  app.post('/api/admin/fb-receipts/queue/check-images', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        ids: z.array(z.coerce.number().int().positive()).max(200).optional(),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+      })
+      .parse(req.body ?? {});
+
+    const res = await checkQueueImages({ ids: input.ids, limit: input.limit });
+
+    await audit({
+      admin,
+      action: 'fb_receipts.check_images',
+      details: { checked: res.checked, dirty: res.dirty },
+      ip: req.ip,
+    });
+
+    return { ok: true, ...res };
+  });
+
   app.post('/api/admin/fb-receipts/queue/reject', async (req) => {
     const admin = await requireAdminPanel(req);
     const input = z
