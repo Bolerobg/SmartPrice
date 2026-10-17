@@ -63,7 +63,7 @@ export async function gdprPreview(userId: string): Promise<GdprPreview | null> {
        (select count(*) from post_bookmarks where user_id = $1)::text         as bookmarks,
        (select count(*) from post_helped_marks where user_id = $1)::text      as helped,
        (select count(*) from donations where user_id = $1)::text              as donations,
-       (select count(*) from content_reports where reported_by = $1)::text    as reports,
+       (select count(*) from content_reports where reporter_id = $1)::text    as reports,
        (select count(*) from referrals where inviter_id = $1 or invitee_id = $1)::text as referrals`,
     [userId]
   );
