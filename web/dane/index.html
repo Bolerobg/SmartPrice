@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Данни за цените · SmartPrice</title>
+    <meta name="description" content="Отворени данни за цени в България, изпратени от общността: медиана, минимум, максимум и брой наблюдения по продукт и град. Свободно за ползване с позоваване." />
+    <meta property="og:title" content="Данни за цените · SmartPrice" />
+    <meta property="og:description" content="Реални цени от общността в България — отворени данни за медии и журналисти." />
+    <meta property="og:type" content="website" />
+    <style>
+      :root {
+        --bg: #060911;
+        --card: #111728;
+        --card2: #172036;
+        --line: rgba(255, 255, 255, 0.09);
+        --text: #f8fafc;
+        --muted: #94a3b8;
+        --dim: #64748b;
+        --green: #10b981;
+        --red: #f43f5e;
+        --gold: #f59e0b;
+        --cyan: #22d3ee;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(1200px 600px at 20% -10%, rgba(99, 102, 241, 0.18), transparent), var(--bg);
+        color: var(--text);
+        font: 15px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+        padding: 22px 16px 60px;
+      }
+      .wrap { max-width: 1040px; margin: 0 auto; }
+      header h1 { font-size: 26px; margin: 0 0 6px; }
+      header p { color: var(--muted); margin: 0 0 6px; }
+      .meta { color: var(--dim); font-size: 13px; }
+      .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 18px 0; }
+      .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+      .kpi b { display: block; font-size: 22px; }
+      .kpi span { color: var(--muted); font-size: 12.5px; }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
+      .card h2 { font-size: 16px; margin: 0 0 10px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      input, select, button {
+        font: inherit; color: var(--text); background: var(--card2);
+        border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
+      }
+      input { flex: 1; min-width: 180px; }
+      button { cursor: pointer; background: rgba(16, 185, 129, 0.14); border-color: rgba(52, 211, 153, 0.35); font-weight: 600; }
+      button.ghost { background: var(--card2); border-color: var(--line); font-weight: 500; }
+      table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+      th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+      th { color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+      tr.clickable { cursor: pointer; }
+      tr.clickable:hover { background: rgba(255, 255, 255, 0.03); }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; border: 1px solid var(--line); }
+      .pill.g { background: rgba(16, 185, 129, 0.12); border-color: rgba(52, 211, 153, 0.3); }
+      .pill.c { background: rgba(34, 211, 238, 0.12); border-color: rgba(34, 211, 238, 0.3); }
+      .pill.d { background: var(--card2); color: var(--muted); }
+      .bars { display: flex; align-items: flex-end; gap: 4px; height: 110px; margin: 8px 0 4px; }
+      .bars > div { flex: 1; position: relative; }
+      .bars i { display: block; background: linear-gradient(180deg, var(--cyan), #2563eb); border-radius: 4px 4px 0 0; }
+      .bars em { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-style: normal; font-size: 10.5px; color: var(--dim); }
+      .quote { background: var(--card2); border-left: 3px solid var(--gold); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+      .muted { color: var(--muted); }
+      .dim { color: var(--dim); font-size: 12.5px; }
+      a { color: var(--cyan); }
+      code { background: var(--card2); padding: 2px 6px; border-radius: 6px; font-size: 12.5px; }
+      footer { color: var(--dim); font-size: 12.5px; margin-top: 22px; }
+      .hidden { display: none; }
+      .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--cyan); border-radius: 50%; animation: sp 0.8s linear infinite; }
+      @keyframes sp { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>📊 Данни за цените в България</h1>
+        <p>Реални цени, изпратени от хората. Сумите са в евро. Данните са анонимни — без имена, снимки и адреси.</p>
+        <div class="meta" id="meta">Зареждам…</div>
+      </header>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card">
+        <h2>🔎 Търси продукт</h2>
+        <div class="row">
+          <input id="q" placeholder="напр. домати, кафе, еклер, такса…" />
+          <select id="city"><option value="">Всички градове</option></select>
+          <select id="days">
+            <option value="30">последните 30 дни</option>
+            <option value="90" selected>последните 90 дни</option>
+            <option value="365">последната година</option>
+            <option value="3650">всичко</option>
+          </select>
+          <button id="go">Търси</button>
+          <button class="ghost" id="all">Най-наблюдавани</button>
+        </div>
+        <div id="list" style="margin-top: 12px"></div>
+      </div>
+
+      <div class="card hidden" id="detailCard">
+        <div class="row" style="justify-content: space-between">
+          <h2 id="dTitle" style="margin: 0"></h2>
+          <button class="ghost" id="dClose">✕ затвори</button>
+        </div>
+        <div id="dBody" style="margin-top: 10px"></div>
+      </div>
+
+      <div class="card">
+        <h2>🏙 По градове</h2>
+        <div id="cities"></div>
+      </div>
+
+      <div class="card">
+        <h2>🧩 По категории</h2>
+        <div id="cats"></div>
+      </div>
+
+      <footer>
+        <p>
+          <strong>Позоваване:</strong> „Данни: SmartPrice (общностни цени в България), обновено на <span id="fDate">—</span>“ ·
+          Лиценз: <strong>CC BY 4.0</strong> — свободно ползване с посочване на източника.
+        </p>
+        <p>
+          Отворен достъп за медии (JSON, без ключ):
+          <code>GET /api/public/overview</code> ·
+          <code>GET /api/public/prices?q=домати&amp;city=София&amp;days=90</code> ·
+          <code>GET /api/public/prices/&lt;slug&gt;</code>
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+      const eur = (v) => (v == null ? '—' : Number(v).toFixed(2).replace('.', ',') + ' €');
+      const CATS = {
+        restaurants: 'Заведения', hotels_airbnb: 'Настаняване', supermarket: 'Магазини', cafes_bars: 'Кафе и барове',
+        services_tech: 'Услуги', vehicles: 'Авто', real_estate: 'Имоти', shops_places: 'Обекти',
+        private_sellers: 'Частни продавачи', other: 'Други',
+      };
+
+      async function get(path) {
+        const r = await fetch(path);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }
+
+      async function loadOverview() {
+        const d = await get('/api/public/overview');
+        const t = d.totals || {};
+        $('kpis').innerHTML = [
+          ['Наблюдения', t.observations], ['Продукти', t.products], ['Градове', t.cities],
+        ].map(([k, v]) => '<div class="kpi"><b>' + Number(v || 0).toLocaleString('bg-BG') + '</b><span>' + k + '</span></div>').join('') +
+          '<div class="kpi"><b>' + esc(t.last_seen || '—') + '</b><span>последно наблюдение</span></div>';
+        $('meta').innerHTML = 'Общо <strong>' + Number(t.observations || 0).toLocaleString('bg-BG') + '</strong> ценови наблюдения от <strong>' +
+          Number(t.cities || 0) + '</strong> града · първо: ' + esc(t.first_seen || '—') + ' · обновено: ' + new Date(d.meta.generatedAt).toLocaleString('bg-BG');
+        $('fDate').textContent = new Date(d.meta.generatedAt).toLocaleDateString('bg-BG');
+        $('city').innerHTML = '<option value="">Всички градове</option>' +
+          (d.byCity || []).map((c) => '<option value="' + esc(c.city) + '">' + esc(c.city) + ' (' + c.observations + ')</option>').join('');
+        $('cities').innerHTML = '<table><thead><tr><th>Град</th><th>Наблюдения</th><th>Продукти</th></tr></thead><tbody>' +
+          (d.byCity || []).map((c) => '<tr><td>' + esc(c.city) + '</td><td>' + c.observations + '</td><td>' + c.products + '</td></tr>').join('') + '</tbody></table>';
+        $('cats').innerHTML = '<table><thead><tr><th>Категория</th><th>Наблюдения</th><th>Медиана</th></tr></thead><tbody>' +
+          (d.byCategory || []).map((c) => '<tr><td>' + esc(CATS[c.category] || c.category) + '</td><td>' + c.observations + '</td><td>' + eur(c.median) + '</td></tr>').join('') + '</tbody></table>';
+        return d;
+      }
+
+      function renderList(items) {
+        if (!items.length) { $('list').innerHTML = '<div class="muted">Няма намерени наблюдения. Пробвай друга дума или период.</div>'; return; }
+        $('list').innerHTML = '<table><thead><tr><th>Продукт</th><th>Град</th><th>Средна</th><th>Медиана</th><th>От – до</th><th>Колко пъти</th><th>Последно</th></tr></thead><tbody>' +
+          items.map((it) => '<tr class="clickable" data-slug="' + esc(it.slug) + '">' +
+            '<td><strong>' + esc(it.product) + '</strong></td>' +
+            '<td>' + esc((it.cities || []).join(', ')) + '</td>' +
+            '<td>' + eur(it.avg) + '</td>' +
+            '<td><span class="pill g">' + eur(it.median) + '</span></td>' +
+            '<td class="dim">' + eur(it.min) + ' – ' + eur(it.max) + '</td>' +
+            '<td>' + it.observations + '</td>' +
+            '<td class="dim">' + esc(it.last_seen) + '</td></tr>').join('') + '</tbody></table>';
+        document.querySelectorAll('tr[data-slug]').forEach((tr) => { tr.onclick = () => openDetail(tr.dataset.slug); });
+      }
+
+      async function search() {
+        $('list').innerHTML = '<span class="spinner"></span> Търся…';
+        try {
+          const qs = new URLSearchParams({ limit: '40', days: $('days').value });
+          if ($('q').value.trim()) qs.set('q', $('q').value.trim());
+          if ($('city').value) qs.set('city', $('city').value);
+          const d = await get('/api/public/prices?' + qs.toString());
+          renderList(d.items || []);
+        } catch (e) {
+          $('list').innerHTML = '<div class="muted">Грешка: ' + esc(e.message) + '</div>';
+        }
+      }
+
+      async function openDetail(slug) {
+        $('detailCard').classList.remove('hidden');
+        $('dTitle').textContent = 'Продукт';
+        $('dBody').innerHTML = '<span class="spinner"></span> Зареждам…';
+        try {
+          const d = await get('/api/public/prices/' + slug);
+          const s = d.stats || {};
+          $('dTitle').textContent = d.product;
+          const max = Math.max.apply(null, (d.byMonth || []).map((m) => m.median).concat([1]));
+          const bars = (d.byMonth || []).map((m) => '<div><i style="height:' + Math.max(6, Math.round((m.median / max) * 92)) + 'px"></i><em>' + esc(m.month.slice(2)) + '</em></div>').join('');
+          $('dBody').innerHTML =
+            '<div class="row" style="gap:14px">' +
+              '<span class="pill g">средна ' + eur(s.avg) + '</span>' +
+              '<span class="pill c">медиана ' + eur(s.median) + '</span>' +
+              '<span class="pill d">от ' + eur(s.min) + ' до ' + eur(s.max) + '</span>' +
+              '<span class="pill d">' + (s.observations || 0) + ' наблюдения</span>' +
+              '<span class="pill d">' + esc(s.first_seen || '—') + ' → ' + esc(s.last_seen || '—') + '</span>' +
+            '</div>' +
+            '<h2 style="margin:14px 0 4px;font-size:15px">По месеци (медиана)</h2>' +
+            '<div class="bars">' + bars + '</div>' +
+            '<h2 style="margin:22px 0 4px;font-size:15px">По градове</h2>' +
+            '<table><thead><tr><th>Град</th><th>Медиана</th><th>От – до</th><th>Колко пъти</th><th>Последно</th></tr></thead><tbody>' +
+              (d.byCity || []).map((c) => '<tr><td>' + esc(c.city) + '</td><td>' + eur(c.median) + '</td><td class="dim">' + eur(c.min) + ' – ' + eur(c.max) + '</td><td>' + c.observations + '</td><td class="dim">' + esc(c.last_seen) + '</td></tr>').join('') +
+            '</tbody></table>' +
+            '<h2 style="margin:22px 0 4px;font-size:15px">Последни наблюдения</h2>' +
+            '<table><thead><tr><th>Дата</th><th>Град</th><th>Цена</th></tr></thead><tbody>' +
+              (d.recent || []).slice(0, 20).map((o) => '<tr><td class="dim">' + esc(o.observed_on) + '</td><td>' + esc(o.city) + '</td><td>' + eur(o.price) + '</td></tr>').join('') +
+            '</tbody></table>' +
+            '<h2 style="margin:22px 0 6px;font-size:15px">Готово за цитиране</h2>' +
+            '<div class="quote" id="quote">Според SmartPrice (общностни цени в България) <strong>' + esc(d.product) + '</strong> струва средно <strong>' +
+              eur(s.avg) + '</strong> (медиана ' + eur(s.median) + ', от ' + eur(s.min) + ' до ' + eur(s.max) + '), по ' + (s.observations || 0) +
+              ' наблюдения в ' + (d.byCity || []).length + ' града; последно наблюдение: ' + esc(s.last_seen || '—') + '.</div>' +
+            '<div class="row" style="margin-top:8px">' +
+              '<button id="cp">📋 Копирай текста</button>' +
+              '<a class="pill d" href="/api/public/prices/' + esc(slug) + '" target="_blank" rel="noopener">JSON за този продукт ↗</a>' +
+              '<a class="pill d" href="/api/public/overview" target="_blank" rel="noopener">JSON обобщение ↗</a>' +
+            '</div>';
+          $('cp').onclick = () => {
+            const t = $('quote').innerText;
+            navigator.clipboard.writeText(t).then(() => { $('cp').textContent = '✅ Копирано'; }, () => { $('cp').textContent = 'Копирай ръчно'; });
+          };
+        } catch (e) {
+          $('dBody').innerHTML = '<div class="muted">Грешка: ' + esc(e.message) + '</div>';
+        }
+      }
+
+      $('go').onclick = search;
+      $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') search(); });
+      $('all').onclick = () => { $('q').value = ''; $('city').value = ''; $('days').value = '3650'; search(); };
+      $('dClose').onclick = () => $('detailCard').classList.add('hidden');
+
+      loadOverview().then(() => search()).catch((e) => { $('meta').textContent = 'Грешка при зареждане: ' + e.message; });
+    </script>
+  </body>
+</html>

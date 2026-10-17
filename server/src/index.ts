@@ -26,6 +26,7 @@ import assistantRoutes from './routes/assistant.js';
 import scraperRoutes from './routes/scraper.js';
 import fbReceiptRoutes from './routes/fbReceipts.js';
 import objectRoutes from './routes/objects.js';
+import publicDataRoutes from './routes/publicData.js';
 import { startScraperWorker } from './lib/scraper.js';
 import { startSecurityMonitor } from './lib/security.js';
 import { seedDemoData } from './seed.js';
@@ -187,6 +188,7 @@ export async function buildApp() {
   // Сваляне и AI разчитане на касови бележки от публични Facebook групи (с одобрение)
   await app.register(fbReceiptRoutes);
   await app.register(objectRoutes);
+  await app.register(publicDataRoutes);
 
   /* ---------------------------------------------------------------------
    *  Спрени/изтрити профили и активност.
