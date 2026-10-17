@@ -122,25 +122,83 @@ async function geocodeAddress(query: string): Promise<{ lat: number; lng: number
   }
 }
 
-/** ЕИК → име и адрес на търговеца през безплатния VIES на ЕС. */
-async function viesLookup(eik: string | null | undefined): Promise<{ name: string; address: string } | null> {
-  const vat = (eik || '').replace(/\D/g, '');
-  if (vat.length < 9) return null;
+/**
+ * Проверка, че числото прилича на реален ЕИК.
+ * 9 цифри → проверява се контролната цифра (тегла 1..8; при остатък 10 — втори ред тегла 3..10).
+ * 13 цифри → отхвърляме само очевидните боклуци (000000000, 111111111…), решението остава на VIES.
+ */
+export function isValidEik(raw: string | null | undefined): boolean {
+  const n = String(raw || '').replace(/\D/g, '');
+  if (n.length !== 9 && n.length !== 13) return false;
+  if (/^(\d)\1+$/.test(n)) return false;
+  if (n.length === 13) return true;
+  const d = n.split('').map(Number);
+  const sum1 = [1, 2, 3, 4, 5, 6, 7, 8].reduce((acc, w, i) => acc + d[i]! * w, 0);
+  let r = sum1 % 11;
+  if (r === 10) {
+    const sum2 = [3, 4, 5, 6, 7, 8, 9, 10].reduce((acc, w, i) => acc + d[i]! * w, 0);
+    r = sum2 % 11;
+    if (r === 10) r = 0;
+  }
+  return d[8] === r;
+}
+
+/** Кеш на VIES отговорите (24 ч) — ЕС ограничава честотата на заявките. */
+const viesCache = new Map<string, { at: number; val: { name: string; address: string } | null }>();
+const VIES_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Заявка към VIES. Първо официалният (документиран) REST endpoint
+ * POST /rest-api/check-vat-number — връща { valid, name, address }.
+ * Ако не отговори, падаме на стария път GET /rest-api/ms/BG/vat/{vat} (още работи).
+ */
+async function viesQuery(vat: string): Promise<{ valid: boolean; name?: string; address?: string } | null> {
+  try {
+    const res = await fetch('https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-number', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ countryCode: 'BG', vatNumber: vat }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.ok) {
+      const r = (await res.json()) as { valid?: boolean; isValid?: boolean; name?: string; address?: string };
+      return { valid: Boolean(r.valid ?? r.isValid), name: r.name, address: r.address };
+    }
+  } catch {
+    /* пробваме стария път */
+  }
   try {
     const res = await fetch(
       'https://ec.europa.eu/taxation_customs/vies/rest-api/ms/BG/vat/' + vat,
       { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) }
     );
     if (!res.ok) return null;
-    const d = (await res.json()) as { isValid?: boolean; name?: string; address?: string };
-    if (!d?.isValid) return null;
-    const name = String(d.name ?? '').replace(/\s+/g, ' ').trim();
-    const address = String(d.address ?? '').replace(/\s+/g, ' ').trim();
-    if (!name || name === '---') return null;
-    return { name, address };
+    const r = (await res.json()) as { isValid?: boolean; name?: string; address?: string };
+    return { valid: Boolean(r.isValid), name: r.name, address: r.address };
   } catch {
     return null;
   }
+}
+
+/** ЕИК → име и адрес на търговеца през безплатния VIES на ЕС (REST, без ключ). */
+async function viesLookup(eik: string | null | undefined): Promise<{ name: string; address: string } | null> {
+  const vat = String(eik || '').replace(/\D/g, '');
+  if (!isValidEik(vat)) return null;
+  const hit = viesCache.get(vat);
+  if (hit && Date.now() - hit.at < VIES_TTL_MS) return hit.val;
+  const d = await viesQuery(vat);
+  if (!d?.valid) {
+    if (viesCache.size > 500) viesCache.clear();
+    viesCache.set(vat, { at: Date.now(), val: null });
+    return null;
+  }
+  const name = String(d.name ?? '').replace(/\s+/g, ' ').trim();
+  const address = String(d.address ?? '').replace(/\s+/g, ' ').trim();
+  if (!name || name === '---') return null;
+  const val = { name, address };
+  if (viesCache.size > 500) viesCache.clear();
+  viesCache.set(vat, { at: Date.now(), val });
+  return val;
 }
 
 /** Списък с групи за автоматични обиколки (един адрес на ред). */
