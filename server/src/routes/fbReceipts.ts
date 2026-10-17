@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { many, one, query } from '../db.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { audit, requireAdminPanel } from '../lib/admin.js';
+import { getPriceAlertStats, runPriceAlerts } from '../lib/priceAlerts.js';
 import {
   approveFbReceiptItem,
   checkQueueImages,
@@ -425,6 +426,31 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       ip: req.ip,
     });
     return { ok: true, limitUsd };
+  });
+
+  /** Ценови аларми: колко са активни и какво е изпратено напоследък. */
+  app.get('/api/admin/price-alerts/info', async (req) => {
+    await requireAdminPanel(req);
+    return await getPriceAlertStats();
+  });
+
+  /**
+   * Пуска проверката на ценовите аларми и праща писмата.
+   * Вика се от cron на VPS-а (веднъж дневно) или ръчно от панела.
+   */
+  app.post('/api/admin/price-alerts/run', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({ force: z.coerce.boolean().default(false), limit: z.coerce.number().int().min(1).max(500).default(200) })
+      .parse(req.body ?? {});
+    const res = await runPriceAlerts({ force: input.force, limit: input.limit });
+    await audit({
+      admin,
+      action: 'price_alerts.run',
+      details: { checked: res.checked, emailed: res.emailed, skipped: res.skipped, force: input.force },
+      ip: req.ip,
+    });
+    return { ok: true, ...res };
   });
 
   /** Запазените групи за автоматични обиколки. */

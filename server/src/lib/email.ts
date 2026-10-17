@@ -441,6 +441,48 @@ export async function sendRaffleWonEmail(params: {
   });
 }
 
+/** Писмо: намерихме оферта под цената от ценова аларма. */
+export async function sendPriceAlertEmail(params: {
+  to: string;
+  name: string;
+  keyword: string;
+  maxPrice: number | null;
+  city: string;
+  price: number;
+  postTitle: string;
+  placeName: string;
+  postCity: string;
+  postCode: string | null;
+  postId: string;
+  baseUrl: string;
+}): Promise<SendResult> {
+  const link = `${params.baseUrl.replace(/\/+$/, '')}/post/${params.postId}`;
+  const where = params.city && params.city !== 'Всички градове' ? ` в ${escapeHtml(params.city)}` : ' във всички градове';
+  const limitLine = params.maxPrice ? ` до ${params.maxPrice.toFixed(2)} €` : '';
+  const html = plainLayout({
+    heading: `🔔 Намерихме: ${escapeHtml(params.keyword)} за ${params.price.toFixed(2)} €`,
+    intro: `${escapeHtml(params.name)}, следим „${escapeHtml(params.keyword)}“${limitLine}${where}. Има нова оферта под тази цена.`,
+    bodyHtml: `
+      <p style="font-weight:700;color:#F8FAFC;">${escapeHtml(params.postTitle)}</p>
+      <p>Цена: <strong style="color:#22C55E;">${params.price.toFixed(2)} €</strong><br>
+         Място: ${escapeHtml(params.placeName)}, ${escapeHtml(params.postCity)}</p>
+      <p><a href="${link}" style="color:#38BDF8;font-weight:700;">Виж офертата в SmartPrice →</a></p>`,
+    footnote: 'Пращаме най-много едно писмо на 3 дни за тази аларма. Можеш да я спреш от приложението.',
+  });
+
+  return sendMail({
+    to: params.to,
+    subject: `🔔 ${params.keyword} за ${params.price.toFixed(2)} €`,
+    html,
+    text:
+      `${params.name}, следим "${params.keyword}"${limitLine}${params.city ? ` (${params.city})` : ''}.\n\n` +
+      `Намерихме: ${params.postTitle}\n` +
+      `Цена: ${params.price.toFixed(2)} €\n` +
+      `Място: ${params.placeName}, ${params.postCity}\n\n` +
+      `Виж офертата: ${link}\n`,
+  });
+}
+
 /** Писмо до организатора: готовите данни за куриера, без да ги търси в панела. */
 export async function sendRaffleDeliveryEmail(params: {
   winnerName: string;
