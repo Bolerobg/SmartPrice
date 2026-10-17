@@ -26,6 +26,8 @@ export interface RawFbPost {
   imageUrls: string[];
   authorName?: string;
   postedAt?: string;
+  /** Коментари под поста (за място/потвърждение + като самостоятелни сигнали). */
+  comments?: Array<{ id?: string; author?: string; text: string; postedAt?: string }>;
 }
 
 export interface ParsedReceiptLine {
@@ -129,6 +131,126 @@ export async function saveFbScraperConfig(input: {
  * Стратегия 1: Apify (`apify/facebook-groups-scraper`).
  * Работи изцяло от сървъра с публични групи (напр. groups/3111975342346393).
  */
+
+/**
+ * Съдържанието към AI-я: текстът на поста/коментара + (по избор) коментарите като
+ * контекст и снимката. Без снимка работим само по текст (сигнали от коментари).
+ */
+function buildAnalyzerUserContent(
+  postText: string,
+  params: { imageDataUrl?: string | null; commentsText?: string; commentContext?: string }
+): Array<Record<string, unknown>> {
+  const q = String.fromCharCode(34, 34, 34);
+  const lines: string[] = [];
+  if (params.commentContext) {
+    lines.push('Коментарът е под пост във Facebook с текст:\n' + q + params.commentContext + q);
+  } else if (postText) {
+    lines.push('Текст към поста във Facebook:\n' + q + postText + q);
+  }
+  if (params.commentsText) {
+    lines.push('Коментари под поста (само за място/потвърждение, без имена):\n' + q + params.commentsText + q);
+  }
+  lines.push(
+    params.imageDataUrl
+      ? 'Разчети касовата бележка/цената от снимката и подготви публикацията.'
+      : 'Няма снимка — работи САМО с текста и подготви публикацията.'
+  );
+  const parts: Array<Record<string, unknown>> = [{ type: 'text', text: lines.join('\n\n') }];
+  if (params.imageDataUrl) {
+    parts.push({ type: 'image_url', image_url: { url: params.imageDataUrl } });
+  }
+  return parts;
+}
+
+/** Чете коментарите под дадени постове през Apify (apify~facebook-comments-scraper).
+ *  При грешка връща празни масиви — никога не чупи обиколката. */
+async function fetchViaApifyComments(
+  postUrls: string[],
+  apifyToken: string,
+  maxPerPost: number
+): Promise<Array<Array<{ id?: string; author?: string; text: string; postedAt?: string }>>> {
+  type Cmt = { id?: string; author?: string; text: string; postedAt?: string };
+  const empty: Array<Cmt[]> = postUrls.map(() => []);
+  if (!apifyToken || postUrls.length === 0) return empty;
+  const endpoint =
+    'https://api.apify.com/v2/acts/apify~facebook-comments-scraper/run-sync-get-dataset-items?token=' +
+    encodeURIComponent(apifyToken);
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      startUrls: postUrls.slice(0, 10).map((url) => ({ url })),
+      resultsLimit: Math.min(200, Math.max(10, maxPerPost * postUrls.length * 2)),
+      includeReplies: false,
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!res.ok) {
+    throw new Error('Apify comments HTTP ' + res.status);
+  }
+  const items = (await res.json()) as Array<Record<string, unknown>>;
+  if (!Array.isArray(items)) return empty;
+  for (const it of items) {
+    // apify~facebook-comments-scraper връща: facebookUrl (адресът на ПОСТА),
+    // profileName (автор), id (на коментара), text, date.
+    const parent = fbUrlKey(
+      String(it.facebookUrl ?? it.inputUrl ?? it.postUrl ?? it.topLevelUrl ?? it.url ?? '')
+    );
+    const text = String(it.text ?? it.message ?? '').trim();
+    if (!text || text.length < 8) continue;
+    const authorObj = it.user as Record<string, unknown> | undefined;
+    const author =
+      String(authorObj?.name ?? it.profileName ?? it.userName ?? it.authorName ?? '').trim() || undefined;
+    const idx = postUrls.findIndex((u) => fbUrlKey(u) === parent);
+    if (idx < 0) continue;
+    const bucket = empty[idx]!;
+    if (bucket.length >= maxPerPost) continue;
+    bucket.push({
+      id: String(it.id ?? it.commentId ?? '').trim() || undefined,
+      author,
+      text: text.slice(0, 1200),
+      postedAt: String(it.date ?? it.time ?? '').trim() || undefined,
+    });
+  }
+  return empty;
+}
+
+/** Закача коментарите към постовете (до limited поста, до perPost коментара на пост). */
+async function attachFbComments(
+  posts: RawFbPost[],
+  apifyToken: string,
+  onLog: (msg: string) => Promise<void>,
+  perPost = 8,
+  limited = 10
+): Promise<number> {
+  const targets = posts.slice(0, limited);
+  if (!targets.length) return 0;
+  await onLog('Чета коментарите под ' + targets.length + ' поста…');
+  const buckets = await fetchViaApifyComments(
+    targets.map((t) => t.postUrl),
+    apifyToken,
+    perPost
+  );
+  let n = 0;
+  targets.forEach((t, i) => {
+    const list = buckets[i] ?? [];
+    if (list.length) {
+      t.comments = list;
+      n++;
+    }
+  });
+  return n;
+}
+
+/** Дали текстът си струва да влезе като сигнал (цена или оплакване). */
+function looksLikePriceSignal(text: string): boolean {
+  const t = (text || '').trim();
+  if (t.length < 15) return false;
+  const price = /(\d[\d\s.,]*)\s*(€|лв\.?|EUR|BGN|евро|лева|евроцента)/i.test(t);
+  const complaint = /скъп|измам|надцен|вдигна|повиши|такс|грамаж|необоснов|лъж|промоция|завиши/i.test(t);
+  return price || complaint;
+}
+
 async function fetchViaApify(
   groupUrl: string,
   count: number,
@@ -459,7 +581,13 @@ const ALIAS_FIRST_NAMES = [
   'Мария', 'Иван', 'Елена', 'Петър', 'Десислава', 'Николай', 'Габриела', 'Стоян',
   'Виктория', 'Антон', 'Калина', 'Мартин', 'Ивелина', 'Димитър', 'Силвия', 'Радослав',
   'Теодора', 'Костадин', 'Яна', 'Борис', 'Лилия', 'Емил', 'Невена', 'Красимир',
-  'Полина', 'Живко', 'Ралица', 'Тодор', 'Милена', 'Валентин',
+  'Полина', 'Живко', 'Ралица', 'Тодор', 'Милена', 'Валентин', 'Диана', 'Георги',
+  'Василена', 'Христо', 'Даниела', 'Светослав', 'Адриана', 'Пламен', 'Йорданка', 'Веселин',
+  'Кристина', 'Асен', 'Биляна', 'Огнян', 'Стела', 'Румен', 'Магдалена', 'Илия',
+  'Анелия', 'Здравко', 'Преслава', 'Любомир', 'Мирослава', 'Тихомир', 'Станислава', 'Чавдар',
+  'Елица', 'Никола', 'Румяна', 'Владимир', 'Цветелина', 'Младен', 'Гергана', 'Слави',
+  'Ирена', 'Бойко', 'Таня', 'Евгени', 'Надежда', 'Кирил', 'Радостина', 'Симеон',
+  'Юлия', 'Атанас', 'Миглена', 'Гроздан', 'Албена', 'Драгомир', 'Зорница', 'Орлин',
 ];
 /** Безличното обръщение, което ползваме, когато нямаме автор (или за оплаквания). */
 export const NEUTRAL_AUTHOR = 'Потребител сигнализира';
@@ -500,11 +628,16 @@ export function scrubAuthorName(
 }
 
 export async function analyzeFbReceiptWithAi(params: {
-  imageDataUrl: string;
+  /** Снимка като data URL или null/празно, когато анализираме само текст (коментар). */
+  imageDataUrl: string | null;
   fbPostText: string;
   defaultCity?: string;
   /** Измислен псевдоним на автора (никога истинското име). */
   authorAlias?: string;
+  /** Коментари под поста — само за място/потвърждение на цената. */
+  commentsText?: string;
+  /** Текстът на поста, когато анализираме коментар (контекст). */
+  commentContext?: string;
 }): Promise<AiReceiptAnalysis> {
   if (!features.ocr) {
     throw new Error('Липсва OPENROUTER_API_KEY в конфигурацията за AI разчитане на касови бележки.');
@@ -538,6 +671,7 @@ export async function analyzeFbReceiptWithAi(params: {
     '     • Факти: продукт/услуга, цена, търговец, град/място. Каквото не се вижда на снимката или не е в поста — не го пиши. Ако цената е само от снимката, кажи „според снимката“.',
     '     • САМОЛИЧНОСТ: никога не пиши истинско име, телефон, линк или профил на автора. За оплакване (polarity "red") започни безлично: "Потребител сигнализира, че…". За добра находка можеш да ползваш само подадения псевдоним (полето authorAlias), напр. "<псевдоним> от <град> споделя добра оферта…". Псевдонимът е измислен — не търси истинското име.',
     '     • Завърши с факт, не с призив. Не добавяй съвети, оценки и прогнози, които не са в поста.',
+    '     • КОМЕНТАРИ: ако ти подам коментари под поста, ползвай ги САМО за да уточниш мястото (град/магазин) или да потвърдиш цената. Част от коментарите може да са мемета, спам или политика — тях не ги взимай предвид. Никога не цитирай имена от коментарите; ако вземаш цена/място от коментар, кажи „според коментарите“.',
     '   - "placeName": разбираемо име на магазина или заведението (напр. "Lidl", "Kaufland", "Ресторант ...", или името на фирмата от бона).',
     `   - "city": градът в България. За "receipt": от бележката или от текста; ако никъде не пише — "${fallbackCity}". За "price_signal": САМО истинският град (иначе "not_relevant").`,
     '   - "address": точен адрес/улица от касовата бележка, ако се чете, иначе null.',
@@ -581,18 +715,7 @@ export async function analyzeFbReceiptWithAi(params: {
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: cleanPostText
-                ? `Текст към поста във Facebook:\n"""\n${cleanPostText}\n"""\n\nРазчети касовата бележка от снимката и подготви публикацията.`
-                : 'Постът няма допълнителен текст. Разчети касовата бележка от снимката и подготви публикацията.',
-            },
-            { type: 'image_url', image_url: { url: params.imageDataUrl } },
-          ],
-        },
+        { role: 'user', content: buildAnalyzerUserContent(cleanPostText, params) },
       ],
     }),
     signal: AbortSignal.timeout(60_000),
@@ -760,6 +883,144 @@ export function fbUrlKey(url: string | null | undefined): string {
     .replace(/\/+$/, '');
 }
 
+
+/**
+ * Коментарите под постовете също могат да са сигнали („и в Пловдив е 12 лв“). Всяка
+ * подходяща реплика минава през същия AI (само по текст, със снимката на поста като
+ * доказателство) и влиза в опашката за одобрение — с псевдоним вместо име.
+ */
+async function processCommentSignals(params: {
+  jobId?: string | null;
+  groupUrl: string;
+  posts: RawFbPost[];
+  defaultCity?: string;
+  maxSignals?: number;
+}): Promise<{ queued: number; skipped: number }> {
+  const cap = params.maxSignals ?? 20;
+  let queued = 0;
+  let skipped = 0;
+  for (const post of params.posts) {
+    if (queued >= cap) break;
+    const comments = post.comments ?? [];
+    let perPost = 0;
+    for (let i = 0; i < comments.length && perPost < 3 && queued < cap; i++) {
+      const c = comments[i]!;
+      if (!looksLikePriceSignal(c.text)) {
+        skipped++;
+        continue;
+      }
+      const commentKey = (post.postId ?? fbUrlKey(post.postUrl)) + '#c' + (c.id ?? i);
+      const seen = await one<{ id: string }>(
+        'select id::text from fb_receipt_queue where fb_post_id = $1 limit 1',
+        [commentKey]
+      );
+      if (seen) {
+        skipped++;
+        continue;
+      }
+      const parent = await one<{
+        local_image_url: string | null;
+        original_image_url: string | null;
+        image_sha256: string | null;
+      }>(
+        `select local_image_url, original_image_url, image_sha256 from fb_receipt_queue
+          where local_image_url is not null
+            and (($1 <> '' and fb_post_id = $1)
+                 or ($2 <> '' and regexp_replace(split_part(coalesce(fb_post_url, ''), '?', 1), '/+$', '') = $2))
+          order by created_at desc limit 1`,
+        [post.postId ?? '', fbUrlKey(post.postUrl)]
+      );
+      if (!parent?.local_image_url) {
+        skipped++;
+        continue;
+      }
+      try {
+        const authorAlias = pseudonymFor(c.author);
+        if (params.jobId) {
+          await logJob(params.jobId, 'Разчитам коментар с AI: ' + c.text.slice(0, 60) + '…');
+        }
+        const analysis = await analyzeFbReceiptWithAi({
+          imageDataUrl: null,
+          fbPostText: c.text,
+          commentContext: post.text,
+          defaultCity: params.defaultCity,
+          authorAlias,
+        });
+        const title = scrubAuthorName(analysis.title, c.author, authorAlias);
+        const description = scrubAuthorName(analysis.description, c.author, authorAlias);
+        const status = analysis.isReceipt ? 'pending' : 'not_receipt';
+        await one(
+          `insert into fb_receipt_queue (
+             job_id, group_url, fb_post_id, fb_post_url, fb_author_name, fb_post_text,
+             original_image_url, local_image_url, image_sha256, status, skip_reason,
+             polarity, category, title, description, place_name, city, address,
+             merchant_name, merchant_tax_id, receipt_date, receipt_time,
+             total_amount, original_amount, original_currency, confidence, ai_model, items
+           ) values (
+             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28::jsonb
+           ) returning id::text`,
+          [
+            params.jobId ?? null,
+            params.groupUrl,
+            commentKey,
+            post.postUrl,
+            c.author ?? null,
+            c.text.slice(0, 2000),
+            parent.original_image_url,
+            parent.local_image_url,
+            parent.image_sha256,
+            status,
+            analysis.skipReason ?? null,
+            analysis.polarity,
+            analysis.category,
+            title,
+            description,
+            analysis.placeName,
+            analysis.city,
+            analysis.address ?? null,
+            analysis.merchantName,
+            analysis.merchantTaxId ?? null,
+            analysis.receiptDate ?? null,
+            analysis.receiptTime ?? null,
+            analysis.totalAmountEur,
+            analysis.originalAmount ?? null,
+            analysis.originalCurrency ?? null,
+            analysis.confidenceScore,
+            analysis.model,
+            JSON.stringify(analysis.items),
+          ]
+        );
+        perPost++;
+        if (analysis.isReceipt) {
+          queued++;
+          if (params.jobId) {
+            await query('update fb_receipt_jobs set receipts_found = receipts_found + 1 where id = $1', [
+              params.jobId,
+            ]);
+            await logJob(
+              params.jobId,
+              '💬 Сигнал от коментар: „' +
+                title +
+                '“ — ' +
+                analysis.totalAmountEur.toFixed(2) +
+                ' € · ' +
+                analysis.city
+            );
+          }
+        } else {
+          skipped++;
+        }
+      } catch (err) {
+        skipped++;
+        if (params.jobId) {
+          await logJob(params.jobId, '⚠️ Коментар: ' + (err as Error).message.slice(0, 120));
+        }
+      }
+    }
+  }
+  return { queued, skipped };
+}
+
 async function logJob(jobId: string, msg: string) {
   const line = `${new Date().toISOString().slice(11, 19)} ${msg}`;
   await query(
@@ -853,6 +1114,12 @@ export async function processRawFbPosts(params: {
           fbPostText: post.text,
           defaultCity: params.defaultCity,
           authorAlias,
+          commentsText: post.comments?.length
+            ? post.comments
+                .map((c) => maskSensitiveText(c.text).slice(0, 300))
+                .slice(0, 8)
+                .join('\n- ')
+            : undefined,
         });
         // Самоличността: истинското име на автора не бива да стига до приложението.
         analysis.title = scrubAuthorName(analysis.title, post.authorName, authorAlias);
@@ -983,6 +1250,15 @@ export async function runFbGroupJob(
           strategy = 'apify';
           await logJob(jobId, `Apify върна ${rawPosts.length} поста със снимки.`);
         }
+        // Коментарите под постовете: и като контекст за мястото, и като отделни сигнали.
+        if (rawPosts.length > 0 && (await getSetting('fb_comments', 'on')) !== 'off') {
+          try {
+            const withComments = await attachFbComments(rawPosts, cfg.apifyToken, (m) => logJob(jobId, m));
+            await logJob(jobId, `Коментари: прочетени за ${withComments} поста.`);
+          } catch (err) {
+            await logJob(jobId, `Коментари (предупреждение): ${(err as Error).message.slice(0, 140)}`);
+          }
+        }
       } catch (err) {
         await logJob(jobId, `Apify предупреждение: ${(err as Error).message}`);
       }
@@ -1027,6 +1303,25 @@ export async function runFbGroupJob(
       defaultCity: options.defaultCity,
       maxReceipts: job.target_count,
     });
+
+    // Коментарите под постовете също може да са сигнали („и в Пловдив е 12 лв“).
+    try {
+      const commentRes = await processCommentSignals({
+        jobId,
+        groupUrl: canonicalUrl,
+        posts: rawPosts,
+        defaultCity: options.defaultCity,
+        maxSignals: Math.min(20, Math.max(5, Math.round(job.target_count / 2))),
+      });
+      if (commentRes.queued || commentRes.skipped) {
+        await logJob(
+          jobId,
+          `Коментари: нови сигнали ${commentRes.queued}, прескочени ${commentRes.skipped}.`
+        );
+      }
+    } catch (err) {
+      await logJob(jobId, `Коментари (предупреждение): ${(err as Error).message.slice(0, 120)}`);
+    }
 
     await logJob(
       jobId,
