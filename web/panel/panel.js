@@ -3521,6 +3521,63 @@ let fbReceiptsLastGroupUrl = 'https://www.facebook.com/groups/3111975342346393';
 let fbReceiptsLastCount = 10;
 let fbReceiptsLastCity = 'София';
 
+/* ===== Otkriti novi grupi (podobrenie 9) ===== */
+async function loadFbCandidates() {
+  const box = document.getElementById('fb-cand-list');
+  if (!box) return;
+  try {
+    const d = await api('/fb-receipts/groups/candidates?status=pending');
+    const list = Array.isArray(d && d.candidates) ? d.candidates : [];
+    if (!list.length) {
+      box.innerHTML = '<div class="hint" style="margin:0">Няма нови групи за преглед. Натисни „Търси нови групи“.</div>';
+      return;
+    }
+    const head = '<div class="hint" style="margin:0 0 6px">Чакат одобрение: <strong>' + num(list.length) + '</strong> — най-подходящите са отгоре.</div>';
+    const rows = list.map(function (c) {
+      const members = c.member_count ? num(c.member_count) + ' членове' : 'членове: няма данни';
+      const priv = c.privacy === 'private' ? '<span class="pill pill-red">затворена</span>' : '<span class="pill pill-green">публична</span>';
+      return '<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid rgba(148,163,184,.25);border-radius:10px;margin-bottom:6px">' +
+        '<div style="min-width:0">' +
+          '<div style="font-weight:700">' + esc(c.name || '—') +
+            ' <span class="pill pill-dim">' + members + '</span> ' + priv +
+            ' <span class="pill pill-cyan">резултат ' + num(c.score) + '</span>' +
+          '</div>' +
+          '<div class="hint" style="margin:2px 0 0;word-break:break-all">' + esc(c.group_url) + ' · търсено с: „' + esc(c.query || '—') + '“</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px;flex-shrink:0">' +
+          '<button class="btn btn-sm btn-ok" data-fb-cand-ok="' + Number(c.id) + '">Добави</button>' +
+          '<button class="btn btn-sm btn-ghost" data-fb-cand-no="' + Number(c.id) + '">Отхвърли</button>' +
+        '</div></div>';
+    }).join('');
+    box.innerHTML = head + rows;
+    box.querySelectorAll('[data-fb-cand-ok]').forEach(function (btn) {
+      btn.onclick = function () { fbCandAct(Number(btn.dataset.fbCandOk), 'approve'); };
+    });
+    box.querySelectorAll('[data-fb-cand-no]').forEach(function (btn) {
+      btn.onclick = function () { fbCandAct(Number(btn.dataset.fbCandNo), 'reject'); };
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="margin:0">Грешка при зареждане: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function fbCandAct(id, action) {
+  try {
+    const r = await api('/fb-receipts/groups/candidates/' + id, {
+      method: 'POST',
+      body: JSON.stringify({ action: action }),
+    });
+    if (action === 'approve') {
+      toast('Групата е добавена към обиколките (общо ' + (r && r.groups ? r.groups : '?') + ' групи).', 'ok');
+    } else {
+      toast('Групата е отхвърлена — повече няма да се предлага.', 'ok');
+    }
+    await loadFbCandidates();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
 function stopFbReceiptsPoll() {
   if (fbReceiptsJobPoll) {
     clearInterval(fbReceiptsJobPoll);
@@ -3601,6 +3658,16 @@ async function renderFbReceipts(box) {
               : '— (само „Оферти и цени“ по подразбиране)'
           }</strong></span>
         </div>
+      </div>
+
+      <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(56,189,248,.35);border-radius:12px;background:rgba(56,189,248,.07)">
+        <span><strong>🔎 Откриване на нови групи</strong> — Apify търси публични Facebook групи по ключови думи
+        (градове + теми). Намереното пада тук за преглед; одобреното влиза в обиколките.</span>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px">
+          <button class="btn btn-sm btn-ok" id="fb-discover-btn">🔎 Търси нови групи</button>
+          <span class="hint" style="margin:0" id="fb-discover-status">—</span>
+        </div>
+        <div id="fb-cand-list" style="margin-top:10px"></div>
       </div>
 
       <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(250,204,21,.35);border-radius:12px;background:rgba(250,204,21,.06)">
@@ -3983,6 +4050,31 @@ async function renderFbReceipts(box) {
       }
     }, 2500);
   }
+
+  const discoverBtn = document.getElementById('fb-discover-btn');
+  if (discoverBtn) {
+    discoverBtn.onclick = async () => {
+      const st = document.getElementById('fb-discover-status');
+      discoverBtn.disabled = true;
+      if (st) st.textContent = 'Търся в Apify… (1–3 минути)';
+      try {
+        const res = await api('/fb-receipts/groups/discover', { method: 'POST', body: JSON.stringify({}) });
+        toast('Открити ' + Number(res.found || 0) + ' групи — нови за преглед: ' + Number(res.added || 0), 'ok');
+        if (st) {
+          st.textContent = 'претърсени ' + (res.queries ? res.queries.length : 0) + ' заявки · нови ' + Number(res.added || 0) +
+            ' · познати ' + Number(res.known || 0) + ' · затворени ' + Number(res.skippedPrivate || 0) +
+            (res.usd ? ' · $' + Number(res.usd).toFixed(3) : '');
+        }
+        await loadFbCandidates();
+      } catch (e) {
+        toast(e.message, 'err');
+        if (st) st.textContent = 'Грешка: ' + e.message;
+      } finally {
+        discoverBtn.disabled = false;
+      }
+    };
+  }
+  void loadFbCandidates();
 }
 
 function renderFbJobCard(j) {

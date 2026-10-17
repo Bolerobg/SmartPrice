@@ -5,6 +5,13 @@ import { badRequest, notFound } from '../lib/errors.js';
 import { audit, requireAdminPanel } from '../lib/admin.js';
 import { getPriceAlertStats, runPriceAlerts } from '../lib/priceAlerts.js';
 import {
+  approveGroupCandidate,
+  countPendingCandidates,
+  discoverFbGroups,
+  listGroupCandidates,
+  rejectGroupCandidate,
+} from '../lib/fbGroupDiscovery.js';
+import {
   approveFbReceiptItem,
   checkQueueImages,
   fbBudgetAllows,
@@ -544,6 +551,65 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       ip: req.ip,
     });
     return { ok: true, groups, skipped: input.urls.length - groups.length };
+  });
+
+  /** Tarsene na novi publichni grupi v Apify po kliuchovi dumi (podobrenie 9). */
+  app.post('/api/admin/fb-receipts/groups/discover', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        queries: z.array(z.string().trim().min(2).max(80)).max(30).optional(),
+        maxItems: z.coerce.number().int().min(5).max(200).default(60),
+        minMembers: z.coerce.number().int().min(0).max(1000000).optional(),
+      })
+      .parse(req.body ?? {});
+
+    const discovered = await discoverFbGroups({
+      queries: input.queries,
+      maxItems: input.maxItems,
+      minMembers: input.minMembers,
+    });
+    if (!discovered.ok) throw badRequest(discovered.reason ?? 'Tarseneto ne uspia.');
+
+    await audit({
+      admin,
+      action: 'fb_receipts.groups_discover',
+      details: { found: discovered.found, added: discovered.added, usd: discovered.usd },
+      ip: req.ip,
+    });
+    return discovered;
+  });
+
+  /** Otkriti grupi, chakashti odobrenie (ili s podaden status). */
+  app.get('/api/admin/fb-receipts/groups/candidates', async (req) => {
+    await requireAdminPanel(req);
+    const raw = String((req.query as { status?: string } | undefined)?.status ?? 'pending');
+    const status = ['pending', 'approved', 'rejected', 'all'].includes(raw) ? raw : 'pending';
+    const [candidates, pending] = await Promise.all([
+      listGroupCandidates(status),
+      countPendingCandidates(),
+    ]);
+    return { candidates, pending, status };
+  });
+
+  /** Odobravane (vliza v obikolkata) ili othvarliane na otkrita grupa. */
+  app.post('/api/admin/fb-receipts/groups/candidates/:id', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
+    const input = z.object({ action: z.enum(['approve', 'reject']) }).parse(req.body ?? {});
+
+    const result =
+      input.action === 'approve'
+        ? await approveGroupCandidate(params.id)
+        : await rejectGroupCandidate(params.id);
+
+    await audit({
+      admin,
+      action: input.action === 'approve' ? 'fb_receipts.group_approve' : 'fb_receipts.group_reject',
+      details: { id: params.id },
+      ip: req.ip,
+    });
+    return result;
   });
 
   /** Пуска обиколка на ВСИЧКИ запазени групи (една след друга, с пауза между тях). */
