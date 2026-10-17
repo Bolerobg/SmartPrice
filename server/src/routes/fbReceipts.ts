@@ -645,7 +645,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
     const input = z
       .object({
         group_url: z.string().trim().min(10).max(600),
-        name: z.string().trim().max(200).optional(),
+        name: z.string().trim().max(200).nullable().optional(),
         enabled: z.boolean().optional(),
         posts_per_run: z.coerce.number().int().min(1).max(100).optional(),
         max_posts_per_day: z.coerce.number().int().min(0).max(2000).optional(),
@@ -653,8 +653,8 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
         hours: z.string().trim().max(200).optional(),
         min_interval_min: z.coerce.number().int().min(5).max(1440).optional(),
         priority: z.coerce.number().int().min(1).max(10).optional(),
-        default_city: z.string().trim().max(80).optional(),
-        notes: z.string().trim().max(500).optional(),
+        default_city: z.string().trim().max(80).nullable().optional(),
+        notes: z.string().trim().max(500).nullable().optional(),
       })
       .parse(req.body ?? {});
     const plan = await upsertPlan(input);
