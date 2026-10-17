@@ -68,8 +68,8 @@ export default async function publicDataRoutes(app: FastifyInstance): Promise<vo
          from v_price_observations
         where price > 0
         group by lower(product)
-        having count(*) >= 2
-        order by count(*) desc, max(observed_on) desc
+        having count(*) >= 1
+        order by count(*) desc, max(observed_date) desc, max(price) desc
         limit 12`
     );
 
