@@ -430,11 +430,38 @@ export function stripShopMentions(text: string, domain?: string): string {
     .trim();
 }
 
+/**
+ * Маха изтекъл CSS от текст. Magento (Page Builder) слага правилата в `<style>`, но
+ * JSON-LD описанието на продукта минава през `strip_tags`, което маха само таговете и
+ * ОСТАВЯ тялото на стила направо в описанието:
+ *   `#html-body [data-pb-style=XXX]{justify-content:flex-start;display:flex;…}`
+ * Затова офертите от remedium.bg изглеждаха като CSS. Работи и по вложени блокове
+ * (`@media …{ … }`), маха ги отвътре навън. Пази текста — маха само парче БЕЗ кирилица,
+ * което съдържа `:` или `;` вътре в скобите.
+ */
+export function stripCssRules(text: string): string {
+  let out = text;
+  for (let i = 0; i < 10; i++) {
+    const next = out.replace(
+      /(?:@[a-z-]+[^{}]*?|[.#]?[A-Za-z0-9_\-[\]="'>:,.\s]*?)\{[^{}]*\}/gi,
+      (m) => (/[:;]/.test(m) && !/[А-Яа-я]/.test(m) ? ' ' : m)
+    );
+    if (next === out) break;
+    out = next;
+  }
+  // Остатъци: отворен блок (`@media … {`) и самотни скоби.
+  out = out.replace(/@[a-z-]+[^{}]*\{/gi, ' ');
+  if (/[{}]/.test(out) && /[A-Za-z]:[^А-Яа-я]*[;}]/.test(out)) out = out.replace(/[{}]/g, ' ');
+  return out;
+}
+
 export function htmlToText(html: string): string {
-  return html
+  const stripped = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<\/(p|div|li|h[1-6]|tr|br)>/gi, '\n')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  return (
+    stripCssRules(stripped)
+      .replace(/<\/(p|div|li|h[1-6]|tr|br)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
@@ -454,10 +481,11 @@ export function htmlToText(html: string): string {
     .replace(/&laquo;/gi, '«')
     .replace(/&raquo;/gi, '»')
     .replace(/&sect;/gi, '§')
-    .replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(Number(d)))
-    .replace(/[ \t\u00a0]+/g, ' ')
-    .replace(/\n{2,}/g, '\n')
-    .trim();
+      .replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(Number(d)))
+      .replace(/[ \t\u00a0]+/g, ' ')
+      .replace(/\n{2,}/g, '\n')
+      .trim()
+  );
 }
 
 /** „1 234,56 €“ / „1,234.56“ / „12.50“ → 1234.56 */
