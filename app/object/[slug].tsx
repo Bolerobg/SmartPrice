@@ -114,9 +114,11 @@ export default function ObjectScreen() {
             <View style={[styles.pill, styles.pillGreen]}>
               <Text style={styles.pillText}>{formatNumber(o.signals_count)} сигнала</Text>
             </View>
-            <View style={[styles.pill, styles.pillCyan]}>
-              <Text style={styles.pillText}>{formatNumber(o.reporters_count)} души сигнализират</Text>
-            </View>
+            {o.reporters_count > 1 ? (
+              <View style={[styles.pill, styles.pillCyan]}>
+                <Text style={styles.pillText}>{formatNumber(o.reporters_count)} души сигнализират</Text>
+              </View>
+            ) : null}
             {o.helped_total > 0 ? (
               <View style={[styles.pill, styles.pillDim]}>
                 <Text style={styles.pillText}>{formatNumber(o.helped_total)}× помогнало</Text>

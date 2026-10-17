@@ -40,7 +40,8 @@ export function ObjectSignalsCard({ postId }: { postId: string }) {
         {o.city ? ', ' + o.city : ''}
       </Text>
       <Text style={styles.meta}>
-        {formatNumber(o.signals_count)} сигнала от {formatNumber(o.reporters_count)} души
+        {formatNumber(o.signals_count)} сигнала
+        {o.reporters_count > 1 ? ' от ' + formatNumber(o.reporters_count) + ' души' : ''}
         {o.avg_price != null ? ' · средно ' + formatMoney(o.avg_price) : ''}
         {o.min_price != null && o.max_price != null
           ? ' · ' + formatMoney(o.min_price) + '–' + formatMoney(o.max_price)
