@@ -3633,6 +3633,7 @@ const FB_TOPIC_TITLES = {
   services: '🔧 Услуги',
   masters: '👷 Майстори',
   real_estate: '🏠 Имоти',
+  vehicles: '🚗 Авто',
   shops_places: '🏪 Обекти',
   private_sellers: '🧍 Частни продавачи',
 };
@@ -4129,7 +4130,7 @@ async function renderFbReceipts(box) {
                 .filter((it) => !fbFlaggedOnly || it.flagged)
                 .map((it) => renderFbQueueItemCard(it))
                 .join('')
-            : `<div class="empty" style="padding:28px 12px">Няма записи в този списък. Пусни сваляне от групата горе или подай пост със снимка на бележка.</div>`
+            : `<div class="empty" style="padding:28px 12px">${fbReceiptsPolarity || fbFlaggedOnly || fbReceiptsTopic ? 'Няма записи с този филтър — натисни „Всички теми“ и „Всички“ (или махни „Червени/Топ находки/С предупреждения“), за да видиш всичко.' : 'Няма записи в този списък. Пусни сваляне от групата горе или подай пост със снимка на бележка.'}</div>`
         }
       </div>
     </div>`;

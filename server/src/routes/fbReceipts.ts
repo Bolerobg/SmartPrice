@@ -143,7 +143,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
             and ($3::text is null or coalesce(q.topic, 'deals') = $3)
           order by q.created_at desc
           limit $2`,
-        [q.status, q.limit, q.topic ?? null]
+        [q.status, q.limit, q.topic && q.topic.trim() !== '' ? q.topic.trim() : null]
       ),
       getFbTopics(),
     ]);
