@@ -102,11 +102,18 @@ export async function getFbScraperConfig(): Promise<{
   hasFbCookie: boolean;
   ocrAvailable: boolean;
   ocrModel: string;
+  commentsEnabled: boolean;
+  autoApprove: boolean;
+  autoApproveMin: number;
 }> {
   const savedApify = await getSetting('apify_api_token', '');
   const savedCookie = await getSetting('fb_cookie', '');
+  const savedComments = await getSetting('fb_comments', 'on');
+  const savedAuto = await getSetting('fb_auto_approve', 'off');
+  const savedAutoMin = await getSetting('fb_auto_approve_min', '0.85');
   const apifyToken = (savedApify || env.APIFY_API_TOKEN || '').trim();
   const fbCookie = (savedCookie || '').trim();
+  const autoApproveMin = Number(savedAutoMin);
   return {
     apifyToken,
     hasApifyToken: Boolean(apifyToken),
@@ -114,18 +121,34 @@ export async function getFbScraperConfig(): Promise<{
     hasFbCookie: Boolean(fbCookie),
     ocrAvailable: features.ocr,
     ocrModel: env.OCR_MODEL,
+    commentsEnabled: savedComments !== 'off',
+    autoApprove: savedAuto === 'on',
+    autoApproveMin: Number.isFinite(autoApproveMin) && autoApproveMin > 0 && autoApproveMin <= 1 ? autoApproveMin : 0.85,
   };
 }
 
 export async function saveFbScraperConfig(input: {
   apifyToken?: string;
   fbCookie?: string;
+  commentsEnabled?: boolean;
+  autoApprove?: boolean;
+  autoApproveMin?: number;
 }): Promise<void> {
   if (input.apifyToken !== undefined) {
     await setSetting('apify_api_token', input.apifyToken.trim());
   }
   if (input.fbCookie !== undefined) {
     await setSetting('fb_cookie', input.fbCookie.trim());
+  }
+  if (input.commentsEnabled !== undefined) {
+    await setSetting('fb_comments', input.commentsEnabled ? 'on' : 'off');
+  }
+  if (input.autoApprove !== undefined) {
+    await setSetting('fb_auto_approve', input.autoApprove ? 'on' : 'off');
+  }
+  if (input.autoApproveMin !== undefined) {
+    const v = Number(input.autoApproveMin);
+    if (Number.isFinite(v) && v > 0 && v <= 1) await setSetting('fb_auto_approve_min', String(v));
   }
 }
 
@@ -235,6 +258,10 @@ async function attachFbComments(
     apifyToken,
     perPost
   );
+  const commentsUsd = await fetchApifyRunUsage(apifyToken, 'apify~facebook-comments-scraper');
+  if (commentsUsd !== null) {
+    await onLog('Apify разход за коментарите: $' + commentsUsd.toFixed(4));
+  }
   let n = 0;
   targets.forEach((t, i) => {
     const list = buckets[i] ?? [];
@@ -253,6 +280,26 @@ function looksLikePriceSignal(text: string): boolean {
   const price = /(\d[\d\s.,]*)\s*(€|лв\.?|EUR|BGN|евро|лева|евроцента)/i.test(t);
   const complaint = /скъп|измам|надцен|вдигна|повиши|такс|грамаж|необоснов|лъж|промоция|завиши/i.test(t);
   return price || complaint;
+}
+
+/** Колко е изяла последната обиколка на даден Apify актьор (в долари). */
+async function fetchApifyRunUsage(token: string, actor: string): Promise<number | null> {
+  try {
+    const res = await fetch(
+      'https://api.apify.com/v2/acts/' +
+        actor +
+        '/runs?token=' +
+        encodeURIComponent(token) +
+        '&limit=1&desc=true',
+      { signal: AbortSignal.timeout(20_000) }
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { data?: { items?: Array<{ usageTotalUsd?: number }> } };
+    const usd = data.data?.items?.[0]?.usageTotalUsd;
+    return typeof usd === 'number' ? usd : null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchViaApify(
@@ -284,6 +331,11 @@ async function fetchViaApify(
 
   const rawItems = (await res.json()) as Array<Record<string, unknown>>;
   if (!Array.isArray(rawItems)) return [];
+
+  const runUsd = await fetchApifyRunUsage(apifyToken, 'apify~facebook-groups-scraper');
+  if (runUsd !== null) {
+    await onLog('Apify разход за тази обиколка: $' + runUsd.toFixed(4));
+  }
 
   const posts: RawFbPost[] = [];
   for (const item of rawItems) {
@@ -516,7 +568,7 @@ async function fetchViaDirectHttp(
 
 /* ========================================= 2) Изтегляне на снимка при нас */
 
-export async function downloadReceiptImage(
+async function downloadReceiptImageOnce(
   imageUrl: string
 ): Promise<{ localUrl: string; dataUrl: string; sha256: string } | null> {
   try {
@@ -565,6 +617,16 @@ export async function downloadReceiptImage(
   } catch {
     return null;
   }
+}
+
+/** Сваля снимката с ВТОРИ опит — Facebook CDN понякога не отговаря от първия път. */
+export async function downloadReceiptImage(
+  imageUrl: string
+): Promise<{ localUrl: string; dataUrl: string; sha256: string } | null> {
+  const first = await downloadReceiptImageOnce(imageUrl);
+  if (first) return first;
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  return downloadReceiptImageOnce(imageUrl);
 }
 
 /* =========================== 3) AI Vision OCR + Анализ на текста от поста */
@@ -1501,6 +1563,42 @@ export async function runFbGroupJob(
       }
     } catch (err) {
       await logJob(jobId, `Коментари (предупреждение): ${(err as Error).message.slice(0, 120)}`);
+    }
+
+    // Авто-одобрение: сигнали с висока увереност влизат сами (само ако е включено).
+    try {
+      const cfgNow = await getFbScraperConfig();
+      if (cfgNow.autoApprove) {
+        const approver = await one<{ created_by: string | null }>(
+          'select created_by from fb_receipt_jobs where id = $1',
+          [jobId]
+        );
+        if (approver?.created_by) {
+          const auto = await many<{ id: string }>(
+            `select id::text from fb_receipt_queue
+              where status = 'pending' and local_image_url is not null and confidence >= $1
+              order by confidence desc limit 25`,
+            [cfgNow.autoApproveMin]
+          );
+          let approved = 0;
+          for (const row of auto) {
+            try {
+              const done = await approveFbReceiptItem(row.id, approver.created_by);
+              if (done) approved++;
+            } catch {
+              /* не мина — остава за ръчно одобрение */
+            }
+          }
+          if (auto.length) {
+            await logJob(
+              jobId,
+              `🤖 Авто-одобрени ${approved} от ${auto.length} сигнала (увереност ≥ ${cfgNow.autoApproveMin}).`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      await logJob(jobId, `Авто-одобрение (предупреждение): ${(err as Error).message.slice(0, 120)}`);
     }
 
     await logJob(

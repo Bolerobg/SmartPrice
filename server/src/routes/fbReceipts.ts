@@ -110,6 +110,9 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
         hasFbCookie: cfg.hasFbCookie,
         ocrAvailable: cfg.ocrAvailable,
         ocrModel: cfg.ocrModel,
+        commentsEnabled: cfg.commentsEnabled,
+        autoApprove: cfg.autoApprove,
+        autoApproveMin: cfg.autoApproveMin,
       },
       counts: counts ?? { pending: 0, approved: 0, rejected: 0, not_receipt: 0 },
       jobs,
@@ -124,6 +127,9 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       .object({
         apifyToken: z.string().max(400).optional(),
         fbCookie: z.string().max(8000).optional(),
+        commentsEnabled: z.boolean().optional(),
+        autoApprove: z.boolean().optional(),
+        autoApproveMin: z.coerce.number().min(0.1).max(1).optional(),
       })
       .parse(req.body ?? {});
 
