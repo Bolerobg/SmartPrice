@@ -3573,7 +3573,7 @@ async function renderFbReceipts(box) {
           <label class="field">
             <span>Apify API Token (препоръчано за 100% автоматично сваляне от сървъра)</span>
             <input id="fb-apify-token" type="password" placeholder="${cfg.hasApifyToken ? 'Вече има записан токен (остави празно или въведи нов)' : 'apify_api_...'}" autocomplete="off">
-            <span class="hint" style="margin-top:4px">Безплатна регистрация в <a href="https://console.apify.com/ settings/integrations" target="_blank" rel="noopener">console.apify.com ↗</a> (ползва актьор <code>apify/facebook-groups-scraper</code>).</span>
+            <span class="hint" style="margin-top:4px">Безплатна регистрация в <a href="https://console.apify.com/settings/integrations" target="_blank" rel="noopener">console.apify.com ↗</a> (ползва актьор <code>apify/facebook-groups-scraper</code>).</span>
           </label>
           <label class="field">
             <span>Facebook Cookie (по избор — за директно четене без Apify)</span>
