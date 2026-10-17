@@ -455,10 +455,56 @@ const str = (v: unknown, max = 200): string | undefined => {
   return t ? t.slice(0, max) : undefined;
 };
 
+const ALIAS_FIRST_NAMES = [
+  'Мария', 'Иван', 'Елена', 'Петър', 'Десислава', 'Николай', 'Габриела', 'Стоян',
+  'Виктория', 'Антон', 'Калина', 'Мартин', 'Ивелина', 'Димитър', 'Силвия', 'Радослав',
+  'Теодора', 'Костадин', 'Яна', 'Борис', 'Лилия', 'Емил', 'Невена', 'Красимир',
+  'Полина', 'Живко', 'Ралица', 'Тодор', 'Милена', 'Валентин',
+];
+/** Безличното обръщение, което ползваме, когато нямаме автор (или за оплаквания). */
+export const NEUTRAL_AUTHOR = 'Потребител сигнализира';
+
+/** Стабилен (детерминистичен) псевдоним за автор: един и същ човек получава един и същ
+ *  измислен псевдоним във всички групи и задачи — звучи човешки, но не издава самоличност.
+ *  Истинското име НИКОГА не излиза от сървъра. */
+export function pseudonymFor(authorName: string | null | undefined): string {
+  const raw = (authorName || '').trim();
+  if (!raw) return NEUTRAL_AUTHOR;
+  let h = 7;
+  for (let i = 0; i < raw.length; i++) h = (h * 31 + raw.charCodeAt(i)) % 1000003;
+  return ALIAS_FIRST_NAMES[h % ALIAS_FIRST_NAMES.length]!;
+}
+
+/** Маха истинското име (и линкове към профил) от текст, който отива в приложението. */
+export function scrubAuthorName(
+  text: string,
+  authorName: string | null | undefined,
+  alias: string
+): string {
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let out = text || '';
+  const rawName = (authorName || '').trim();
+  if (rawName.length >= 3) {
+    out = out.split(rawName).join(alias);
+    const first = rawName.split(/\s+/)[0] ?? '';
+    if (first.length >= 4) {
+      // \b в JS е ASCII-базиран и не хваща кирилица → собствени граници на дума.
+      const re = new RegExp('(^|[^\u0410-\u044f\u0401\u0451A-Za-z])' + escapeRe(first) + '($|[^\u0410-\u044f\u0401\u0451A-Za-z])', 'gi');
+      out = out.replace(re, (_m, before: string, after: string) => before + alias + after);
+    }
+  }
+  return out
+    .replace(/\b(?:facebook|fb)\.[a-z]+\/\S+/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export async function analyzeFbReceiptWithAi(params: {
   imageDataUrl: string;
   fbPostText: string;
   defaultCity?: string;
+  /** Измислен псевдоним на автора (никога истинското име). */
+  authorAlias?: string;
 }): Promise<AiReceiptAnalysis> {
   if (!features.ocr) {
     throw new Error('Липсва OPENROUTER_API_KEY в конфигурацията за AI разчитане на касови бележки.');
@@ -486,8 +532,12 @@ export async function analyzeFbReceiptWithAi(params: {
     '3. Комбинирай ТЕКСТА НА ПОСТА със СНИМКАТА НА БЕЛЕЖКАТА:',
     '   - "polarity": "red" (ако авторът се оплаква от висока цена, надценка, скрита такса, малък грамаж или измама) или "green" (ако споделя добра оферта, ниска цена или изгодна покупка). При "price_signal" почти винаги е "red" — "green" само ако изрично хвали цената.',
     '   - "category": точно една от: "restaurants" | "hotels_airbnb" | "supermarket" | "cafes_bars" | "services_tech" | "other".',
-    '   - "title": ясно и грабващо заглавие на български (до 110 знака), което отразява какво е купено/коментирано и на каква цена/място.',
-    '   - "description": запази смисъла и историята от текста на поста във Facebook + добави кратко обобщение какво се вижда на касовата бележка. Махни лични имена или телефони.',
+    '   - "title": ясно и неутрално заглавие на български (до 110 знака) — какво е купено/коментирано и на каква цена и място. Без имена, без емоции, без КАПС и удивителни.',
+    '   - "description": ПРЕРАЗКАЖИ текста на поста със СВОИ ДУМИ в стила на SmartPrice — 2 до 4 кратки изречения, като за приложение с реални цени, НЕ като пост във Facebook.',
+    '     • Тон: неутрален, приятелски, спокоен и полезен. Без емоции, възклицания, КАПС, ирония, обиди, политика и религия. Без хаштагове и без емотикони.',
+    '     • Факти: продукт/услуга, цена, търговец, град/място. Каквото не се вижда на снимката или не е в поста — не го пиши. Ако цената е само от снимката, кажи „според снимката“.',
+    '     • САМОЛИЧНОСТ: никога не пиши истинско име, телефон, линк или профил на автора. За оплакване (polarity "red") започни безлично: "Потребител сигнализира, че…". За добра находка можеш да ползваш само подадения псевдоним (полето authorAlias), напр. "<псевдоним> от <град> споделя добра оферта…". Псевдонимът е измислен — не търси истинското име.',
+    '     • Завърши с факт, не с призив. Не добавяй съвети, оценки и прогнози, които не са в поста.',
     '   - "placeName": разбираемо име на магазина или заведението (напр. "Lidl", "Kaufland", "Ресторант ...", или името на фирмата от бона).',
     `   - "city": градът в България. За "receipt": от бележката или от текста; ако никъде не пише — "${fallbackCity}". За "price_signal": САМО истинският град (иначе "not_relevant").`,
     '   - "address": точен адрес/улица от касовата бележка, ако се чете, иначе null.',
@@ -699,6 +749,17 @@ export async function analyzeFbReceiptWithAi(params: {
 
 /* =============================== 4) Обработка на постове и запис в опашката */
 
+/** Адрес без query/hash и без крайни наклонени черти — за сравнение „същият пост/снимка“.
+ *  Facebook CDN слага изтичащи параметри (?\_nc\_cat=…), затова сравняваме само пътя. */
+export function fbUrlKey(url: string | null | undefined): string {
+  return (url || '')
+    .split('#')[0]!
+    .split('?')[0]!
+    .trim()
+    .toLowerCase()
+    .replace(/\/+$/, '');
+}
+
 async function logJob(jobId: string, msg: string) {
   const line = `${new Date().toISOString().slice(11, 19)} ${msg}`;
   await query(
@@ -737,14 +798,18 @@ export async function processRawFbPosts(params: {
     for (const imgUrl of post.imageUrls.slice(0, 3)) {
       if (queued >= cap) break;
 
-      // Проверка дали вече не сме обработили същия пост + снимка
+      // Дедупликация: НЕ теглим повторно вече видяно — нито одобрено, нито отхвърлено,
+      // нито чакащо. Сравняваме пост по стабилния fb_post_id, а адресите (пост и снимка)
+      // без query част, защото Facebook CDN слага изтичащи параметри при всеки fetch.
       const existingByUrl = await one<{ id: string }>(
         `select id::text from fb_receipt_queue
-          where original_image_url = $1 or (fb_post_url = $2 and $2 <> '')
+          where ($1 <> '' and fb_post_id = $1)
+             or ($2 <> '' and regexp_replace(split_part(coalesce(fb_post_url, ''), '?', 1), '/+$', '') = $2)
+             or ($3 <> '' and regexp_replace(split_part(coalesce(original_image_url, ''), '?', 1), '/+$', '') = $3)
           limit 1`,
-        [imgUrl, post.postUrl]
+        [(post.postId ?? '').trim(), fbUrlKey(post.postUrl), fbUrlKey(imgUrl)]
       );
-      if (existingByUrl && post.imageUrls.length === 1) {
+      if (existingByUrl) {
         skipped++;
         if (params.jobId) {
           await query(`update fb_receipt_jobs set skipped = skipped + 1 where id = $1`, [params.jobId]);
@@ -782,11 +847,16 @@ export async function processRawFbPosts(params: {
           );
         }
 
+        const authorAlias = pseudonymFor(post.authorName);
         const analysis = await analyzeFbReceiptWithAi({
           imageDataUrl: downloaded.dataUrl,
           fbPostText: post.text,
           defaultCity: params.defaultCity,
+          authorAlias,
         });
+        // Самоличността: истинското име на автора не бива да стига до приложението.
+        analysis.title = scrubAuthorName(analysis.title, post.authorName, authorAlias);
+        analysis.description = scrubAuthorName(analysis.description, post.authorName, authorAlias);
 
         const status = analysis.isReceipt ? 'pending' : 'not_receipt';
         const row = await one<{ id: string }>(
