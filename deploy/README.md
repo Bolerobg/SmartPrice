@@ -47,10 +47,15 @@ hermes cron list
   затова след деплой се пуска purge и потребителите виждат новия панел веднага.
 
 ## Резервни копия в Google Drive
-- Папка: `My Drive/backupdisk` на `kolyo.hristov@gmail.com`
-  (`https://drive.google.com/drive/folders/1rxUPc3LzkqJihsQ54xITtmE0wsBdNkeb`).
-- Верига: VPS → тази машина (scp) → Mac (`~/Library/CloudStorage/GoogleDrive-kolyo.hristov@gmail.com/My Drive/backupdisk`)
-  → Drive за Desktop качва файла в облака сам.
-- Пази последните **14** копия, тихо е, когато няма какво да прави; съобщава само ако
-  бекъпът на VPS-а е стар или последното копие в Drive е над 48 ч.
-- Ако Mac-ът спи — пропуска и пробва следващия час (затова е на всеки час, а не веднъж).
+- Папка (по ID, не по име): `1rxUPc3LzkqJihsQ54xITtmE0wsBdNkeb` — „SmartPrice_backup“ на
+  `kolyo.hristov@gmail.com` → https://drive.google.com/drive/folders/1rxUPc3LzkqJihsQ54xITtmE0wsBdNkeb
+- Верига: VPS → тази машина (scp) → **Google Drive API** (директно, чрез
+  `skills/productivity/google-workspace/scripts/google_api.py`). Не зависи от
+  Google Drive за Desktop и от никаква друга машина.
+- Токенът е в `~/AppData/Local/hermes/google_token.json` (автоматично се подновява).
+  Ако бъде отменен: `setup.py --revoke` и ново съгласие през `setup.py --auth-url`.
+- Пази последните **14** копия (по-старите отиват в кошчето на Drive).
+- Тихо, когато няма какво да прави; съобщава само ако бекъпът на VPS-а е стар (>30 ч)
+  или последното копие в Drive е над 48 ч.
+- **ПИТФОЛ:** заявката към Drive трябва да е с `and trashed = false` — иначе връща и
+  файловете от кошчето и скриптът решава, че бекъпът е качен (хванато на живо).
