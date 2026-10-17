@@ -1087,3 +1087,82 @@ export function storyCardUrl(params: {
   if (params.posts !== undefined) q.set('posts', String(params.posts));
   return `${API_URL}/api/referrals/card.png?${q.toString()}`;
 }
+
+/* ================= 🏪 Обекти (#11) ================= */
+
+export interface ObjectSummary {
+  slug: string;
+  place_name: string;
+  city: string;
+  signals_count: number;
+  reporters_count: number;
+  green_count: number;
+  red_count: number;
+  min_price: number | null;
+  max_price: number | null;
+  avg_price: number | null;
+  last_seen: string;
+  first_seen: string;
+  helped_total: number;
+  category: string | null;
+  categories?: string[] | null;
+  cover_image: string | null;
+  last_post_id?: string | null;
+  unit_type?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  address?: string | null;
+  merchant_name?: string | null;
+  merchant_tax_id?: string | null;
+  receipts_verified?: number;
+}
+
+export interface ObjectSignal {
+  id: string;
+  title: string;
+  description: string;
+  polarity: string;
+  category: string;
+  price_paid: number;
+  currency: string;
+  image_url: string;
+  created_at: string;
+  helped_count: number;
+  unit_quantity: number | null;
+  unit_type: string | null;
+  price_per_unit: number | null;
+  is_fake_promo: boolean;
+  is_shrinkflation: boolean;
+  verified_by_ai: boolean | null;
+  merchant_name: string | null;
+  merchant_tax_id: string | null;
+}
+
+export interface ObjectDetail {
+  object: ObjectSummary;
+  signals: ObjectSignal[];
+  history: Array<{ id: string; price: number; title: string; created_at: string; polarity: string; image_url: string }>;
+  months: Array<{ month: string; avg_price: number; min_price: number; max_price: number; posts: number }>;
+}
+
+/** Страница на един обект (по слуг от v_objects). */
+export async function loadObject(slug: string): Promise<ObjectDetail> {
+  return rawRequest<ObjectDetail>('/api/objects/' + encodeURIComponent(slug));
+}
+
+/** Обектът, към който принадлежи дадена оферта. */
+export async function loadObjectForPost(postId: string): Promise<ObjectDetail> {
+  return rawRequest<ObjectDetail>('/api/objects/by-post/' + encodeURIComponent(postId));
+}
+
+/** Търсене на обекти по име или град. */
+export async function searchObjects(
+  query: string,
+  city?: string,
+  limit = 20
+): Promise<{ total: number; items: ObjectSummary[] }> {
+  const parts = ['limit=' + limit];
+  if (query.trim()) parts.push('q=' + encodeURIComponent(query.trim()));
+  if (city && city.trim()) parts.push('city=' + encodeURIComponent(city.trim()));
+  return rawRequest<{ total: number; items: ObjectSummary[] }>('/api/objects?' + parts.join('&'));
+}

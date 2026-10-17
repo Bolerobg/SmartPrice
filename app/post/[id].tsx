@@ -19,6 +19,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ReceiptModalCard } from '@/components/ReceiptModalCard';
 import { PublicPostPreview } from '@/components/PublicPostPreview';
 import { PriceHistoryCard } from '@/components/PriceHistoryCard';
+import { ObjectSignalsCard } from '@/components/ObjectSignalsCard';
 import { ShopPriceCompare } from '@/components/ShopPriceCompare';
 import { Avatar } from '@/components/Avatar';
 import { COLORS } from '@/constants/theme';
@@ -504,6 +505,9 @@ export default function PostDetailScreen() {
 
           {/* История на цената + „Беше ли на място?“ */}
           <PriceHistoryCard post={post} />
+
+          {/* 🏪 Към кой обект е и колко души са сигнализирали за него */}
+          <ObjectSignalsCard postId={String(id)} />
 
           {/* Пълна касова бележка (AI OCR) */}
           {post.receipt && (
