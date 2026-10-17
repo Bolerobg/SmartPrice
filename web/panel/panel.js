@@ -60,7 +60,14 @@ async function api(path, options = {}) {
   const res = await fetch(`/api/admin${path}`, {
     method: options.method || 'GET',
     headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    // Приема и готов JSON низ, и обикновен обект — иначе тялото се
+    // кодира два пъти и сървърът отговаря „Подадените данни са невалидни“.
+    body:
+      options.body === undefined || options.body === null
+        ? undefined
+        : typeof options.body === 'string'
+          ? options.body
+          : JSON.stringify(options.body),
   });
 
   let data = null;
