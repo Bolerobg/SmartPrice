@@ -479,6 +479,8 @@ export async function analyzeFbReceiptWithAi(params: {
     '2. ЗАДЪЛЖИТЕЛНО за "price_signal" — трябва да е ЯСНО МЯСТОТО: "placeName" (магазин/обект) И "city" (град в България) И "citySource".',
     '   - "citySource": "receipt" (градът се чете от бележката/табелата/менюто), "post" (споменат е в текста на поста), "none" (никъде не личи).',
     '   - Ако "citySource" е "none" ИЛИ не можеш да определиш "placeName" → върни "kind": "not_relevant", "isReceipt": false, "skipReason": "Няма разпознаваем град/място". НЕ измисляй град и не ползвай град по подразбиране.',
+    '   - "country": "BG" ако мястото е в БЪЛГАРИЯ, иначе кратък код на държавата на английски ("GB", "MD", "IT", "DE", …). Ако не е ясно — празен низ.',
+    '   - Ако държавата НЕ е България → "kind": "not_relevant", "isReceipt": false, "skipReason": "Не е от България — не влиза в приложението". Приложението показва само български цени.',
     '   - Само когато мястото Е ясно и има реална цена (totalAmount > 0) → "isReceipt": true (това е билетът за опашката за одобрение).',
     '2. Прочети САМО това, което реално виждаш на касовата бележка/сметката: търговец (merchantName), ЕИК (merchantTaxId), дата (DD.MM.YYYY), час (HH:MM), обща сума (totalAmount), валута ("BGN" или "EUR") и всички артикули по редове (items).',
     '3. Комбинирай ТЕКСТА НА ПОСТА със СНИМКАТА НА БЕЛЕЖКАТА:',
@@ -496,6 +498,7 @@ export async function analyzeFbReceiptWithAi(params: {
     '  "isReceipt": boolean,',
     '  "skipReason": string | null,',
     '  "citySource": "receipt" | "post" | "none",',
+    '  "country": string,',
     '  "polarity": "green" | "red",',
     '  "category": "restaurants" | "hotels_airbnb" | "supermarket" | "cafes_bars" | "services_tech" | "other",',
     '  "title": string,',
@@ -582,6 +585,8 @@ export async function analyzeFbReceiptWithAi(params: {
         ? 'receipt'
         : 'none';
   const placeOk = (v: string) => Boolean(v) && v !== 'Неразчетен търговец';
+  const countryRaw = String(parsed.country ?? '').trim().toUpperCase();
+  const isForeign = countryRaw !== '' && countryRaw !== 'BG' && !countryRaw.startsWith('БЪЛГАР');
   const rawCurrency = String(parsed.currency ?? 'BGN').toUpperCase() === 'EUR' ? 'EUR' : 'BGN';
   const isBgn = rawCurrency === 'BGN';
   const toEur = (val: number) => Number((val / BGN_PER_EUR).toFixed(2));
@@ -652,11 +657,13 @@ export async function analyzeFbReceiptWithAi(params: {
   const locationOk = citySource !== 'none' && placeOk(placeName) && Boolean(city);
   const hasNumbers = totalAmountEur > 0 || items.length > 0;
   const accepted =
-    kind === 'receipt'
-      ? isReceipt && hasNumbers
-      : kind === 'price_signal'
-        ? locationOk && totalAmountEur > 0
-        : false;
+    isForeign
+      ? false
+      : kind === 'receipt'
+        ? isReceipt && hasNumbers
+        : kind === 'price_signal'
+          ? locationOk && totalAmountEur > 0
+          : false;
 
   return {
     kind,
@@ -665,9 +672,11 @@ export async function analyzeFbReceiptWithAi(params: {
       str(parsed.skipReason, 240) ??
       (accepted
         ? null
-        : kind === 'price_signal'
-          ? 'Няма разпознаваем град/място — не влиза в червените флагове'
-          : 'Снимката не съдържа касова бележка или цени.'),
+        : isForeign
+          ? 'Не е от България — не влиза в приложението'
+          : kind === 'price_signal'
+            ? 'Няма разпознаваем град/място — не влиза в червените флагове'
+            : 'Снимката не съдържа касова бележка или цени.'),
     polarity,
     category,
     title: title.slice(0, 200),
