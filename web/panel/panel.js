@@ -4056,21 +4056,42 @@ async function renderFbReceipts(box) {
     discoverBtn.onclick = async () => {
       const st = document.getElementById('fb-discover-status');
       discoverBtn.disabled = true;
-      if (st) st.textContent = 'Търся в Apify… (1–3 минути)';
+      if (st) st.textContent = 'Стартирам търсене в Apify…';
       try {
         const res = await api('/fb-receipts/groups/discover', { method: 'POST', body: JSON.stringify({}) });
-        toast('Открити ' + Number(res.found || 0) + ' групи — нови за преглед: ' + Number(res.added || 0), 'ok');
-        if (st) {
-          st.textContent = 'претърсени ' + (res.queries ? res.queries.length : 0) + ' заявки · нови ' + Number(res.added || 0) +
-            ' · познати ' + Number(res.known || 0) + ' · затворени ' + Number(res.skippedPrivate || 0) +
-            (res.usd ? ' · $' + Number(res.usd).toFixed(3) : '');
+        if (!res.started) {
+          toast(res.reason || 'Вече върви търсене — изчакай.', 'err');
+        } else {
+          if (st) st.textContent = 'Търся в Apify… (1–3 минути). Новите групи се появяват тук, докато върви.';
+          let tries = 0;
+          while (tries < 45) {
+            tries += 1;
+            await new Promise((resolve) => setTimeout(resolve, 8000));
+            await loadFbCandidates();
+            const st2 = await api('/fb-receipts/groups/discover/status');
+            if (st2 && st2.running === false) {
+              const last = st2.last || {};
+              if (last.ok === false) {
+                toast(last.reason || 'Търсенето не успя.', 'err');
+                if (st) st.textContent = 'Грешка: ' + (last.reason || 'неизвестна');
+              } else {
+                toast('Открити ' + Number(last.found || 0) + ' групи — нови за преглед: ' + Number(last.added || 0), 'ok');
+                if (st) {
+                  st.textContent = 'претърсени ' + ((last.queries || []).length) + ' заявки · нови ' + Number(last.added || 0) +
+                    ' · познати ' + Number(last.known || 0) + ' · затворени ' + Number(last.skippedPrivate || 0) +
+                    (last.usd ? ' · $' + Number(last.usd).toFixed(3) : '');
+                }
+              }
+              break;
+            }
+          }
         }
-        await loadFbCandidates();
       } catch (e) {
         toast(e.message, 'err');
         if (st) st.textContent = 'Грешка: ' + e.message;
       } finally {
         discoverBtn.disabled = false;
+        await loadFbCandidates();
       }
     };
   }

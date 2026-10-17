@@ -8,6 +8,7 @@
  * Одобрена група влиза в `app_settings.fb_groups` (списъкът за обиколки).
  */
 import { many, one, query } from '../db.js';
+import { getSetting, setSetting } from './settings.js';
 import {
   addFbSpend,
   fbBudgetAllows,
@@ -340,6 +341,65 @@ export async function discoverFbGroups(params: {
   await log(`Готово: нови групи за преглед — ${added} (познати: ${known}, затворени: ${skippedPrivate}).`);
 
   return { ok: true, queries, scanned: items.length, found, added, known, skippedPrivate, usd };
+}
+
+/** Върви ли в момента търсене на нови групи. */
+let discoveryRunning = false;
+
+export function isDiscoveryRunning(): boolean {
+  return discoveryRunning;
+}
+
+/** Последен резултат от търсене на нови групи (пази се в настройките). */
+export async function readDiscoveryStatus(): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await getSetting('fb_discover_last', '');
+    if (!raw) return null;
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    return obj && typeof obj === 'object' ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Пуска търсенето на нови групи ФОНОВО. Синхронната заявка минава през
+ * Cloudflare, който я реже след ~100 секунди (грешка 504), затова тук
+ * връщаме веднага, а резултатът се записва в настройките.
+ */
+export async function startDiscoveryInBackground(params: {
+  queries?: string[];
+  maxItems?: number;
+  minMembers?: number;
+}): Promise<{ started: boolean; reason?: string }> {
+  if (discoveryRunning) return { started: false, reason: 'Търсенето вече върви — изчакай да завърши.' };
+  discoveryRunning = true;
+  const startedAt = new Date().toISOString();
+
+  void (async () => {
+    let payload: Record<string, unknown>;
+    try {
+      const res = await discoverFbGroups(params);
+      payload = { ...res, startedAt, finishedAt: new Date().toISOString() };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      payload = {
+        ok: false,
+        reason: 'Грешка при търсенето: ' + msg.slice(0, 240),
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      };
+    } finally {
+      discoveryRunning = false;
+    }
+    try {
+      await setSetting('fb_discover_last', JSON.stringify(payload));
+    } catch {
+      /* настройката не е критична */
+    }
+  })();
+
+  return { started: true };
 }
 
 /** Одобрява кандидат: добавя групата в списъка за обиколки. */

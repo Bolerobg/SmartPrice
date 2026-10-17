@@ -7,9 +7,11 @@ import { getPriceAlertStats, runPriceAlerts } from '../lib/priceAlerts.js';
 import {
   approveGroupCandidate,
   countPendingCandidates,
-  discoverFbGroups,
+  isDiscoveryRunning,
   listGroupCandidates,
+  readDiscoveryStatus,
   rejectGroupCandidate,
+  startDiscoveryInBackground,
 } from '../lib/fbGroupDiscovery.js';
 import {
   approveFbReceiptItem,
@@ -564,20 +566,26 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
       })
       .parse(req.body ?? {});
 
-    const discovered = await discoverFbGroups({
+    const started = await startDiscoveryInBackground({
       queries: input.queries,
       maxItems: input.maxItems,
       minMembers: input.minMembers,
     });
-    if (!discovered.ok) throw badRequest(discovered.reason ?? 'Tarseneto ne uspia.');
 
     await audit({
       admin,
       action: 'fb_receipts.groups_discover',
-      details: { found: discovered.found, added: discovered.added, usd: discovered.usd },
+      details: { started: started.started },
       ip: req.ip,
     });
-    return discovered;
+    return { ok: started.started, started: started.started, reason: started.reason };
+  });
+
+  /** Върви ли търсенето и какъв е последният резултат. */
+  app.get('/api/admin/fb-receipts/groups/discover/status', async (req) => {
+    await requireAdminPanel(req);
+    const [running, last] = await Promise.all([Promise.resolve(isDiscoveryRunning()), readDiscoveryStatus()]);
+    return { running, last };
   });
 
   /** Otkriti grupi, chakashti odobrenie (ili s podaden status). */
