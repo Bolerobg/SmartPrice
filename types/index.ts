@@ -7,6 +7,7 @@ export type CategoryId =
   | 'supermarket'
   | 'cafes_bars'
   | 'services_tech'
+  | 'vehicles'
   | 'real_estate'
   | 'shops_places'
   | 'private_sellers'

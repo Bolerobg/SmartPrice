@@ -92,6 +92,13 @@ export const CATEGORIES: CategoryInfo[] = [
     description: 'Майстори, сервизи, електроника и битови разходи',
   },
   {
+    id: 'vehicles',
+    label: 'Авто и мото',
+    shortLabel: 'Авто',
+    icon: 'car',
+    description: 'Коли, мотоциклети, части, ремонт и обслужване',
+  },
+  {
     id: 'real_estate',
     label: 'Имоти, наеми и продажби',
     shortLabel: 'Имоти',

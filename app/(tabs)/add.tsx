@@ -37,6 +37,8 @@ const SAMPLE_PHOTOS: Record<Exclude<CategoryId, 'all'>, string> = {
     'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=900&auto=format&fit=crop&q=80',
   services_tech:
     'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=900&auto=format&fit=crop&q=80',
+  vehicles:
+    'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=900&auto=format&fit=crop&q=80',
   real_estate:
     'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=900&auto=format&fit=crop&q=80',
   shops_places:
