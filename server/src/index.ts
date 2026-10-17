@@ -27,6 +27,7 @@ import scraperRoutes from './routes/scraper.js';
 import fbReceiptRoutes from './routes/fbReceipts.js';
 import objectRoutes from './routes/objects.js';
 import publicDataRoutes from './routes/publicData.js';
+import pushRoutes from './routes/push.js';
 import { startScraperWorker } from './lib/scraper.js';
 import { startSecurityMonitor } from './lib/security.js';
 import { seedDemoData } from './seed.js';
@@ -189,6 +190,7 @@ export async function buildApp() {
   await app.register(fbReceiptRoutes);
   await app.register(objectRoutes);
   await app.register(publicDataRoutes);
+  await app.register(pushRoutes);
 
   /* ---------------------------------------------------------------------
    *  Спрени/изтрити профили и активност.

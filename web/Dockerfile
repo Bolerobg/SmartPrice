@@ -34,6 +34,10 @@ COPY --from=build /out /usr/share/nginx/html
 COPY web/panel /usr/share/nginx/html/panel
 # Публичният дашборд с отворени данни за медии (#13) — собствена страница на /dane/
 COPY web/dane /usr/share/nginx/html/dane
+# Service worker за Web Push + икони за известията (#push)
+COPY web/push-sw.js /usr/share/nginx/html/push-sw.js
+COPY assets/images/icon-192.png /usr/share/nginx/html/push-icon.png
+COPY assets/images/favicon.png /usr/share/nginx/html/push-badge.png
 # PWA манифестът: Expo не го копира при output:'single', затова го слагаме ние —
 # без него телефонът слага произволна икона, когато приложението се инсталира.
 COPY public/manifest.webmanifest /usr/share/nginx/html/manifest.webmanifest

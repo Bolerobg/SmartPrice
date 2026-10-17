@@ -1,5 +1,6 @@
 import { many, one, query } from '../db.js';
 import { sendPriceAlertEmail } from './email.js';
+import { sendPushToUser } from './push.js';
 import { env } from '../env.js';
 
 /**
@@ -160,6 +161,29 @@ export async function runPriceAlerts(options: { force?: boolean; limit?: number 
         [a.id, best.id, best.price]
       );
       emailed++;
+
+      // Push известие до браузъра/PWA (ако човекът има абонамент).
+      try {
+        const push = await sendPushToUser(a.user_id, {
+          title: '💰 По-ниска цена: ' + a.keyword,
+          body:
+            best.price.toFixed(2).replace('.', ',') +
+            ' € в ' +
+            (best.place_name || best.city || 'обект') +
+            (best.city ? ', ' + best.city : '') +
+            (a.max_price ? ' (търсиш до ' + Number(a.max_price).toFixed(2).replace('.', ',') + ' €)' : ''),
+          url: env.PUBLIC_BASE_URL + '/post/' + best.id,
+          tag: 'alert-' + a.id,
+        });
+        if (push.sent > 0) {
+          await query(
+            `insert into price_alert_log (alert_id, post_id, price, channel) values ($1,$2,$3,'push')`,
+            [a.id, best.id, best.price]
+          ).catch(() => undefined);
+        }
+      } catch {
+        /* push-ът не бива да чупи имейла */
+      }
     } catch (err) {
       errors.push('Имейл за аларма ' + a.id.slice(0, 8) + ': ' + (err as Error).message.slice(0, 140));
     }

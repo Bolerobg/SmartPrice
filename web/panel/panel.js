@@ -5042,6 +5042,17 @@ async function loadSecurityExtras() {
           : '') +
       '</div>' +
 
+      '<div class="card" style="margin-bottom:12px">' +
+        '<div class="card-title">🔔 Push известия (Web Push / VAPID)</div>' +
+        '<div class="hint">Известия до браузъра/телефона вместо имейл. Абонаменти: <strong id="push-devices">…</strong></div>' +
+        '<div class="row" style="margin-top:10px">' +
+          '<input id="push-title" placeholder="заглавие (по избор)" style="max-width:240px">' +
+          '<input id="push-body" placeholder="текст (по избор)" style="max-width:320px">' +
+          '<button class="btn btn-sm btn-ok" id="push-send">Изпрати тестово до всички</button>' +
+        '</div>' +
+        '<div class="hint" style="margin-top:8px">Публичен ключ: <span class="mono" id="push-key">…</span></div>' +
+      '</div>' +
+
       '<div class="card">' +
         '<div class="card-title">🧹 GDPR: право на забравяне</div>' +
         '<div class="hint">Търси по имейл, @handle или име. Първо виждаш точно какво ще се изтрие.</div>' +
@@ -5115,6 +5126,33 @@ async function loadSecurityExtras() {
           },
         });
     });
+
+    // Push статистика + тестово известие
+    (async () => {
+      try {
+        const st = await api('/push/stats');
+        const el = $e('push-devices');
+        if (el) el.textContent = Number(st.devices || 0) + ' устройства · ' + Number(st.users || 0) + ' души' + (st.last_ok ? ' · последно ' + ago(st.last_ok) : '');
+        const k = $e('push-key');
+        if (k) k.textContent = String(st.publicKey || '').slice(0, 24) + '…';
+      } catch (e) {
+        const el = $e('push-devices');
+        if (el) el.textContent = 'грешка: ' + e.message;
+      }
+      const sb = $e('push-send');
+      if (sb)
+        sb.onclick = async () => {
+          try {
+            const body = {};
+            if ($e('push-title').value.trim()) body.title = $e('push-title').value.trim();
+            if ($e('push-body').value.trim()) body.body = $e('push-body').value.trim();
+            const r = await api('/push/test-all', { method: 'POST', body });
+            toast('Изпратено до ' + Number(r.sent || 0) + ' устройства' + (r.gone ? ' · ' + r.gone + ' мъртви премахнати' : '') + (r.failed ? ' · неуспешни ' + r.failed : ''), r.sent ? 'ok' : 'warn');
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        };
+    })();
 
     if ($e('gdpr-search')) {
       const runSearch = async () => {

@@ -17,6 +17,7 @@ import {
   isAlreadyInstalled,
 } from '@/components/AddToHomeScreenModal';
 import { InviteCard } from '@/components/InviteCard';
+import { PushNotificationsCard } from '@/components/PushNotificationsCard';
 import { StoryCardModal } from '@/components/StoryCardModal';
 import { COLORS } from '@/constants/theme';
 import { storyCardUrl } from '@/src/api/client';
@@ -259,6 +260,8 @@ export default function ProfileScreen() {
                       : 'Обнови данните от сървъра'}
               </Text>
             </TouchableOpacity>
+
+            <PushNotificationsCard />
 
             <TouchableOpacity
               style={styles.testNudgeBtn}
