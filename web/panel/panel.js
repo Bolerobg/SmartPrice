@@ -4471,8 +4471,16 @@ async function renderFbReceipts(box) {
       }
     };
   }
-  void loadFbCandidates();
-  void loadPlans(false);
+  const isFull = !state.admin || state.admin.role === 'admin';
+  if (isFull) {
+    void loadFbCandidates();
+    void loadPlans(false);
+  } else {
+    const a = document.getElementById('fb-cand-list');
+    if (a) a.innerHTML = '<div class="hint" style="margin:0">Откриването на нови групи е само за главен админ.</div>';
+    const b = document.getElementById('fb-plan-box');
+    if (b) b.innerHTML = '<div class="hint" style="margin:0">Графикът на обиколките е само за главен админ.</div>';
+  }
 }
 
 function renderFbJobCard(j) {

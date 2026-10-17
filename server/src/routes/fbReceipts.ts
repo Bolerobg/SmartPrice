@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { many, one, query } from '../db.js';
 import { badRequest, notFound } from '../lib/errors.js';
-import { audit, requireAdminPanel } from '../lib/admin.js';
+import { audit, requireAdminPanel, requireFullAdmin } from '../lib/admin.js';
 import { getPriceAlertStats, runPriceAlerts } from '../lib/priceAlerts.js';
 import {
   approveGroupCandidate,
@@ -191,7 +191,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Запис на Apify API токен и/или Facebook сесийна бисквитка от админ панела. */
   app.post('/api/admin/fb-receipts/settings', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z
       .object({
         apifyToken: z.string().max(400).optional(),
@@ -217,7 +217,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Пуска нова задача за сваляне на касови бележки от публична Facebook група. */
   app.post('/api/admin/fb-receipts/jobs', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z
       .object({
         groupUrl: z.string().trim().min(5).max(600),
@@ -404,7 +404,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
   /** Отхвърляне на една или няколко бележки от опашката. */
   /** Кои теми (интереси) се скрапват в момента. */
   app.get('/api/admin/fb-receipts/topics', async (req) => {
-    await requireAdminPanel(req);
+    await requireFullAdmin(req);
     const enabled = await getFbTopics();
     const on = enabled.map((t) => t.key);
     return {
@@ -422,7 +422,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Запис на избраните теми (интереси) — какво да търсим във Facebook групите. */
   app.post('/api/admin/fb-receipts/topics', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z.object({ keys: z.array(z.string().trim().max(40)).max(20) }).parse(req.body ?? {});
     const topics = await saveFbTopics(input.keys);
     await audit({
@@ -436,13 +436,13 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Дневен бюджет за Apify: колко е похарчено и какъв е лимитът. */
   app.get('/api/admin/fb-receipts/cost', async (req) => {
-    await requireAdminPanel(req);
+    await requireFullAdmin(req);
     return await getFbCost();
   });
 
   /** Задаване на дневния лимит (в долари). */
   app.post('/api/admin/fb-receipts/cost', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z.object({ limitUsd: z.coerce.number().min(0).max(50) }).parse(req.body ?? {});
     const limitUsd = await saveFbDailyLimitUsd(input.limitUsd);
     await audit({
@@ -547,13 +547,13 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Запазените групи за автоматични обиколки. */
   app.get('/api/admin/fb-receipts/groups', async (req) => {
-    await requireAdminPanel(req);
+    await requireFullAdmin(req);
     return { groups: await getFbGroups() };
   });
 
   /** Запис на списъка с групи (един адрес на ред). */
   app.post('/api/admin/fb-receipts/groups', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z.object({ urls: z.array(z.string().max(600)).max(50) }).parse(req.body ?? {});
     const groups = await saveFbGroups(input.urls);
     await audit({
@@ -567,7 +567,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Tarsene na novi publichni grupi v Apify po kliuchovi dumi (podobrenie 9). */
   app.post('/api/admin/fb-receipts/groups/discover', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z
       .object({
         queries: z.array(z.string().trim().min(2).max(80)).max(30).optional(),
@@ -634,14 +634,14 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Списък с плановете (колко поста, колко пъти на ден, в кои часове) + глобални настройки. */
   app.get('/api/admin/fb-receipts/plans', async (req) => {
-    await requireAdminPanel(req);
+    await requireFullAdmin(req);
     const [view, status, cost] = await Promise.all([listPlanViews(), getDispatchStatus(), getFbCost()]);
     return { ...view, status, cost };
   });
 
   /** Създаване/редакция на план за група. */
   app.post('/api/admin/fb-receipts/plans', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z
       .object({
         group_url: z.string().trim().min(10).max(600),
@@ -664,7 +664,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Глобални настройки на графика (спиране, таван, нощна пауза, закъснение, пауза до дата). */
   app.post('/api/admin/fb-receipts/plans/settings', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z
       .object({
         autoEnabled: z.boolean().optional(),
@@ -685,7 +685,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Пускане на диспечера (ползва се от cron на всеки 10 минути). */
   app.post('/api/admin/fb-receipts/plans/dispatch', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z
       .object({
         force: z.boolean().optional(),
@@ -710,7 +710,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Включване/изключване на група. */
   app.post('/api/admin/fb-receipts/plans/:id/enabled', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
     const input = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
     const res = await setPlanEnabled(params.id, input.enabled);
@@ -720,7 +720,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Пускане на една група веднага. */
   app.post('/api/admin/fb-receipts/plans/:id/run', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
     const res = await runPlanNow(params.id, admin.id);
     if (!res.ok) throw badRequest(res.reason ?? 'Не успя да се пусне.');
@@ -730,7 +730,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Махане на групата от графика. */
   app.delete('/api/admin/fb-receipts/plans/:id', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
     const res = await deletePlan(params.id);
     await audit({ admin, action: 'fb_receipts.plan_delete', details: { id: params.id }, ip: req.ip });
@@ -739,7 +739,7 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
   /** Пуска обиколка на ВСИЧКИ запазени групи (една след друга, с пауза между тях). */
   app.post('/api/admin/fb-receipts/run-all', async (req) => {
-    const admin = await requireAdminPanel(req);
+    const admin = await requireFullAdmin(req);
     const input = z
       .object({
         count: z.coerce.number().int().min(1).max(100).default(20),
