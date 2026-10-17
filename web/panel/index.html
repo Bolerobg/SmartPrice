@@ -34,6 +34,11 @@
       <input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••">
     </label>
 
+    <label class="field">
+      <span>Код от приложението (2FA) — само ако е включена</span>
+      <input id="login-code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456">
+    </label>
+
     <button class="btn btn-primary btn-block" type="submit" id="login-btn">Влез</button>
     <div class="login-error" id="login-error" hidden></div>
   </form>

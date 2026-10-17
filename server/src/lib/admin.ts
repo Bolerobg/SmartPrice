@@ -29,7 +29,25 @@ export function adminEmails(): string[] {
 }
 
 export function isAdminProfile(profile: { role: string; email: string }): boolean {
+  return (
+    profile.role === 'admin' ||
+    profile.role === 'moderator' ||
+    adminEmails().includes(profile.email.toLowerCase())
+  );
+}
+
+/** Пълни права: само главен админ (не модератор). Пази чувствителните действия. */
+export function isFullAdmin(profile: { role: string; email: string }): boolean {
   return profile.role === 'admin' || adminEmails().includes(profile.email.toLowerCase());
+}
+
+/** Изисква пълни права — за настройки, ключове, GDPR, екип и роли. */
+export async function requireFullAdmin(req: FastifyRequest): Promise<AdminProfile> {
+  const profile = await requireAdminPanel(req);
+  if (!isFullAdmin(profile)) {
+    throw forbidden('Това действие е само за главен админ (модераторът няма право).');
+  }
+  return profile;
 }
 
 export async function loadAdminById(userId: string): Promise<AdminProfile | null> {

@@ -119,13 +119,16 @@ $('#login-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   btn.textContent = 'Проверявам…';
   try {
+    const codeEl = $('#login-code');
+    const code = codeEl && codeEl.value.trim() ? codeEl.value.trim() : undefined;
     const data = await api('/login', {
       method: 'POST',
-      body: { email: $('#login-email').value.trim(), password: $('#login-password').value },
+      body: { email: $('#login-email').value.trim(), password: $('#login-password').value, code },
     });
     state.token = data.token;
     state.admin = data.admin;
     localStorage.setItem(TOKEN_KEY, data.token);
+    applyRoleUi();
     showApp();
   } catch (e2) {
     err.textContent = e2.message;
@@ -155,11 +158,13 @@ async function showApp() {
     try {
       const me = await api('/me');
       state.admin = me.admin;
+      applyRoleUi();
     } catch {
       return;
     }
   }
-  $('#who').innerHTML = `<strong>${esc(state.admin.name || '')}</strong><br>${esc(state.admin.email)}`;
+  $('#who').innerHTML = `<strong>${esc(state.admin.name || '')}</strong><br>${esc(state.admin.email)}<br><span class="pill" id="role-badge" hidden></span>`;
+  applyRoleUi();
   $('#stamp').textContent = `Заредено: ${new Date().toLocaleTimeString('bg-BG')}`;
   navigate(state.page || 'overview');
 }
@@ -4959,10 +4964,255 @@ async function renderFavorites(box) {
 
 /* --------------------------------------------------------- сигурност */
 
+/**
+ * Модераторът вижда само модерацията. Скриваме му секциите с настройки,
+ * ключове, GDPR, екип и роли. Сървърът също пази правата си — това е само UI.
+ */
+function applyRoleUi() {
+  const role = (state.admin && state.admin.role) || 'admin';
+  const full = role === 'admin';
+  const hiddenForModerator = ['users', 'raffles', 'demo', 'referrals', 'assistant', 'scraper', 'security', 'emails', 'audit'];
+  document.querySelectorAll('.nav-item').forEach((b) => {
+    const page = b.dataset.page || '';
+    const hide = !full && hiddenForModerator.includes(page);
+    b.hidden = hide;
+  });
+  const badge = document.getElementById('role-badge');
+  if (badge) {
+    badge.textContent = full ? 'главен админ' : 'модератор';
+    badge.className = 'pill ' + (full ? 'pill-green' : 'pill-gold');
+    badge.hidden = false;
+  }
+}
+
+/* ===== 🔐 2FA, екип и роли, GDPR (в секция „Сигурност“) ===== */
+async function loadSecurityExtras() {
+  const box = document.getElementById('sec-extra');
+  if (!box) return;
+  const role = (state.admin && state.admin.role) || 'admin';
+  const full = role === 'admin';
+  box.innerHTML = '<div class="card"><span class="spinner"></span></div>';
+  try {
+    const tf = await api('/2fa/status').catch(() => ({ enabled: false, pendingSetup: false }));
+    const team = await api('/team').catch(() => ({ team: [], adminEmails: [] }));
+    const members = (team.team || [])
+      .map(
+        (m) =>
+          '<tr><td><strong>' + esc(m.name) + '</strong><div class="dim">' + esc(m.email) + '</div></td>' +
+          '<td><span class="pill ' + (m.role === 'admin' ? 'pill-green' : 'pill-gold') + '">' + (m.role === 'admin' ? 'главен админ' : 'модератор') + '</span></td>' +
+          '<td>' + (m.totp_enabled ? '<span class="pill pill-green">включена</span>' : '<span class="pill pill-dim">изключена</span>') + '</td>' +
+          '<td class="dim nowrap">' + ago(m.last_login_at) + '</td>' +
+          '<td class="actions">' + (m.role === 'moderator' ? '<button class="btn btn-sm btn-ghost" data-team-rm="' + esc(m.id) + '">махни правата</button>' : '') + '</td></tr>'
+      )
+      .join('');
+
+    box.innerHTML =
+      '<div class="card" style="margin-bottom:12px">' +
+        '<div class="card-title">🔐 Двуфакторна защита (2FA)</div>' +
+        '<div class="hint">Освен паролата се иска код от приложението (Google Authenticator, Authy, 1Password). ' +
+          (tf.enabled ? '<span class="pill pill-green">включена</span>' : '<span class="pill pill-dim">изключена</span>') + '</div>' +
+        (full
+          ? tf.enabled
+            ? '<div class="row" style="margin-top:10px"><input id="tfa-pass" type="password" placeholder="паролата ти" style="max-width:260px"><button class="btn btn-sm" id="tfa-off">Спри защитата</button></div>'
+            : '<div class="row" style="margin-top:10px"><button class="btn btn-sm btn-ok" id="tfa-setup">Настрой двуфакторна защита</button><span class="dim" id="tfa-out"></span></div>' +
+              '<div id="tfa-confirm" hidden style="margin-top:10px">' +
+              '<div class="hint">Отвори приложението-автентикатор → „Добави“ → „Въведи ключ“ и напиши тайната по-горе (или отвори адреса). После въведи кода тук:</div>' +
+              '<div class="row" style="margin-top:6px"><input id="tfa-code" inputmode="numeric" maxlength="10" placeholder="123456" style="max-width:140px"><button class="btn btn-sm btn-ok" id="tfa-on">Включи</button></div></div>'
+          : '<div class="hint" style="margin-top:8px">Само главният админ може да променя 2FA.</div>') +
+      '</div>' +
+
+      '<div class="card" style="margin-bottom:12px">' +
+        '<div class="card-title">👥 Екип и роли</div>' +
+        '<div class="hint">Модераторът ползва само модерацията (ФБ Бележки, оферти, коментари, сигнали) — без настройки, ключове, GDPR и екип.</div>' +
+        '<div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Човек</th><th>Роля</th><th>2FA</th><th>Последен вход</th><th></th></tr></thead><tbody>' +
+          (members || '<tr><td colspan="5" class="dim">—</td></tr>') +
+        '</tbody></table></div>' +
+        (full
+          ? '<div class="row" style="margin-top:10px"><input id="team-email" placeholder="имейл на регистриран потребител" style="max-width:300px">' +
+            '<select id="team-role"><option value="moderator">модератор</option><option value="admin">главен админ</option></select>' +
+            '<button class="btn btn-sm btn-ok" id="team-add">Дай права</button></div>'
+          : '') +
+      '</div>' +
+
+      '<div class="card">' +
+        '<div class="card-title">🧹 GDPR: право на забравяне</div>' +
+        '<div class="hint">Търси по имейл, @handle или име. Първо виждаш точно какво ще се изтрие.</div>' +
+        (full
+          ? '<div class="row" style="margin-top:8px"><input id="gdpr-q" placeholder="имейл / @handle / име" style="max-width:320px"><button class="btn btn-sm" id="gdpr-search">Търси</button></div><div id="gdpr-res" style="margin-top:10px"></div>'
+          : '<div class="hint" style="margin-top:8px">Само главният админ има достъп до GDPR инструментите.</div>') +
+      '</div>';
+
+    const $e = (id) => document.getElementById(id);
+
+    if ($e('tfa-setup'))
+      $e('tfa-setup').onclick = async () => {
+        try {
+          const r = await api('/2fa/setup', { method: 'POST' });
+          $e('tfa-out').innerHTML = 'тайна: <strong class="mono">' + esc(r.secret) + '</strong> · <a href="' + esc(r.uri) + '">отвори в приложението</a>';
+          $e('tfa-confirm').hidden = false;
+          toast('Тайната е готова — въведи я в приложението и напиши кода.', 'ok');
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+      };
+
+    if ($e('tfa-on'))
+      $e('tfa-on').onclick = async () => {
+        try {
+          await api('/2fa/enable', { method: 'POST', body: { code: $e('tfa-code').value.trim() } });
+          toast('Двуфакторната защита е включена. От следващия вход ще иска код.', 'ok');
+          void loadSecurityExtras();
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+      };
+
+    if ($e('tfa-off'))
+      $e('tfa-off').onclick = async () => {
+        try {
+          await api('/2fa/disable', { method: 'POST', body: { password: $e('tfa-pass').value } });
+          toast('Защитата е спряна.', 'ok');
+          void loadSecurityExtras();
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+      };
+
+    if ($e('team-add'))
+      $e('team-add').onclick = async () => {
+        try {
+          const r = await api('/team', { method: 'POST', body: { email: $e('team-email').value.trim(), role: $e('team-role').value } });
+          toast('Правата са дадени на ' + (r.member && r.member.name ? r.member.name : '') + '.', 'ok');
+          void loadSecurityExtras();
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+      };
+
+    box.querySelectorAll('[data-team-rm]').forEach((b) => {
+      b.onclick = () =>
+        confirmAction({
+          title: 'Махни правата',
+          message: 'Човекът остава с обикновен профил и губи достъп до панела.',
+          confirmLabel: 'Махни',
+          onConfirm: async () => {
+            closeModal();
+            try {
+              await api('/team/' + b.dataset.teamRm, { method: 'DELETE' });
+              toast('Правата са махнати.', 'ok');
+              void loadSecurityExtras();
+            } catch (e) {
+              toast(e.message, 'err');
+            }
+          },
+        });
+    });
+
+    if ($e('gdpr-search')) {
+      const runSearch = async () => {
+        const q = $e('gdpr-q').value.trim();
+        if (q.length < 2) return toast('Напиши поне 2 букви.', 'warn');
+        $e('gdpr-res').innerHTML = '<span class="spinner"></span>';
+        try {
+          const r = await api('/gdpr/search?q=' + encodeURIComponent(q));
+          const users = r.users || [];
+          $e('gdpr-res').innerHTML = users.length
+            ? '<div class="table-wrap"><table><thead><tr><th>Човек</th><th>Град</th><th>Оферти</th><th>Състояние</th><th></th></tr></thead><tbody>' +
+              users.map((u) =>
+                '<tr><td><strong>' + esc(u.name) + '</strong><div class="dim">' + esc(u.email) + ' · ' + esc(u.handle) + '</div></td>' +
+                '<td>' + esc(u.city) + '</td><td>' + Number(u.posts || 0) + '</td>' +
+                '<td>' + (u.anonymized_at ? '<span class="pill pill-gold">обезличен</span>' : u.deleted ? '<span class="pill pill-red">изтрит</span>' : '<span class="pill pill-green">активен</span>') + '</td>' +
+                '<td class="actions"><button class="btn btn-sm" data-gdpr-prev="' + esc(u.id) + '">Прегледай</button></td></tr>'
+              ).join('') + '</tbody></table></div>'
+            : '<div class="dim">Никой не е намерен.</div>';
+          $e('gdpr-res').querySelectorAll('[data-gdpr-prev]').forEach((b) => {
+            b.onclick = () => void loadGdprPreview(b.dataset.gdprPrev);
+          });
+        } catch (e) {
+          $e('gdpr-res').innerHTML = '<div class="dim">Грешка: ' + esc(e.message) + '</div>';
+        }
+      };
+      $e('gdpr-search').onclick = runSearch;
+      $e('gdpr-q').addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') void runSearch();
+      });
+    }
+  } catch (e) {
+    box.innerHTML = '<div class="card"><div class="hint">Грешка: ' + esc(e.message) + '</div></div>';
+  }
+}
+
+/** Преглед какво точно ще се изтрие + бутоните за обезличаване и пълно изтриване. */
+async function loadGdprPreview(userId) {
+  const res = document.getElementById('gdpr-res');
+  if (!res) return;
+  res.innerHTML = '<span class="spinner"></span>';
+  try {
+    const p = await api('/gdpr/preview/' + encodeURIComponent(userId));
+    const c = p.counts || {};
+    const rows = [
+      ['Оферти (постове)', c.posts], ['Коментари', c.comments], ['Кас. бележки', c.receipts],
+      ['Качени снимки', c.uploads], ['Ценови аларми', c.price_alerts], ['Реакции', c.reactions],
+      ['Любими', c.bookmarks], ['„Помогна ми“', c.helped], ['Дарения', c.donations],
+      ['Сигнали от него', c.reports], ['Покани', c.referrals],
+    ];
+    res.innerHTML =
+      '<div class="card"><div class="card-title">👤 ' + esc(p.user.name) + ' · ' + esc(p.user.email) + '</div>' +
+      '<div class="hint">' + esc(p.user.handle) + ' · ' + esc(p.user.city) + ' · регистрация: ' + ago(p.user.created_at) + '</div>' +
+      '<div class="table-wrap" style="margin-top:8px"><table><tbody>' +
+      rows.filter(([, v]) => Number(v) > 0).map(([k, v]) => '<tr><td>' + k + '</td><td><strong>' + Number(v) + '</strong></td></tr>').join('') +
+      '</tbody></table></div>' +
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-sm btn-ok" id="gdpr-anon">🧹 Обезличи (офертите остават)</button>' +
+      '<button class="btn btn-sm btn-danger-solid" id="gdpr-erase">🗑 Изтрий всичко</button>' +
+      '</div>' +
+      '<div class="hint" style="margin-top:8px">Обезличаването маха име, имейл, @handle и снимката, но офертите и цените остават (те са общностни данни). Пълното изтриване маха и съдържанието.</div></div>';
+
+    document.getElementById('gdpr-anon').onclick = () =>
+      confirmAction({
+        title: 'Обезличаване по GDPR',
+        message: 'Името, имейлът, @handle-ът и снимката се махат. Офертите и цените остават.',
+        details: ['Оферти: ' + Number(c.posts || 0) + ' (остават)', 'Коментари: ' + Number(c.comments || 0) + ' (остават)', 'Ценови аларми: ' + Number(c.price_alerts || 0) + ' (изтриват се)'],
+        confirmLabel: 'Обезличи',
+        onConfirm: async () => {
+          closeModal();
+          try {
+            await api('/gdpr/anonymize', { method: 'POST', body: { userId } });
+            toast('Профилът е обезличен.', 'ok');
+            res.innerHTML = '<div class="dim">Готово — профилът е обезличен.</div>';
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        },
+      });
+
+    document.getElementById('gdpr-erase').onclick = () =>
+      confirmAction({
+        title: 'Пълно изтриване по GDPR',
+        message: 'Това НЕ може да се върне: махат се профилът и съдържанието на човека.',
+        details: ['Оферти: ' + Number(c.posts || 0), 'Коментари: ' + Number(c.comments || 0), 'Качени снимки: ' + Number(c.uploads || 0), 'Кас. бележки: ' + Number(c.receipts || 0)],
+        confirmLabel: 'Изтрий завинаги',
+        onConfirm: async () => {
+          closeModal();
+          try {
+            const r = await api('/gdpr/erase', { method: 'POST', body: { userId } });
+            toast('Профилът и съдържанието са изтрити.' + (r.blocked && r.blocked.length ? ' (засегнати: ' + r.blocked.join(', ') + ')' : ''), 'ok');
+            res.innerHTML = '<div class="dim">Готово — профилът е изтрит.</div>';
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        },
+      });
+  } catch (e) {
+    res.innerHTML = '<div class="dim">Грешка: ' + esc(e.message) + '</div>';
+  }
+}
+
 async function renderSecurity(box, force) {
   const f = (cache.securityFilter = force ? { onlyOpen: false } : cache.securityFilter || { onlyOpen: false });
   const data = await api(`/security?onlyOpen=${f.onlyOpen}&limit=50`);
   box.innerHTML = `
+    <div id="sec-extra" style="margin-bottom:14px"></div>
     <div class="toolbar">
       <label class="dim"><input type="checkbox" id="sec-open" style="width:auto" ${f.onlyOpen ? 'checked' : ''}> само нерешени</label>
       <button class="btn" id="sec-scan">🔍 Пусни проверка сега</button>
@@ -4994,6 +5244,7 @@ async function renderSecurity(box, force) {
       }
       </tbody></table></div>`;
 
+  void loadSecurityExtras();
   $('#sec-open').onchange = (e) => {
     f.onlyOpen = e.target.checked;
     render('security');

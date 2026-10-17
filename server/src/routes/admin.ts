@@ -7,13 +7,17 @@ import { badRequest, conflict, notFound, tooLarge, unauthorized } from '../lib/e
 import { hashPassword, verifyPassword } from '../lib/auth.js';
 import { putImage, publicUrl, storageDriver } from '../lib/storage.js';
 import {
+  adminEmails,
   audit,
   isAdminProfile,
   loadAdminById,
   loadDashboardStats,
   requireAdminPanel,
+  requireFullAdmin,
   signAdminToken,
 } from '../lib/admin.js';
+import { generateTotpSecret, totpUri, verifyTotp } from '../lib/totp.js';
+import { anonymizeUser, eraseUser, gdprPreview, searchUsersForGdpr } from '../lib/gdpr.js';
 import { runSecurityScan, ALERT_EMAIL } from '../lib/security.js';
 import { invalidateKnowledgeCache } from './assistant.js';
 import { retrainCenko, lastRetrain, logRetrain } from '../lib/cenkoKnowledge.js';
@@ -49,7 +53,12 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.post('/api/admin/login', async (req) => {
     const input = z
-      .object({ email: z.string().trim().email(), password: z.string().min(1).max(200) })
+      .object({
+        email: z.string().trim().email(),
+        password: z.string().min(1).max(200),
+        /** Код от приложението-автентикатор, ако е включена двуфакторна защита. */
+        code: z.string().trim().max(10).optional(),
+      })
       .parse(req.body);
 
     const row = await one<{ id: string; password_hash: string; role: string; email: string; name: string }>(
@@ -75,6 +84,24 @@ export default async function adminRoutes(app: FastifyInstance) {
         ip,
       });
       throw unauthorized('Този профил няма админ права.');
+    }
+
+    // Двуфакторна защита (TOTP): ако е включена, без верен код не пускаме.
+    const totpRow = await one<{ totp_secret: string | null; totp_enabled: boolean }>(
+      `select totp_secret, coalesce(totp_enabled, false) as totp_enabled from profiles where id = $1`,
+      [row.id]
+    );
+    if (totpRow?.totp_enabled && totpRow.totp_secret) {
+      const code = String(input.code ?? '').replace(/\D/g, '');
+      if (!code) throw unauthorized('Въведи кода от приложението за двуфакторна защита.');
+      if (!verifyTotp(totpRow.totp_secret, code)) {
+        await one(`insert into login_attempts (email, ip, ok, reason) values ($1,$2,false,$3) returning id`, [
+          input.email,
+          ip,
+          'wrong_totp',
+        ]).catch(() => undefined);
+        throw unauthorized('Грешен код за двуфакторна защита.');
+      }
     }
 
     await one(`update profiles set last_login_at = now(), login_count = login_count + 1 where id = $1 returning id`, [
@@ -1540,6 +1567,153 @@ export default async function adminRoutes(app: FastifyInstance) {
     ]);
     return { recent, top, stats };
   });
+  /* ------------------------------------------- двуфакторна защита (2FA) */
+
+  app.get('/api/admin/2fa/status', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const row = await one<{ totp_enabled: boolean; totp_secret: string | null }>(
+      `select coalesce(totp_enabled, false) as totp_enabled, totp_secret from profiles where id = $1`,
+      [admin.id]
+    );
+    return {
+      enabled: Boolean(row?.totp_enabled),
+      pendingSetup: Boolean(row?.totp_secret) && !row?.totp_enabled,
+    };
+  });
+
+  app.post('/api/admin/2fa/setup', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const secret = generateTotpSecret();
+    await query(`update profiles set totp_secret = $2, totp_enabled = false where id = $1`, [admin.id, secret]);
+    return { ok: true, secret, uri: totpUri(admin.email, secret), issuer: 'SmartPrice' };
+  });
+
+  app.post('/api/admin/2fa/enable', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z.object({ code: z.string().trim().min(6).max(10) }).parse(req.body ?? {});
+    const row = await one<{ totp_secret: string | null }>(`select totp_secret from profiles where id = $1`, [admin.id]);
+    if (!row?.totp_secret) throw badRequest('Първо натисни „Настрой двуфакторна защита“.');
+    if (!verifyTotp(row.totp_secret, input.code)) {
+      throw badRequest('Кодът не съвпада. Провери часовника на телефона и опитай пак.');
+    }
+    await query(`update profiles set totp_enabled = true, totp_confirmed_at = now() where id = $1`, [admin.id]);
+    await audit({ admin, action: 'admin.2fa_enable', ip: req.ip });
+    return { ok: true };
+  });
+
+  app.post('/api/admin/2fa/disable', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z
+      .object({ code: z.string().trim().max(10).optional(), password: z.string().max(200).optional() })
+      .parse(req.body ?? {});
+    const row = await one<{ totp_secret: string | null; password_hash: string }>(
+      `select totp_secret, password_hash from profiles where id = $1`,
+      [admin.id]
+    );
+    const byPassword = input.password ? await verifyPassword(input.password, row?.password_hash ?? '') : false;
+    const byCode = input.code && row?.totp_secret ? verifyTotp(row.totp_secret, input.code) : false;
+    if (!byPassword && !byCode) throw badRequest('Въведи паролата си (или код от приложението), за да спреш защитата.');
+    await query(`update profiles set totp_secret = null, totp_enabled = false, totp_confirmed_at = null where id = $1`, [
+      admin.id,
+    ]);
+    await audit({ admin, action: 'admin.2fa_disable', ip: req.ip });
+    return { ok: true };
+  });
+
+  /* ------------------------------------------- екип и роли */
+
+  app.get('/api/admin/team', async (req) => {
+    await requireAdminPanel(req);
+    const team = await many<Record<string, unknown>>(
+      `select id::text, name, email::text, handle, role, coalesce(totp_enabled, false) as totp_enabled,
+              created_at::text, last_login_at::text
+         from profiles
+        where role in ('admin', 'moderator') and deleted_at is null
+        order by role, created_at`
+    );
+    return { team, adminEmails: adminEmails() };
+  });
+
+  app.post('/api/admin/team', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z
+      .object({ email: z.string().trim().email(), role: z.enum(['moderator', 'admin']) })
+      .parse(req.body ?? {});
+    const row = await one<{ id: string; name: string; role: string }>(
+      `update profiles set role = $2
+        where email = $1 and deleted_at is null
+        returning id::text, name, role`,
+      [input.email, input.role]
+    );
+    if (!row) throw notFound('Няма регистриран потребител с този имейл.');
+    await audit({
+      admin,
+      action: 'admin.team_role',
+      targetType: 'profile',
+      targetId: row.id,
+      targetLabel: input.email,
+      details: { role: input.role },
+      ip: req.ip,
+    });
+    return { ok: true, member: row };
+  });
+
+  app.delete('/api/admin/team/:id', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const params = z.object({ id: z.string().uuid() }).parse(req.params ?? {});
+    if (params.id === admin.id) throw badRequest('Не можеш да си махнеш правата сам.');
+    await query(`update profiles set role = 'user' where id = $1`, [params.id]);
+    await audit({ admin, action: 'admin.team_remove', targetType: 'profile', targetId: params.id, ip: req.ip });
+    return { ok: true };
+  });
+
+  /* ------------------------------------------- GDPR: право на забравяне */
+
+  app.get('/api/admin/gdpr/search', async (req) => {
+    await requireFullAdmin(req);
+    const q = z.object({ q: z.string().trim().min(2).max(120) }).parse(req.query ?? {});
+    return { users: await searchUsersForGdpr(q.q) };
+  });
+
+  app.get('/api/admin/gdpr/preview/:id', async (req) => {
+    await requireFullAdmin(req);
+    const params = z.object({ id: z.string().uuid() }).parse(req.params ?? {});
+    const preview = await gdprPreview(params.id);
+    if (!preview) throw notFound('Няма такъв профил.');
+    return preview;
+  });
+
+  app.post('/api/admin/gdpr/anonymize', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z.object({ userId: z.string().uuid() }).parse(req.body ?? {});
+    const res = await anonymizeUser(input.userId);
+    await audit({ admin, action: 'gdpr.anonymize', targetType: 'profile', targetId: input.userId, ip: req.ip });
+    return res;
+  });
+
+  app.post('/api/admin/gdpr/erase', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z.object({ userId: z.string().uuid() }).parse(req.body ?? {});
+    const preview = await gdprPreview(input.userId);
+    if (preview?.user?.email) {
+      await sendAccountDeletedEmail({
+        to: preview.user.email,
+        name: preview.user.name,
+        reason: 'Изтриване на профила по GDPR (право на забравяне)',
+      }).catch(() => undefined);
+    }
+    const res = await eraseUser(input.userId);
+    await audit({
+      admin,
+      action: 'gdpr.erase',
+      targetType: 'profile',
+      targetId: input.userId,
+      details: res.removed,
+      ip: req.ip,
+    });
+    return res;
+  });
+
 }
 
 /** Помощна: взима IP-то от заявката (ползва се в одита). */
