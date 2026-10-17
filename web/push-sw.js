@@ -11,8 +11,7 @@ self.addEventListener('push', function (event) {
     body: data.body || '',
     tag: data.tag || 'smartprice',
     renotify: false,
-    icon: '/push-icon.png',
-    badge: '/push-badge.png',
+    icon: '/favicon.ico',
     data: { url: data.url || '/' },
   };
   event.waitUntil(self.registration.showNotification(title, options));
