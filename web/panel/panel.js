@@ -763,6 +763,119 @@ async function openUser(id) {
 
 /* ------------------------------------------------------------ оферти */
 
+/* ===== 🏪 Обекти (#11): колко сигнала има всеки обект и какви са цените ===== */
+function objMoney(v) {
+  return v == null ? '—' : Number(v).toFixed(2).replace('.', ',') + ' €';
+}
+function objDay(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('bg-BG');
+}
+
+async function loadPanelObjects(q) {
+  const box = document.getElementById('obj-box');
+  if (!box) return;
+  box.innerHTML = '<div class="card"><span class="spinner"></span></div>';
+  try {
+    const qs = new URLSearchParams({ limit: 15, sort: 'signals' });
+    if (q) qs.set('q', q);
+    const res = await fetch('/api/objects?' + qs.toString());
+    const data = await res.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.innerHTML =
+      '<div class="card"><div class="card-title">🏪 Обекти с най-много сигнали</div>' +
+      '<div class="hint" style="margin:6px 0 10px">Един обект = място + град. Тук се вижда колко пъти хората са сигнализирали и какви са цените.</div>' +
+      '<div class="toolbar" style="margin-bottom:10px"><input class="grow" id="obj-q" placeholder="Търси обект по име или град…" value="' + esc(q || '') + '"><button class="btn" id="obj-go">Търси</button></div>' +
+      (items.length
+        ? '<div class="table-wrap"><table><thead><tr><th>Обект</th><th>Град</th><th>Сигнали</th><th>Души</th><th>Цени (мин – макс, средна)</th><th>Последно</th><th></th></tr></thead><tbody>' +
+          items
+            .map(function (o) {
+              const slug = esc(o.slug);
+              return (
+                '<tr><td><strong>' + esc(o.place_name) + '</strong>' +
+                  (o.merchant_tax_id ? '<div class="hint">ЕИК ' + esc(o.merchant_tax_id) + '</div>' : '') + '</td>' +
+                '<td>' + esc(o.city) + '</td>' +
+                '<td><span class="pill pill-green">' + num(o.signals_count) + '</span></td>' +
+                '<td>' + num(o.reporters_count) + '</td>' +
+                '<td>' + objMoney(o.min_price) + ' – ' + objMoney(o.max_price) + ' <span class="hint">(ср. ' + objMoney(o.avg_price) + ')</span></td>' +
+                '<td>' + objDay(o.last_seen) + '</td>' +
+                '<td><button class="btn btn-sm" data-obj="' + slug + '">▸ детайли</button></td></tr>' +
+                '<tr id="obj-det-' + slug + '" hidden><td colspan="7"></td></tr>'
+              );
+            })
+            .join('') +
+          '</tbody></table></div>'
+        : '<div class="hint">Няма намерени обекти.</div>') +
+      '</div>';
+
+    const goBtn = document.getElementById('obj-go');
+    if (goBtn) {
+      goBtn.onclick = function () {
+        void loadPanelObjects(document.getElementById('obj-q').value.trim());
+      };
+    }
+    box.querySelectorAll('[data-obj]').forEach(function (btn) {
+      btn.onclick = function () {
+        void loadPanelObjectDetail(btn.dataset.obj);
+      };
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="card"><div class="hint">Грешка: ' + esc(e.message) + '</div></div>';
+  }
+}
+
+async function loadPanelObjectDetail(slug) {
+  const row = document.getElementById('obj-det-' + slug);
+  if (!row) return;
+  if (!row.hidden) {
+    row.hidden = true;
+    return;
+  }
+  const cell = row.firstElementChild;
+  row.hidden = false;
+  cell.innerHTML = '<span class="spinner"></span>';
+  try {
+    const res = await fetch('/api/objects/' + encodeURIComponent(slug));
+    const d = await res.json();
+    const o = d.object || {};
+    const signals = Array.isArray(d.signals) ? d.signals : [];
+    const months = Array.isArray(d.months) ? d.months : [];
+    cell.innerHTML =
+      '<div style="padding:12px 6px">' +
+      '<div class="hint">' + num(o.signals_count) + ' сигнала · ' + num(o.reporters_count) + ' души · ' +
+        num(o.green_count) + ' зелени / ' + num(o.red_count) + ' червени' +
+        (o.address ? ' · ' + esc(o.address) : '') +
+        (o.merchant_name ? ' · търговец: ' + esc(o.merchant_name) : '') +
+        (o.receipts_verified ? ' · проверени бележки: ' + num(o.receipts_verified) : '') + '</div>' +
+      (months.length
+        ? '<div class="hint" style="margin-top:6px">По месеци: ' +
+          months
+            .slice(-6)
+            .map(function (m) {
+              return esc(m.month) + ' — ср. ' + objMoney(m.avg_price) + ' (' + num(m.posts) + ' сигн.)';
+            })
+            .join(' · ') +
+          '</div>'
+        : '') +
+      '<div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Сигнал</th><th>Цена</th><th>Тип</th><th>Кога</th></tr></thead><tbody>' +
+      signals
+        .slice(0, 12)
+        .map(function (s) {
+          return (
+            '<tr><td>' + esc(s.title) + '</td><td>' + objMoney(s.price_paid) + '</td><td>' +
+            (s.polarity === 'green' ? '🟢 находка' : '🔴 флаг') +
+            (s.verified_by_ai ? ' · 🧾 проверена' : '') +
+            (s.is_fake_promo ? ' · ⚠️ фалшива промоция' : '') + '</td><td>' + objDay(s.created_at) + '</td></tr>'
+          );
+        })
+        .join('') +
+      '</tbody></table></div></div>';
+  } catch (e) {
+    cell.innerHTML = '<div class="hint" style="padding:12px 6px">Грешка: ' + esc(e.message) + '</div>';
+  }
+}
+
 async function renderPosts(box, force) {
   const f = (cache.postsFilter = force
     ? { search: '', status: 'all', polarity: 'all', sellerType: 'all', offset: 0 }
@@ -789,11 +902,13 @@ async function renderPosts(box, force) {
       </select>
       <button class="btn" id="p-go">Търси</button>
     </div>
+    <div id="obj-box" style="margin-bottom:14px"></div>
     <div id="p-list"><div class="card"><span class="spinner"></span></div></div>`;
 
   $('#p-status').value = f.status;
   $('#p-pol').value = f.polarity;
   $('#p-seller').value = f.sellerType;
+  void loadPanelObjects();
 
   const load = async () => {
     Object.assign(f, {
