@@ -533,6 +533,15 @@ export default function PostDetailScreen() {
             </Text>
           </TouchableOpacity>
 
+          {(post.signalCount ?? 1) > 1 && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <Ionicons name="people-outline" size={15} color={COLORS.textSecondary} />
+              <Text style={{ fontSize: 13, color: COLORS.textSecondary }}>
+                {post.signalCount} души сигнализират за това
+              </Text>
+            </View>
+          )}
+
           {/* Подкрепа за автора и платформата */}
           <TouchableOpacity
             style={styles.supportPromptStrip}

@@ -96,6 +96,53 @@ export function parseFbGroupUrl(rawUrl: string): { canonicalUrl: string; groupId
 }
 
 
+
+/** Геокод през OpenStreetMap Nominatim — безплатно и без ключ (учтиво: 1 заявка/сек). */
+async function geocodeAddress(query: string): Promise<{ lat: number; lng: number } | null> {
+  const q = (query || '').trim();
+  if (q.length < 4) return null;
+  try {
+    const res = await fetch(
+      'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=bg&q=' +
+        encodeURIComponent(q),
+      {
+        headers: { 'User-Agent': 'SmartPriceBot/1.0 (+https://smartprice.bg)', Accept: 'application/json' },
+        signal: AbortSignal.timeout(15_000),
+      }
+    );
+    if (!res.ok) return null;
+    const arr = (await res.json()) as Array<{ lat?: string; lon?: string }>;
+    const first = Array.isArray(arr) ? arr[0] : undefined;
+    if (!first?.lat || !first?.lon) return null;
+    const lat = Number(first.lat);
+    const lng = Number(first.lon);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** ЕИК → име и адрес на търговеца през безплатния VIES на ЕС. */
+async function viesLookup(eik: string | null | undefined): Promise<{ name: string; address: string } | null> {
+  const vat = (eik || '').replace(/\D/g, '');
+  if (vat.length < 9) return null;
+  try {
+    const res = await fetch(
+      'https://ec.europa.eu/taxation_customs/vies/rest-api/ms/BG/vat/' + vat,
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) }
+    );
+    if (!res.ok) return null;
+    const d = (await res.json()) as { isValid?: boolean; name?: string; address?: string };
+    if (!d?.isValid) return null;
+    const name = String(d.name ?? '').replace(/\s+/g, ' ').trim();
+    const address = String(d.address ?? '').replace(/\s+/g, ' ').trim();
+    if (!name || name === '---') return null;
+    return { name, address };
+  } catch {
+    return null;
+  }
+}
+
 /** Списък с групи за автоматични обиколки (един адрес на ред). */
 export async function getFbGroups(): Promise<string[]> {
   const saved = await getSetting('fb_groups', '');
@@ -1899,6 +1946,30 @@ export async function approveFbReceiptItem(
       const claimsDeal = /промоц|намал|отстъпк|изгодн|евтин/i.test(`${title} ${description}`);
       // Обявява „промоция“, а в приложението същият продукт в този град вече е бил по-евтин.
       fakePromo = claimsDeal && minPrev > 0 && minPrev < pricePaid;
+    }
+
+    // ЕИК → име/адрес на търговеца (VIES, безплатно) и геокод, за да сочи картата точно.
+    const vies = await viesLookup(row.merchant_tax_id);
+    const geo =
+      (await geocodeAddress([address || vies?.address || '', placeName, city].filter(Boolean).join(', '))) ??
+      (await geocodeAddress(`${placeName}, ${city}`)) ??
+      (await geocodeAddress(city));
+    if (geo || vies) {
+      await client.query(
+        `update posts
+            set latitude = coalesce($2, latitude),
+                longitude = coalesce($3, longitude),
+                google_maps_url = coalesce($4, google_maps_url),
+                seller_note = coalesce($5, seller_note)
+          where id = $1`,
+        [
+          newPostId,
+          geo?.lat ?? null,
+          geo?.lng ?? null,
+          geo ? `https://www.google.com/maps?q=${geo.lat},${geo.lng}` : null,
+          vies ? `Търговец по ДДС: ${vies.name}${vies.address ? ', ' + vies.address : ''}`.slice(0, 300) : null,
+        ]
+      );
     }
 
     if (unitQty !== null || fakePromo) {

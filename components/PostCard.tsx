@@ -760,6 +760,15 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
           </Text>
         </TouchableOpacity>
 
+        {(post.signalCount ?? 1) > 1 && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            <Ionicons name="people-outline" size={14} color={COLORS.textSecondary} />
+            <Text style={{ fontSize: 12.5, color: COLORS.textSecondary }}>
+              {post.signalCount} души сигнализират за това
+            </Text>
+          </View>
+        )}
+
         <View style={styles.footerRightActions}>
           <TouchableOpacity
             style={styles.iconActionBtn}
