@@ -49,8 +49,21 @@ SKIP_URL = re.compile(
     r"/(category|catalog|kategorii|blog|news|pages?|content|checkout|cart|login|register|"
     r"account|search|tag|tags|brand|brands|about|contact|pravila|usloviya|politika|"
     r"compare|wishlist)(/|$|\?)"
+    # Информационни и сервизни страници НЕ са продукти. Реален случай (bauhaus.bg):
+    # /saveti-remonti-stroitelstvo, /klyucharski-uslugi, /usluga-mashini-pod-naem
+    # минаваха като продукти (слаг с тирета) и пълнеха робота със „съвети“.
+    r"|(?:^|/)(saveti|savet|uslugi|usluga|idei|statii|novini|pomoc|faq|kalkulator|"
+    r"inspiracii|recepti|grizha|dostavka|garanciya|vrushtane)(?:[-/]|$|\?)"
+    # …и когато думата е в КРАЯ на слага: /klyucharski-uslugi, /...-pod-naem
+    r"|[-/](?:uslugi|usluga|pod-naem|naem)(?:[-/]|$|\?)"
+    # Магазини от вида /c/233 (категория) и /k/17 (подкатегория) — също не са продукти.
+    r"|/[ck]/\d+(?:/|$|\?)"
     # Magento слага /c (категория) и /k (подкатегория) накрая — това НЕ е продукт.
-    r"|/[ck](?:[?#]|$)",
+    r"|/[ck](?:[?#]|$)"
+    # Информационни/правни страници (точно съвпадение на сегмент — не пипа продукти).
+    r"|/(?:general-pages|broshura|broshuri|katalog-saveti|kategorii-saveti|mashini-pod-naem|"
+    r"jobs|kontakti|kontakt|za-da-stane-dobre|usloviya-za-polzvane|usloviya|"
+    r"garancionni-usloviya|datenschutz|impressum)(?:/|$|\?)",
     re.I,
 )
 # Продуктов адрес: или изричен път (/product/…), или слаг с тирета в последната част.

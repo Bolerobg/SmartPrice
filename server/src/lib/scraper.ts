@@ -949,12 +949,41 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
 }
 
 /** Безплатен, но често най-точен начин: продуктовият адрес по sitemap. */
-/** Явно НЕ е продукт: категория, марка, търсене, информационна страница. */
+/** Явно НЕ е продукт: категория, марка, търсене, информационна/сервизна страница. */
 export function looksLikeNonProductUrl(loc: string): boolean {
   const p = loc.toLowerCase();
-  return /\/(category|categories|kategor|katalog|catalog|brand|brands|marki|search|tag|blog|news|about|contact|kontakt|za-nas|za_nas|terms|privacy|policy|cart|checkout|account|login|register|compare|wishlist|sitemap)(\/|\.|$|\?)/.test(
-    p
-  );
+  if (
+    /\/(category|categories|kategor|katalog|catalog|brand|brands|marki|search|tag|blog|news|about|contact|kontakt|za-nas|za_nas|terms|privacy|policy|cart|checkout|account|login|register|compare|wishlist|sitemap)(\/|\.|$|\?)/.test(
+      p
+    )
+  ) {
+    return true;
+  }
+  // Информационни и сервизни страници НЕ са продукти — иначе влизат в sitemap-а като
+  // „продукти“ само защото слагът им има тирета. Реален случай (bauhaus.bg, 18.10.2026):
+  // /saveti-remonti-stroitelstvo, /saveti-gradina, /klyucharski-uslugi,
+  // /usluga-mashini-pod-naem, /kategorii-saveti — обхождаха се като оферти.
+  if (
+    /(^|\/)(saveti|savet|uslugi|usluga|idei|statii|novini|pomoc|faq|kalkulator|inspiracii|recepti|grizha|dostavka|garanciya|vrushtane)([-/]|$|\?)/.test(
+      p
+    )
+  ) {
+    return true;
+  }
+  // …и когато думата е в КРАЯ на слага: /klyucharski-uslugi, /gradinska-technika-pod-naem
+  if (/[-/](uslugi|usluga|pod-naem|naem)([-/]|$|\?)/.test(p)) return true;
+  // Магазини със „/c/233“ (категория) и „/k/17“ (подкатегория) — не са продукти.
+  if (/\/[ck]\/\d+(\/|$|\?)/.test(p)) return true;
+  // Точков списък: информационни/правни страници, които магазините слагат в sitemap-а.
+  // Точно съвпадение на цял сегмент — не пипа продукти със същата дума в слага.
+  if (
+    /\/(general-pages|broshura|broshuri|katalog-saveti|kategorii-saveti|mashini-pod-naem|jobs|kontakti|kontakt|za-da-stane-dobre|usloviya-za-polzvane|usloviya|garancionni-usloviya|datenschutz|impressum)(\/|$|\?)/.test(
+      p
+    )
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Изглежда ли адресът на конкретен продукт? */
