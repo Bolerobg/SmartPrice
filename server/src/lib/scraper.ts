@@ -2766,6 +2766,8 @@ export interface JobRow {
   options: ScrapeOptions;
   target_count: number;
   schedule_id: string | null;
+  /** Кой я е пуснал — ползва се, когато предаваме сайта на домашния робот. */
+  created_by: string | null;
 }
 
 function mergeOptions(raw: Partial<ScrapeOptions> | null | undefined, saved?: Partial<ScrapeOptions>): Required<ScrapeOptions> {
@@ -2834,7 +2836,8 @@ async function isCancelled(jobId: string): Promise<boolean> {
  */
 export async function runJob(jobId: string): Promise<void> {
   const job = await one<JobRow>(
-    `select id, url, domain, status, mode, options, target_count, schedule_id from scrape_jobs where id = $1`,
+    `select id, url, domain, status, mode, options, target_count, schedule_id, created_by
+       from scrape_jobs where id = $1`,
     [jobId]
   );
   if (!job) return;
@@ -3174,7 +3177,45 @@ export async function runJob(jobId: string): Promise<void> {
     }
 
     if (!products.length) {
-      await setStatus(jobId, 'failed', { error: 'Нищо не успях да прочета.', finished_at: new Date() });
+      // 🖥️ ПОСЛЕДНА ИНСТАНЦИЯ — „всеки сайт намира начин“.
+      // Сървърът не се справи (Cloudflare, цена само след JavaScript, непозната
+      // платформа). Слагаме сайта в опашката за ДОМАШНИЯ робот: той излиза от
+      // потребителски IP и има истински браузър, затова минава там, където
+      // датацентърът е блокиран. Човекът не остава с празни ръце.
+      let queued = false;
+      if (job.created_by) {
+        try {
+          const ins = await one<{ id: string }>(
+            `insert into local_scan_queue (domain, url, count, status, requested_by, note, imported)
+             values ($1, $2, $3, 'pending', $4, $5, 0)
+             on conflict do nothing
+             returning id::text`,
+            [
+              job.domain,
+              job.url,
+              Math.max(5, Math.min(limit, 50)),
+              job.created_by,
+              'Автоматично от обиколка: сървърът не успя да прочете сайта',
+            ]
+          );
+          queued = Boolean(ins);
+        } catch {
+          queued = false;
+        }
+      }
+      if (queued) {
+        await query(`update scrape_jobs set strategy = $2 where id = $1`, [jobId, 'local-robot']);
+        await logLine(
+          jobId,
+          'Сървърът не се справи (защита или цена само след JavaScript) — предадох сайта на ДОМАШНИЯ робот, който ще го обходи от потребителски IP.'
+        );
+      }
+      await setStatus(jobId, 'failed', {
+        error: queued
+          ? 'Предаден на домашния робот — ще бъде обходен от потребителски IP.'
+          : 'Нищо не успях да прочета.',
+        finished_at: new Date(),
+      });
       if (job.schedule_id) await updateScheduleAfterJob(job.schedule_id, jobId).catch(() => undefined);
       return;
     }
