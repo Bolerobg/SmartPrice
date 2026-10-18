@@ -13,6 +13,10 @@
  */
 import { politeFetch, parseProductPage, normalizeCurrency, parsePrice } from './scraper.js';
 import { one, query } from '../db.js';
+// Верига за проверка на цената: суров HTML → ИСТИНСКИ браузър → Apify (residential).
+// Досега имаше само суровият HTML, затова на JS магазините бутонът казваше „няма цена“.
+import { browserAvailable, renderHtml } from './render.js';
+import { apifyReady, apifyBudgetAllows, apifyRenderHtml } from './apifyBrowser.js';
 
 export interface ShopPriceResult {
   ok: boolean;
@@ -30,6 +34,8 @@ export interface ShopPriceResult {
    */
   blocked?: boolean;
   stored?: StoredShopPrice;
+  /** Откъде дойде цената: суров HTML | истински браузър | Apify. */
+  via?: 'http' | 'browser' | 'apify';
 }
 
 /** Последна реално проверена цена (от сървъра или от локалния робот). */
@@ -158,6 +164,12 @@ function extractListPrice(html: string): { price: number; currency?: string } | 
   return undefined;
 }
 
+/** Има ли смислена цена (за да не приемаме 0/NaN за успех)? */
+function hasUsablePrice(p: { price?: number | null } | null | undefined): boolean {
+  const n = Number(p?.price);
+  return Number.isFinite(n) && n > 0 && n <= 1_000_000;
+}
+
 const TTL_MS = 10 * 60 * 1000;
 const cache = new Map<string, { at: number; value: ShopPriceResult }>();
 
@@ -198,60 +210,99 @@ export async function checkShopPrice(
       timeoutMs: 12_000,
     });
 
-    if (!res.ok) {
-      const blocked = res.status === 403 || res.status === 401 || res.status === 429 || res.status >= 500;
-      value = await withStored({
-        ok: false,
-        checkedAt,
-        blocked,
-        reason: blocked
-          ? `Този магазин не позволява автоматична проверка от нашия сървър (защитен е, отговаря с ${res.status}).`
-          : `Магазинът отговори с грешка (${res.status}).`,
-      });
-    } else if (isChallenge(res.text)) {
+    let blocked =
+      !res.ok && (res.status === 403 || res.status === 401 || res.status === 429 || res.status >= 500);
+    let html = res.ok && !isChallenge(res.text) ? res.text : '';
+    if (res.ok && isChallenge(res.text)) blocked = true;
+    let parsed = html ? parseProductPage(html, res.url || key) : null;
+    let via: 'http' | 'browser' | 'apify' = 'http';
+
+    // 1) Истински браузър в контейнера (безплатен). Тук се четат цените на
+    //    сайтовете, които ги показват само след JavaScript (jysk, praktis,
+    //    technomarket…). Точно този път липсваше — затова бутонът казваше
+    //    „не открих цена“ на много магазини.
+    if (!hasUsablePrice(parsed) && browserAvailable()) {
+      const r = await renderHtml(key, { timeoutMs: 20_000, waitMs: 2_500 }).catch(() => null);
+      if (r && r.html) {
+        const p2 = parseProductPage(r.html, r.url || key);
+        if (hasUsablePrice(p2)) {
+          html = r.html;
+          parsed = p2;
+          via = 'browser';
+          blocked = false;
+        }
+      }
+    }
+
+    // 2) Apify с residential прокси — САМО ако сайтът наистина блокира и има
+    //    дневен бюджет (едно отваряне ≈ $0.0026). Последна инстанция.
+    if (!hasUsablePrice(parsed) && blocked && (await apifyReady().catch(() => false))) {
+      const budget = await apifyBudgetAllows(0.02).catch(() => ({ allowed: false, today: 0, limit: 0 }));
+      if (budget.allowed) {
+        const a = await apifyRenderHtml([key], { resident: true, timeoutMs: 60_000 }).catch(() => null);
+        const page = a && a.ok ? a.pages.find((x) => x.html) : undefined;
+        if (page && page.html) {
+          const p3 = parseProductPage(page.html, key);
+          if (hasUsablePrice(p3)) {
+            html = page.html;
+            parsed = p3;
+            via = 'apify';
+            blocked = false;
+          }
+        }
+      }
+    }
+
+    if (parsed && hasUsablePrice(parsed)) {
+      const { priceEur } = normalizeCurrency(Number(parsed.price), parsed.currency, html.slice(0, 4000));
+      // Редовната цена, ако продуктът е на промоция — за да обясним разликата
+      // с думи („промоцията е свършила, сега е редовната цена“).
+      const listRaw = extractListPrice(html);
+      const listEur = listRaw
+        ? normalizeCurrency(listRaw.price, listRaw.currency, html.slice(0, 4000)).priceEur
+        : undefined;
+      const listPriceEur =
+        listEur && listEur > priceEur + 0.001 && listEur <= 1_000_000
+          ? Number(listEur.toFixed(2))
+          : undefined;
+      value =
+        priceEur > 0 && priceEur <= 1_000_000
+          ? {
+              ok: true,
+              priceEur: Number(priceEur.toFixed(2)),
+              listPriceEur,
+              title: parsed.title,
+              checkedAt,
+              via,
+            }
+          : await withStored({ ok: false, checkedAt, blocked, reason: 'Цената в страницата изглежда невалидна.' });
+      // Запомняме реално проверената цена — за да има какво да покажем, ако
+      // магазинът започне да блокира сървъра.
+      if (value.ok && postId && value.priceEur) {
+        await saveShopPrice(postId, key, value.priceEur, value.listPriceEur, 'server');
+      }
+    } else if (blocked) {
       value = await withStored({
         ok: false,
         checkedAt,
         blocked: true,
-        reason: 'Този магазин не позволява автоматична проверка от нашия сървър (защитен е срещу роботи).',
+        reason: `Този магазин не позволява автоматична проверка от нашия сървър (защитен е${
+          res.ok ? ' срещу роботи' : `, отговаря с ${res.status}`
+        }).`,
+      });
+    } else if (!res.ok) {
+      value = await withStored({
+        ok: false,
+        checkedAt,
+        reason: `Магазинът отговори с грешка (${res.status}).`,
       });
     } else {
-      const parsed = parseProductPage(res.text, res.url || key);
-      const raw = parsed.price;
-      if (raw === undefined || raw === null || !Number.isFinite(Number(raw))) {
-        value = await withStored({
-          ok: false,
-          checkedAt,
-          reason: 'В страницата на магазина не открих цена (възможно е да се зарежда с JavaScript).',
-        });
-      } else {
-        const { priceEur } = normalizeCurrency(Number(raw), parsed.currency, res.text.slice(0, 4000));
-        // Редовната цена, ако продуктът е на промоция — за да обясним разликата
-        // с думи („промоцията е свършила, сега е редовната цена“).
-        const listRaw = extractListPrice(res.text);
-        const listEur = listRaw
-          ? normalizeCurrency(listRaw.price, listRaw.currency, res.text.slice(0, 4000)).priceEur
-          : undefined;
-        const listPriceEur =
-          listEur && listEur > priceEur + 0.001 && listEur <= 1_000_000
-            ? Number(listEur.toFixed(2))
-            : undefined;
-        value =
-          priceEur > 0 && priceEur <= 1_000_000
-            ? {
-                ok: true,
-                priceEur: Number(priceEur.toFixed(2)),
-                listPriceEur,
-                title: parsed.title,
-                checkedAt,
-              }
-            : await withStored({ ok: false, checkedAt, reason: 'Цената в страницата изглежда невалидна.' });
-        // Запомняме реално проверената цена — за да има какво да покажем, ако
-        // магазинът започне да блокира сървъра.
-        if (value.ok && postId && value.priceEur) {
-          await saveShopPrice(postId, key, value.priceEur, value.listPriceEur, 'server');
-        }
-      }
+      value = await withStored({
+        ok: false,
+        checkedAt,
+        reason:
+          'В страницата на магазина не открих цена — нито в HTML, нито след отваряне с истински браузър.',
+      });
     }
   } catch (err) {
     const msg = (err as Error)?.message ?? '';

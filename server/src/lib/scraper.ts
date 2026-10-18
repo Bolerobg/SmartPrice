@@ -953,7 +953,7 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
 export function looksLikeNonProductUrl(loc: string): boolean {
   const p = loc.toLowerCase();
   if (
-    /\/(category|categories|kategor|katalog|catalog|brand|brands|marki|search|tag|blog|news|about|contact|kontakt|za-nas|za_nas|terms|privacy|policy|cart|checkout|account|login|register|compare|wishlist|sitemap)(\/|\.|$|\?)/.test(
+    /\/(category|categories|kategor|katalog|catalog|brand|brands|marki|search|tag|blog|news|inspiration|inspirac|inspire|idei|statii|novini|guide|guides|tips|advice|about|contact|kontakt|za-nas|za_nas|terms|privacy|policy|cart|checkout|account|login|register|compare|wishlist|sitemap)(\/|\.|$|\?)/.test(
       p
     )
   ) {
@@ -1007,7 +1007,15 @@ export function looksLikeProductPage(p: { title?: string; price?: number }): boo
   const categoryish =
     /^(продукти|produkti|produktai|products|всички|all|kategor|категори|brands?|марки)\b/i.test(t) ||
     /(категори|kategor|all products|всички продукти)/i.test(t);
-  if (categoryish) return false;
+  // Страница на МАРКА/блог не е продукт. Реален случай (praktis.bg, 18.10.2026):
+  // заглавие „WD-40 - Продукти на марката на Топ Цени от Praktis.bg“ влезе като оферта,
+  // а адресът беше /wd-40 (маркова страница). Не започва с „Продукти“, затова
+  // старият тест не го хващаше.
+  const brandish =
+    /(продукти на марката|продукти от марка|продукти на марка|продукти в категория|продукти от категория|produkti na markata|products of brand|products in category)/i.test(
+      t
+    );
+  if (categoryish || brandish) return false;
   if (p.price === undefined || p.price <= 0) return false;
   return true;
 }

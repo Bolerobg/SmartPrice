@@ -46,7 +46,7 @@ UA = (
 DEFAULT_SITES = ["https://remedium.bg/", "https://sopharmacy.bg/"]
 CHALLENGE = re.compile(r"Just a moment|cf-browser-verification|Attention Required", re.I)
 SKIP_URL = re.compile(
-    r"/(category|catalog|kategorii|blog|news|pages?|content|checkout|cart|login|register|"
+    r"/(category|catalog|kategorii|blog|news|inspiration|inspirac|pages?|content|checkout|cart|login|register|"
     r"account|search|tag|tags|brand|brands|about|contact|pravila|usloviya|politika|"
     r"compare|wishlist)(/|$|\?)"
     # Информационни и сервизни страници НЕ са продукти. Реален случай (bauhaus.bg):
