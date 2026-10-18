@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -27,6 +27,10 @@ const POOL: Array<{ key: string; label: string; url: string }> = [
   { key: 'soap', label: 'Сапун', url: 'https://images.unsplash.com/photo-1600857544200-b2f666a9a2ec?w=300&q=60' },
   { key: 'rice', label: 'Ориз', url: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=300&q=60' },
   { key: 'choco', label: 'Шоколад', url: 'https://images.unsplash.com/photo-1511381939415-e44015466834?w=300&q=60' },
+  { key: 'juice', label: 'Сок', url: 'https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=300&q=60' },
+  { key: 'yogurt', label: 'Кисело мляко', url: 'https://images.unsplash.com/photo-1488477181946-6428a0291777?w=300&q=60' },
+  { key: 'tea', label: 'Чай', url: 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=300&q=60' },
+  { key: 'pasta', label: 'Паста', url: 'https://images.unsplash.com/photo-1551462147-ff29053bfc14?w=300&q=60' },
 ];
 
 /** 12 плочки, сред тях 2 двойки (както в истинската томбола). */
@@ -84,16 +88,57 @@ export default function PuzzleDemoScreen() {
   const router = useRouter();
   const [round, setRound] = useState(0);
   const [{ tiles, pairs }, setBoard] = useState(() => buildTiles());
+  /** true = плочките са ИСТИНСКИТЕ от томболата (същите продукти и снимки). */
+  const [realTiles, setRealTiles] = useState(false);
   const [result, setResult] = useState<number | null>(null);
   const [best, setBest] = useState<number | null>(null);
   const [plays, setPlays] = useState(0);
   const [offMsg, setOffMsg] = useState('');
 
-  const nextRound = useCallback(() => {
-    setBoard(buildTiles());
+  /**
+   * Взимаме плочките от СЪЩАТА томбола (режим „тренировка“) — така тренировката
+   * е с истинските продукти и снимки, точно както ще е в истинската томбола, и с
+   * всичките 12 полета. Ако няма активна томбола или не сме влезли — падаме към
+   * местните 12 полета, за да може човек да тренира винаги.
+   */
+  const loadReal = useCallback(async (): Promise<{ tiles: PuzzleTile[]; pairs: string[] } | null> => {
+    try {
+      const list = await api.raffles();
+      const active = (list.items || []).find((r) => (r as { status?: string }).status === 'active') || (list.items || [])[0];
+      if (!active?.id) return null;
+      const puzzle = await api.rafflePuzzle(active.id, 'practice');
+      if (!puzzle?.tiles?.length || !puzzle?.pairs?.length) return null;
+      return { tiles: puzzle.tiles, pairs: puzzle.pairs };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const real = await loadReal();
+      if (alive && real) {
+        setBoard(real);
+        setRealTiles(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [loadReal]);
+
+  const nextRound = useCallback(async () => {
     setResult(null);
     setRound((r) => r + 1);
-  }, []);
+    const real = await loadReal();
+    if (real) {
+      setBoard(real);
+      setRealTiles(true);
+    } else {
+      setBoard(buildTiles());
+    }
+  }, [loadReal]);
 
   const onFinish = useCallback(
     async (timeMs: number) => {
@@ -147,7 +192,13 @@ export default function PuzzleDemoScreen() {
 
         {result === null ? (
           <View style={styles.card}>
-            <ProductPairPuzzle key={round} tiles={tiles} targetPairs={pairs} badge="Тренировка" onFinish={(ms) => void onFinish(ms)} />
+            <ProductPairPuzzle
+              key={round}
+              tiles={tiles}
+              targetPairs={pairs}
+              badge={realTiles ? 'Тренировка · същите продукти' : 'Тренировка'}
+              onFinish={(ms) => void onFinish(ms)}
+            />
           </View>
         ) : (
           <View style={styles.card}>
