@@ -51,7 +51,33 @@ function buildTiles(): { tiles: PuzzleTile[]; pairs: string[] } {
       { pairId: p.key, p },
       { pairId: p.key, p },
     ]);
-  const mixed = raw.sort(() => Math.random() - 0.5);
+  // ВАЖНО: истинско разбъркване (Фишер–Йейтс). Досега ползвахме
+  // `sort(() => Math.random() - 0.5)` — това НЕ разбърква истински: двойките
+  // оставаха една до друга и подредбата беше лека (точно както се оплака
+  // собственикът). Фишер–Йейтс мести всяка карта на случайно място.
+  const mixed = [...raw];
+  for (let i = mixed.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [mixed[i], mixed[j]] = [mixed[j]!, mixed[i]!];
+  }
+
+  // И още: НЕ оставяме двете карти на един продукт една до друга — иначе се
+  // нарежда твърде лесно (забелязва се веднага, че са съседни). Разменяме
+  // такава карта с произволна друга, докато няма съседни двойки.
+  for (let pass = 0; pass < 40; pass += 1) {
+    let moved = false;
+    for (let i = 1; i < mixed.length; i += 1) {
+      const a = mixed[i - 1];
+      const b = mixed[i];
+      if (a && b && a.pairId && a.pairId === b.pairId) {
+        const k = Math.floor(Math.random() * mixed.length);
+        if (k === i || k === i - 1) continue;
+        [mixed[i], mixed[k]] = [mixed[k]!, mixed[i]!];
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
   const tiles = mixed.map((m, i) => ({
     id: `demo-${i}-${Math.random().toString(36).slice(2, 7)}`,
     imageUrl: m.p.url,

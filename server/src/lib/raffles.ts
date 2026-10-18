@@ -403,6 +403,11 @@ function seededShuffle<T>(items: T[], seed: string): T[] {
   return out;
 }
 
+function nextInt(seed: string): number {
+  const h = crypto.createHash('md5').update(seed).digest();
+  return h.readUInt32BE(0);
+}
+
 const pairIdOf = (productKey: string): string =>
   crypto.createHash('md5').update(`sp-puzzle:${productKey}`).digest('hex').slice(0, 10);
 
@@ -498,10 +503,29 @@ export async function buildPuzzle(raffleId: string): Promise<Tile[]> {
   const needed = Math.max(0, PUZZLE_TILES - tiles.length);
   const chosen = pool.slice(0, needed).map((t, index) => ({ ...t, id: `d${index}` }));
 
-  return seededShuffle([...tiles, ...chosen], raffleId).map((t, index) => ({
-    ...t,
-    id: `tile-${index}`,
-  }));
+  // Разбъркваме (една и съща дъска за всички) и после ГАРАНТИРАМЕ, че двете
+  // карти на един продукт не са една до друга — иначе нареждането е прекалено
+  // лесно: виждаш две еднакви карти една до друга и просто ги обръщаш.
+  const board = seededShuffle([...tiles, ...chosen], raffleId);
+  let swaps = 0;
+  for (let pass = 0; pass < 60 && swaps < 400; pass += 1) {
+    let moved = false;
+    for (let i = 1; i < board.length; i += 1) {
+      const a = board[i - 1]!;
+      const b = board[i]!;
+      if (a.pairId && b.pairId && a.pairId === b.pairId) {
+        const k = 1 + (nextInt(raffleId + ':' + pass + ':' + i) % board.length);
+        const target = k % board.length;
+        if (target === i || target === i - 1 || target === 0) continue;
+        [board[i], board[target]] = [board[target]!, board[i]!];
+        swaps += 1;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  return board.map((t, index) => ({ ...t, id: `tile-${index}` }));
 }
 
 /* ------------------------------------------------------------- статистики */
