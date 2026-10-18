@@ -227,6 +227,131 @@ export async function loadSimilarOffers(
   );
 }
 
+/* ============================================================ ЧАСТНИ ОБЯВИ
+ * Обявите, които ПОТРЕБИТЕЛИТЕ пускат (не нашите находки). Платени са:
+ * 2 € за 60 дни, могат да се спрат и да се отбележат като продадени.
+ */
+
+export interface ListingOption {
+  id: string;
+  label: string;
+}
+
+export interface ListingConfigPublic {
+  priceEur: number;
+  days: number;
+  maxImages: number;
+  maxActive: number;
+  remindBeforeDays: number;
+  currency: string;
+  choices: {
+    conditions: ListingOption[];
+    handovers: ListingOption[];
+    categories: ListingOption[];
+  };
+}
+
+export type ListingStatus =
+  | 'draft'
+  | 'pending_payment'
+  | 'active'
+  | 'paused'
+  | 'sold'
+  | 'expired'
+  | 'rejected';
+
+export interface UserListing {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string;
+  price_eur: number | null;
+  is_negotiable: boolean;
+  is_free: boolean;
+  category: string;
+  subcategory: string | null;
+  city: string;
+  neighborhood: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  item_condition: string;
+  contact_phone: string | null;
+  contact_note: string | null;
+  handover: string;
+  status: ListingStatus;
+  days: number;
+  paid_until: string | null;
+  activated_at: string | null;
+  sold_at: string | null;
+  price_paid_eur: number | null;
+  renewals: number;
+  views_count: number;
+  saves_count: number;
+  contacts_count: number;
+  reject_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  /** До 5 адреса на снимки. */
+  images: string[];
+  /** Колко дни остават от платения срок. */
+  daysLeft?: number | null;
+}
+
+export interface MyListingsResponse {
+  stats: {
+    active: number;
+    paused: number;
+    sold: number;
+    expired: number;
+    drafts: number;
+    spentEur: number;
+    views: number;
+  };
+  items: UserListing[];
+}
+
+export interface ListingNudgeInfo {
+  show: boolean;
+  reason: string;
+  cooldownDays?: number;
+  off: boolean;
+}
+
+export interface PuzzleDemoInfo {
+  show: boolean;
+  seen: number;
+  bestMs: number | null;
+  reason: string;
+}
+
+export interface NewListingInput {
+  title: string;
+  description?: string;
+  priceEur?: number | null;
+  isNegotiable?: boolean;
+  isFree?: boolean;
+  category?: string;
+  city: string;
+  neighborhood?: string | null;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  itemCondition?: string;
+  contactPhone?: string | null;
+  contactNote?: string | null;
+  handover?: string;
+  images: string[];
+}
+
+export interface ListingCheckoutResult {
+  checkoutUrl: string;
+  sessionId: string;
+  paymentId: string;
+  amountEur: number;
+  message?: string;
+}
+
 export async function uploadImage(uri: string): Promise<string> {
   const tokens = await loadTokens();
   const form = new FormData();
@@ -969,6 +1094,82 @@ export const api = {
     }>('/api/me/interaction', { method: 'POST', body: { reasonHint } }),
 
   snoozeNudge: () => rawRequest<{ ok: boolean; snoozedForMs: number }>('/api/me/snooze', { method: 'POST' }),
+
+  // ------------------------------------------------------------- Частни обяви (продавам)
+  /** Цена, срок и колко снимки — за да го покажем още преди да е влязъл. */
+  listingConfig: () => rawRequest<ListingConfigPublic>('/api/listings/config', { auth: false }),
+
+  /** Активни обяви за разглеждане. */
+  browseListings: (params: {
+    q?: string;
+    city?: string;
+    category?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    sort?: 'recent' | 'cheap' | 'expensive';
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q?.trim()) qs.set('q', params.q.trim());
+    if (params.city) qs.set('city', params.city);
+    if (params.category) qs.set('category', params.category);
+    if (params.minPrice != null) qs.set('minPrice', String(params.minPrice));
+    if (params.maxPrice != null) qs.set('maxPrice', String(params.maxPrice));
+    if (params.sort) qs.set('sort', params.sort);
+    qs.set('limit', String(params.limit ?? 30));
+    qs.set('offset', String(params.offset ?? 0));
+    return rawRequest<{ total: number; items: UserListing[] }>(`/api/listings?${qs.toString()}`, { auth: false });
+  },
+
+  /** Моите обяви + дашборд (колко дни остават, история). */
+  myListings: () => rawRequest<MyListingsResponse>('/api/listings/mine'),
+
+  listing: (id: string) => rawRequest<{ listing: UserListing }>(`/api/listings/${id}`, { auth: false }),
+
+  createListing: (body: NewListingInput) =>
+    rawRequest<{ listing: UserListing; next: string }>('/api/listings', { method: 'POST', body }),
+
+  updateListing: (id: string, body: Partial<NewListingInput>) =>
+    rawRequest<{ listing: UserListing }>(`/api/listings/${id}`, { method: 'PATCH', body }),
+
+  /** Спиране / пускане / „продадено“ — с едно натискане. */
+  listingAction: (id: string, action: 'pause' | 'resume' | 'sold') =>
+    rawRequest<{ listing: UserListing }>(`/api/listings/${id}/${action}`, { method: 'POST' }),
+
+  /** Плащане: 2 € за 60 дни (или подновяване). */
+  listingCheckout: (id: string, kind: 'publish' | 'renew' = 'publish') =>
+    rawRequest<ListingCheckoutResult>(`/api/listings/${id}/checkout`, {
+      method: 'POST',
+      body: { kind, returnScheme: 'smartprice' },
+      timeoutMs: 30_000,
+    }),
+
+  /** Потвърждаване след връщане от Stripe — питаме Stripe, не вярваме на клиента. */
+  confirmListingPayment: (sessionId: string) =>
+    rawRequest<{ ok: boolean; listingId?: string; paidUntil?: string; daysLeft?: number; reason?: string }>(
+      '/api/listings/payments/confirm',
+      { method: 'POST', body: { sessionId }, timeoutMs: 30_000 }
+    ),
+
+  listingHistory: (id: string) =>
+    rawRequest<{
+      events: Array<{ action: string; note: string | null; created_at: string }>;
+      payments: Array<{ amount_eur: number; days: number; kind: string; status: string; paid_at: string | null; created_at: string }>;
+    }>(`/api/listings/${id}/history`),
+
+  /** Да показваме ли „и ти можеш да продаваш“ (подканата за купувача). */
+  listingNudge: () => rawRequest<ListingNudgeInfo>('/api/listings/nudge'),
+  listingNudgeSeen: () => rawRequest<{ ok: boolean }>('/api/listings/nudge/seen', { method: 'POST' }),
+  listingNudgeOff: (off = true) =>
+    rawRequest<{ ok: boolean; off: boolean }>('/api/listings/nudge/off', { method: 'POST', body: { off } }),
+
+  // ------------------------------------------------------------- Демо на пъзела
+  puzzleDemoNudge: () => rawRequest<PuzzleDemoInfo>('/api/puzzle/demo/nudge', { auth: false }),
+  puzzleDemoRecord: (ms: number) =>
+    rawRequest<{ plays: number; bestMs: number | null }>('/api/puzzle/demo/record', { method: 'POST', body: { ms } }),
+  puzzleDemoOff: (off = true) =>
+    rawRequest<{ ok: boolean; off: boolean }>('/api/puzzle/demo/off', { method: 'POST', body: { off } }),
 
   // ------------------------------------------------------------- Поканален цикъл
   /** Моят код, линк, колко души съм поканил и колко точки носят поканите. */

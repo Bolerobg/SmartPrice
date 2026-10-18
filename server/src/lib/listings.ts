@@ -714,7 +714,7 @@ export async function listingNudge(userId: string): Promise<{
     posts_count: number | null;
   }>(
     `select p.created_at::text, p.listing_nudge_off, p.listing_nudge_until::text, p.listing_nudge_seen,
-            (select count(*)::int from posts where user_id = p.id) as posts_count
+            (select count(*)::int from posts where author_id = p.id) as posts_count
        from profiles p where p.id = $1`,
     [userId]
   );

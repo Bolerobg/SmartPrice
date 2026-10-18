@@ -166,6 +166,38 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* 🏷️ Продаване: моите обяви + вход към пускане на нова */}
+        <View style={styles.raffleRow}>
+          <TouchableOpacity
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.borderStrong }]}
+            onPress={() => router.push('/listings' as never)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="pricetags" size={16} color={COLORS.textPrimary} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.textPrimary }]}>Моите обяви</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.greenPrimary }]}
+            onPress={() => router.push('/listings/new' as never)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="add-circle" size={16} color={COLORS.black} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.black }]}>Продавам нещо</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 🎮 Тренировка на пъзела — без ограничения, за подготовка за томболата */}
+        <View style={styles.raffleRow}>
+          <TouchableOpacity
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.accentCyanBorder }]}
+            onPress={() => router.push('/puzzle-demo' as never)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="game-controller" size={16} color={COLORS.accentCyan} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.accentCyan }]}>Тренировка · пъзелът</Text>
+          </TouchableOpacity>
+        </View>
+
         {(userProfile.isAdmin || userProfile.role === 'admin') && (
           <View style={styles.raffleRow}>
             <TouchableOpacity

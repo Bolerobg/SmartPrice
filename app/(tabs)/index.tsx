@@ -25,6 +25,8 @@ import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { FounderBanner } from '@/components/FounderBanner';
+import { ListingNudgeModal } from '@/components/ListingNudgeModal';
+import { PuzzleDemoNudge } from '@/components/PuzzleDemoNudge';
 import {
   calculateDistanceKm,
   detectUserAndStoreLocation,
@@ -76,6 +78,40 @@ export default function FeedScreen() {
     loadMorePosts,
   } = useApp();
   const { isAuthenticated } = useAuth();
+
+  // --- Подкани (без да досаждаме) -------------------------------------------
+  // Сървърът решава дали да ги покажем: обявите — най-много веднъж на 14 дни и
+  // само на някого без собствени обяви; тренировката — на 48 часа. Тук само
+  // питаме веднъж при отваряне на екрана.
+  const [showListingNudge, setShowListingNudge] = useState(false);
+  const [showPuzzleNudge, setShowPuzzleNudge] = useState(false);
+  const [nudgePrice, setNudgePrice] = useState(2);
+  const [nudgeDays, setNudgeDays] = useState(60);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const demo = await api.puzzleDemoNudge();
+        if (alive && demo.show) setShowPuzzleNudge(true);
+      } catch {
+        /* подканата не е критична */
+      }
+      if (!isAuthenticated) return;
+      try {
+        const [nudge, cfg] = await Promise.all([api.listingNudge(), api.listingConfig()]);
+        if (!alive) return;
+        setNudgePrice(cfg.priceEur);
+        setNudgeDays(cfg.days);
+        if (nudge.show) setShowListingNudge(true);
+      } catch {
+        /* подканата не е критична */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isAuthenticated]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [codeBusy, setCodeBusy] = useState(false);
@@ -697,6 +733,16 @@ export default function FeedScreen() {
               </View>
 
               <ActiveRaffleCard onOpen={() => router.push('/raffle' as never)} />
+
+              {showPuzzleNudge ? (
+                <PuzzleDemoNudge
+                  onTrain={() => {
+                    setShowPuzzleNudge(false);
+                    router.push('/puzzle-demo' as never);
+                  }}
+                  onHide={() => setShowPuzzleNudge(false)}
+                />
+              ) : null}
             </>
           )}
 
@@ -712,6 +758,18 @@ export default function FeedScreen() {
 
       {/* Бонусът за новодошли: първа находка в първите минути → „Основател“ */}
       <FounderBanner />
+
+      {/* 🎁 Красивият модел „и ти можеш да продаваш“ — показва се рядко. */}
+      <ListingNudgeModal
+        visible={showListingNudge}
+        priceEur={nudgePrice}
+        days={nudgeDays}
+        onClose={() => setShowListingNudge(false)}
+        onGoToNew={() => {
+          setShowListingNudge(false);
+          router.push('/listings/new' as never);
+        }}
+      />
 
       {/* Гостът чете потока, но не може да участва */}
       {!isAuthenticated && (
