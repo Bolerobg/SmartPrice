@@ -371,6 +371,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [loadFeed, loadSideData]);
 
+  // Референция към последната версия на loadFeed — първоначалното зареждане я
+  // ползва, без да зависи от филтрите (иначе ефектът щеше да се пуска пак при
+  // всяка смяна на филтър, а това прави филтърният ефект отдолу).
+  const loadFeedRef = useRef(loadFeed);
+  useEffect(() => {
+    loadFeedRef.current = loadFeed;
+  }, [loadFeed]);
+
   // Първоначално зареждане
   useEffect(() => {
     let cancelled = false;
@@ -379,10 +387,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         // Потокът се показва и БЕЗ профил — това е входната врата от TikTok.
         // Затова го зареждаме винаги; само алармите (за любими цени) искат вход.
-        const feed = await api.feed({ limit: 60 });
+        //
+        // ВАЖНО: ползваме СЪЩАТА функция като филтърния ефект (loadFeed), а не
+        // отделна заявка. Преди тук имаше самостоятелно api.feed({limit:60}) и
+        // затова при всяко отваряне лентата се теглеше 3 пъти (тази заявка +
+        // филтърният ефект + повторното пускане при влизане в профила).
+        await loadFeedRef.current();
         if (cancelled) return;
-        setPosts(feed.items);
-        setHasMorePosts(Boolean(feed.hasMore));
         setError(null);
 
         const [board, stats, flags] = await Promise.all([
