@@ -53,3 +53,5 @@ web/tiktok/
 
 # Локален скрапер: админ паролата не влиза в git
 scripts/.local-scrape.env
+scripts/__pycache__/
+*.pyc
