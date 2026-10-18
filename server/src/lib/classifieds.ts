@@ -622,6 +622,7 @@ export async function startClassifiedsScan(
 ): Promise<{ started: boolean; reason?: string }> {
   const meta = CLASSIFIED_SOURCES[source];
   if (!meta) return { started: false, reason: 'Непознат източник.' };
+  if (meta.disabled) return { started: false, reason: 'Този източник е изключен.' };
   const q = (query || '').trim();
   if (q.length < 2) return { started: false, reason: 'Липсва дума за търсене (или адрес на категория).' };
 
