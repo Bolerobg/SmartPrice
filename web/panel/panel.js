@@ -283,6 +283,7 @@ async function render(page, force = false) {
     if (page === 'emails') return await renderEmails(box, force);
     if (page === 'audit') return await renderAudit(box, force);
     if (page === 'social') return await renderSocial(box, force);
+    if (page === 'listings') return await renderListings(box, force);
   } catch (e) {
     box.innerHTML = `<div class="card"><div class="hint warn">${esc(e.message)}</div></div>`;
   } finally {
@@ -7318,4 +7319,126 @@ async function socLoadAuto(box) {
       runNow.disabled = false;
     };
   enhanceSelects();
+}
+
+
+/* ==================================================== 💶 ОБЯВИ (ПЛАТЕНИ) ===
+ * Админ изглед за частните обяви на потребителите: приходи, активни, плащания,
+ * модерация. Парите влизат в Stripe — тук показваме какво е платено и кога,
+ * за да има пълен отчет (и за да се вижда кой какво е пуснал).
+ */
+
+async function renderListings(box) {
+  const info = await api('/listings/info');
+  const r = info.revenue || {};
+  const t = info.totals || {};
+  const cfg = info.config || {};
+
+  const statusLabel = {
+    draft: 'Чернова (неплатена)',
+    pending_payment: 'Чака плащане',
+    active: 'Активна',
+    paused: 'Спряна',
+    sold: 'Продадена',
+    expired: 'Изтекла',
+    rejected: 'Махната',
+  };
+
+  box.innerHTML = `
+    <div class="card">
+      <div class="card-title">💶 Обяви от потребители <span class="muted">— приходи и модерация</span></div>
+      <div class="grid grid-4">
+        <div class="card" style="margin:0"><div class="hint">Приходи днес</div><div style="font-size:22px;font-weight:900;color:#86EFAC">${Number(r.todayEur || 0).toFixed(2)} €</div></div>
+        <div class="card" style="margin:0"><div class="hint">Последните 30 дни</div><div style="font-size:22px;font-weight:900">${Number(r.monthEur || 0).toFixed(2)} €</div></div>
+        <div class="card" style="margin:0"><div class="hint">Общо приходи</div><div style="font-size:22px;font-weight:900;color:#93C5FD">${Number(r.allTimeEur || 0).toFixed(2)} €</div></div>
+        <div class="card" style="margin:0"><div class="hint">Плащания</div><div style="font-size:22px;font-weight:900">${num(r.payments || 0)}</div></div>
+      </div>
+      <div class="hint" style="margin-top:12px">
+        Цена на обява: <b>${Number(cfg.priceEur || 0).toFixed(2)} €</b> за <b>${num(cfg.days || 0)} дни</b>
+        · до <b>${num(cfg.maxImages || 0)}</b> снимки · макс <b>${num(cfg.maxActive || 0)}</b> активни на човек.
+        Всички обяви: <b>${num(t.all || 0)}</b> (активни ${num(t.active || 0)} · продадени ${num(t.sold || 0)}).
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⚙️ Настройки на обявите</div>
+      <div class="grid grid-4">
+        <label class="field"><span>Цена (€)</span><input type="number" id="l-price" value="${Number(cfg.priceEur || 2)}" step="0.5" min="0.5" /></label>
+        <label class="field"><span>Дни на обява</span><input type="number" id="l-days" value="${num(cfg.days || 60)}" min="7" max="365" /></label>
+        <label class="field"><span>Макс снимки</span><input type="number" id="l-images" value="${num(cfg.maxImages || 5)}" min="1" max="10" /></label>
+        <label class="field"><span>Напомняне преди края (дни)</span><input type="number" id="l-remind" value="${num(cfg.remindBeforeDays || 7)}" min="0" max="60" /></label>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" id="l-save">💾 Запази настройките</button>
+      <div class="hint">Промяната важи за новите обяви. Вече платените запазват своя срок.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📊 По статус и градове</div>
+      <div class="grid grid-2">
+        <div>${(info.byStatus || [])
+          .map((x) => `<div class="hint">${esc(statusLabel[x.status] || x.status)}: <b>${num(x.count)}</b></div>`)
+          .join('') || '<div class="hint">Още няма обяви.</div>'}</div>
+        <div>${(info.topCities || []).map((c) => `<div class="hint">${esc(c.city || '—')}: <b>${num(c.count)}</b></div>`).join('') || ''}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🕒 Последни обяви <span class="muted">— ${num((info.recent || []).length)}</span></div>
+      ${
+        (info.recent || []).length
+          ? `<div class="table-wrap"><table>
+        <thead><tr><th>Пусната</th><th>Заглавие</th><th>Човек</th><th>Град</th><th>Цена</th><th>Платено до</th><th>Гледания</th><th>Статус</th><th></th></tr></thead>
+        <tbody>${(info.recent || [])
+          .map(
+            (l) => `<tr>
+          <td>${esc(dt(l.created_at))}</td>
+          <td>${esc(String(l.title || '').slice(0, 34))}</td>
+          <td class="muted">${esc(l.user_email || '—')}</td>
+          <td>${esc(l.city || '—')}</td>
+          <td>${l.price_eur != null ? Number(l.price_eur).toFixed(2) + ' €' : '—'}</td>
+          <td>${l.paid_until ? esc(String(l.paid_until).slice(0, 10)) : '—'}</td>
+          <td>${num(l.views_count || 0)}</td>
+          <td>${esc(statusLabel[l.status] || l.status)}</td>
+          <td><button type="button" class="btn btn-sm btn-danger" data-l-take="${esc(l.id)}">Махни</button></td>
+        </tr>`
+          )
+          .join('')}</tbody></table></div>`
+          : '<div class="hint">Още няма пуснати обяви.</div>'
+      }
+    </div>`;
+
+  const save = document.getElementById('l-save');
+  if (save)
+    save.onclick = async () => {
+      save.disabled = true;
+      try {
+        await api('/listings/config', {
+          method: 'POST',
+          body: {
+            priceEur: Number(document.getElementById('l-price').value) || 2,
+            days: Number(document.getElementById('l-days').value) || 60,
+            maxImages: Number(document.getElementById('l-images').value) || 5,
+            remindBeforeDays: Number(document.getElementById('l-remind').value) || 7,
+          },
+        });
+        toast('Настройките са запазени');
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+      save.disabled = false;
+    };
+
+  box.querySelectorAll('[data-l-take]').forEach((b) => {
+    b.onclick = async () => {
+      const reason = prompt('Защо махаме обявата? (ще се запише в дневника)');
+      if (!reason || reason.trim().length < 3) return;
+      try {
+        await api(`/listings/${b.dataset.lTake}/take-down`, { method: 'POST', body: { reason } });
+        toast('Обявата е махната');
+        await renderListings(box);
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    };
+  });
 }
