@@ -284,6 +284,7 @@ async function render(page, force = false) {
     if (page === 'audit') return await renderAudit(box, force);
     if (page === 'social') return await renderSocial(box, force);
     if (page === 'listings') return await renderListings(box, force);
+    if (page === 'people') return await renderPeople(box, force);
   } catch (e) {
     box.innerHTML = `<div class="card"><div class="hint warn">${esc(e.message)}</div></div>`;
   } finally {
@@ -7445,6 +7446,270 @@ async function renderListings(box) {
       } catch (e) {
         toast(e.message, 'err');
       }
+    };
+  });
+}
+
+
+/* ============================================ 👥 СТАТИСТИКА НА ПОТРЕБИТЕЛИТЕ ===
+ * Кой, кога и колко пъти влиза, къде отваря, от какво устройство, кой е вътре
+ * в момента. Всичко е реално от базата — броячи от auth_events (историята на
+ * входовете) и user_screen_views (къде отваря).
+ */
+
+let peopleState = { q: '', sort: 'recent', onlyActive: false, openUser: '' };
+
+function bar(value, max, color) {
+  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 2;
+  return `<div style="height:7px;border-radius:4px;background:rgba(148,163,184,0.18);overflow:hidden;margin-top:4px">
+            <div style="width:${pct}%;height:100%;background:${color}"></div></div>`;
+}
+
+function whenShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'сега';
+  if (mins < 60) return `преди ${mins} мин`;
+  if (mins < 1440) return `преди ${Math.round(mins / 60)} ч`;
+  const days = Math.round(mins / 1440);
+  return days < 30 ? `преди ${days} д` : d.toLocaleDateString('bg-BG');
+}
+
+async function renderPeople(box) {
+  const o = await api('/analytics/overview');
+  const users = await api(
+    `/analytics/users?limit=60&sort=${peopleState.sort}${peopleState.q ? `&q=${encodeURIComponent(peopleState.q)}` : ''}${
+      peopleState.onlyActive ? '&onlyActive=true' : ''
+    }`
+  );
+  const u = o.users || {}, a = o.active || {}, l = o.logins || {}, c = o.content || {};
+  const tl = o.timeline || [], maxActive = Math.max(1, ...tl.map((t) => t.active));
+  const maxLogin = Math.max(1, ...tl.map((t) => t.logins));
+  const screens = o.topScreens || [], maxScreen = Math.max(1, ...screens.map((x) => x.views));
+  const maxHour = Math.max(1, ...(o.hourly || []).map((x) => x.logins));
+
+  const kpi = (label, value, sub, color) => `
+    <div class="card" style="margin:0">
+      <div class="hint">${esc(label)}</div>
+      <div style="font-size:23px;font-weight:900;${color ? `color:${color}` : ''}">${num(value)}</div>
+      ${sub ? `<div class="hint" style="margin-top:2px">${esc(sub)}</div>` : ''}
+    </div>`;
+
+  box.innerHTML = `
+    <div class="card">
+      <div class="card-title">👥 Потребители <span class="muted">— пълна статистика</span></div>
+      <div class="grid grid-4">
+        ${kpi('Всички потребители', u.total, `потвърдени ${num(u.verified)} · спрени ${num(u.suspended)}`)}
+        ${kpi('Нови днес', u.newToday, `7 дни: ${num(u.new7)} · 30 дни: ${num(u.new30)}`, '#86EFAC')}
+        ${kpi('Активни днес', a.today, `тази седмица ${num(a.week)} · месец ${num(a.month)}`, '#93C5FD')}
+        ${kpi('Вътре в момента', a.now, 'последните 15 минути', '#FCD34D')}
+      </div>
+      <div class="grid grid-4" style="margin-top:12px">
+        ${kpi('Влизания днес', l.today, `7 дни: ${num(l.week)} · 30 дни: ${num(l.month)}`)}
+        ${kpi('Неуспешни опити', l.failed7, 'последните 7 дни', l.failed7 > 20 ? '#FCA5A5' : '')}
+        ${kpi('Оферти', c.posts, `днес ${num(c.postsToday)}`)}
+        ${kpi('Обяви / Аларми', `${num(c.listings)} / ${num(c.alerts)}`, `коментари ${num(c.comments)}`)}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📈 Последните 14 дни <span class="muted">— активни хора и влизания</span></div>
+      <div style="display:flex;gap:6px;align-items:flex-end;height:120px;margin-top:8px">
+        ${tl
+          .map(
+            (t) => `<div style="flex:1;text-align:center">
+              <div style="height:${Math.round((t.active / maxActive) * 86)}px;min-height:3px;background:#4ADE80;border-radius:4px 4px 0 0"></div>
+              <div style="height:${Math.round((t.logins / maxLogin) * 26)}px;min-height:2px;background:#60A5FA;border-radius:3px 3px 0 0;margin-top:2px"></div>
+              <div class="hint" style="font-size:9px">${esc(String(t.day).slice(8))}</div>
+            </div>`
+          )
+          .join('')}
+      </div>
+      <div class="hint" style="margin-top:6px">
+        <span style="color:#4ADE80">■</span> активни хора &nbsp;
+        <span style="color:#60A5FA">■</span> влизания &nbsp;· максимум за ден: <b>${num(maxActive)}</b> души, <b>${num(maxLogin)}</b> входa
+      </div>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">📍 Къде отварят най-много <span class="muted">(30 дни)</span></div>
+        ${
+          screens.length
+            ? screens
+                .slice(0, 12)
+                .map(
+                  (x) => `<div style="margin-bottom:8px">
+            <div class="hint" style="display:flex;justify-content:space-between">
+              <span><b>${esc(x.screen)}</b></span><span>${num(x.views)} отваряния · ${num(x.users)} души</span></div>
+            ${bar(x.views, maxScreen, '#38BDF8')}</div>`
+                )
+                .join('')
+            : '<div class="hint">Още няма събрани отваряния. Ще се появят, след като хората ползват приложението.</div>'
+        }
+      </div>
+      <div class="card">
+        <div class="card-title">📱 Устройства и часове на влизане</div>
+        ${(o.platforms || [])
+          .map(
+            (p) => `<div class="hint" style="display:flex;justify-content:space-between">
+              <span>${esc(p.platform)}</span><span><b>${num(p.logins)}</b> влизания · ${num(p.users)} души</span></div>`
+          )
+          .join('') || '<div class="hint">Още няма данни.</div>'}
+        <div style="display:flex;gap:3px;align-items:flex-end;height:56px;margin-top:12px">
+          ${Array.from({ length: 24 })
+            .map((_, hh) => {
+              const hit = (o.hourly || []).find((x) => x.hour === hh);
+              const v = hit ? hit.logins : 0;
+              return `<div title="${hh}:00 — ${v}" style="flex:1;height:${Math.max(2, Math.round((v / maxHour) * 54))}px;background:${
+                v ? '#FBBF24' : 'rgba(148,163,184,0.25)'
+              };border-radius:2px"></div>`;
+            })
+            .join('')}
+        </div>
+        <div class="hint" style="margin-top:4px">Влизания по часове (0–23 ч, последните 30 дни)</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 Хората <span class="muted">— търсене и подредба</span></div>
+      <div class="grid grid-4">
+        <label class="field"><span>Търсене (имейл, име, град)</span><input type="text" id="p-q" value="${esc(peopleState.q)}" placeholder="напр. кольо" /></label>
+        <label class="field"><span>Подредба</span>
+          <select id="p-sort">
+            <option value="recent" ${peopleState.sort === 'recent' ? 'selected' : ''}>Последно влизане</option>
+            <option value="logins" ${peopleState.sort === 'logins' ? 'selected' : ''}>Най-много влизания</option>
+            <option value="active" ${peopleState.sort === 'active' ? 'selected' : ''}>Най-скоро активни</option>
+            <option value="new" ${peopleState.sort === 'new' ? 'selected' : ''}>Най-нови профили</option>
+          </select></label>
+        <label class="field"><span>Само активни (30 дни)</span>
+          <input type="checkbox" id="p-only" ${peopleState.onlyActive ? 'checked' : ''} /></label>
+        <label class="field"><span>&nbsp;</span>
+          <button type="button" class="btn btn-primary btn-sm" id="p-go">Покажи</button></label>
+      </div>
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr>
+            <th>Човек</th><th>Град</th><th>Регистрация</th><th>Последно влизане</th><th>Влизания</th>
+            <th>Сесии</th><th>Отваряния (30д)</th><th>Оферти</th><th>Обяви</th><th>Последен екран</th><th>Устройство</th><th>IP</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${(users.items || [])
+              .map(
+                (r) => `<tr${r.online ? ' style="background:rgba(74,222,128,0.07)"' : ''}>
+              <td>${r.online ? '🟢 ' : ''}<b>${esc(r.name || '—')}</b><div class="hint">${esc(r.email)}</div></td>
+              <td>${esc(r.city || '—')}</td>
+              <td>${esc(String(r.created_at || '').slice(0, 10))}</td>
+              <td>${esc(whenShort(r.last_login_at))}</td>
+              <td><b>${num(r.login_count)}</b>${r.logins_30 ? `<div class="hint">30д: ${num(r.logins_30)}</div>` : ''}</td>
+              <td>${num(r.sessions_count)}</td>
+              <td>${num(r.screens_30)}</td>
+              <td>${num(r.posts)}</td>
+              <td>${num(r.listings)}</td>
+              <td class="muted">${esc(r.last_screen || '—')}</td>
+              <td class="muted">${esc(r.last_platform || '—')}</td>
+              <td class="muted">${esc(r.last_ip || '—')}</td>
+              <td><button type="button" class="btn btn-sm" data-p-user="${esc(r.id)}">Виж</button></td>
+            </tr>`
+              )
+              .join('') || '<tr><td colspan="13" class="hint">Няма намерени потребители.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        Показани ${num((users.items || []).length)} от ${num(users.total)} потребители.
+        Отварянията са от реалното ползване на приложението (събират се от днес нататък).
+      </div>
+    </div>
+
+    <div id="p-detail"></div>`;
+
+  const go = document.getElementById('p-go');
+  if (go)
+    go.onclick = async () => {
+      peopleState.q = (document.getElementById('p-q') || {}).value || '';
+      peopleState.sort = (document.getElementById('p-sort') || {}).value || 'recent';
+      peopleState.onlyActive = !!(document.getElementById('p-only') || {}).checked;
+      await renderPeople(box);
+    };
+
+  box.querySelectorAll('[data-p-user]').forEach((b) => {
+    b.onclick = async () => {
+      const d = await api(`/analytics/user/${b.dataset.pUser}`);
+      const host = document.getElementById('p-detail');
+      if (!host) return;
+      if (!d.found) {
+        host.innerHTML = '<div class="card"><div class="hint">Няма такъв потребител.</div></div>';
+        return;
+      }
+      const p = d.profile || {};
+      host.innerHTML = `
+        <div class="card">
+          <div class="card-title">👤 ${esc(p.name || '—')} <span class="muted">${esc(p.email)}</span>
+            <button type="button" class="btn btn-sm" id="p-close" style="float:right">Затвори</button></div>
+          <div class="grid grid-4">
+            <div class="card" style="margin:0"><div class="hint">Регистрация</div><div><b>${esc(String(p.created_at || '').slice(0, 10))}</b></div></div>
+            <div class="card" style="margin:0"><div class="hint">Влизания общо</div><div><b>${num(p.login_count)}</b></div></div>
+            <div class="card" style="margin:0"><div class="hint">Последно влизане</div><div><b>${esc(whenShort(p.last_login_at))}</b></div></div>
+            <div class="card" style="margin:0"><div class="hint">Видян последно</div><div><b>${esc(whenShort(p.last_seen_at))}</b></div></div>
+          </div>
+          <div class="hint" style="margin-top:10px">
+            Град: <b>${esc(p.city || '—')}</b> · роля: <b>${esc(p.role || '—')}</b> ·
+            телефон: <b>${esc(p.phone || '—')}</b> · последен екран: <b>${esc(p.last_screen || '—')}</b> ·
+            устройство: <b>${esc(p.last_platform || '—')}</b> · IP: <b>${esc(p.last_ip || '—')}</b>
+            ${p.signup_ip ? `· IP при регистрация: <b>${esc(p.signup_ip)}</b>` : ''}
+          </div>
+          <div class="hint" style="margin-top:6px">
+            Оферти: <b>${num((d.counts || {}).posts)}</b> · обяви: <b>${num((d.counts || {}).listings)}</b> ·
+            коментари: <b>${num((d.counts || {}).comments)}</b> · аларми: <b>${num((d.counts || {}).alerts)}</b>
+          </div>
+        </div>
+
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-title">🔑 История на входовете <span class="muted">(последни 100)</span></div>
+            <div class="table-wrap" style="max-height:320px;overflow:auto"><table>
+              <thead><tr><th>Кога</th><th>Какво</th><th>Устройство</th><th>IP</th></tr></thead>
+              <tbody>${(d.logins || [])
+                .map(
+                  (e) => `<tr><td class="muted">${esc(String(e.created_at).slice(0, 16).replace('T', ' '))}</td>
+                  <td>${e.kind === 'login' ? '✅ вход' : e.kind === 'failed' ? '⛔ неуспешен' : esc(e.kind)}</td>
+                  <td class="muted">${esc(e.platform || '—')} / ${esc(e.browser || '—')}</td>
+                  <td class="muted">${esc(e.ip || '—')}</td></tr>`
+                )
+                .join('') || '<tr><td colspan="4" class="hint">Още няма записи.</td></tr>'}</tbody>
+            </table></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">📍 Къде отваря <span class="muted">(всичко)</span></div>
+            <div class="table-wrap" style="max-height:320px;overflow:auto"><table>
+              <thead><tr><th>Екран</th><th>Отваряния</th><th>Дни</th><th>Последно</th></tr></thead>
+              <tbody>${(d.screens || [])
+                .map(
+                  (x) => `<tr><td>${esc(x.screen)}</td><td><b>${num(x.views)}</b></td><td>${num(x.days)}</td>
+                  <td class="muted">${esc(whenShort(x.last_at))}</td></tr>`
+                )
+                .join('') || '<tr><td colspan="4" class="hint">Още няма отваряния.</td></tr>'}</tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🕒 Последна активност <span class="muted">(най-новите отваряния)</span></div>
+          <div class="hint" style="line-height:20px">
+            ${(d.activity || [])
+              .slice(0, 40)
+              .map((x) => `<div>${esc(String(x.created_at).slice(0, 16).replace('T', ' '))} · <b>${esc(x.screen)}</b> · ${esc(x.platform || '')}</div>`)
+              .join('') || '<div>Още няма записи.</div>'}
+          </div>
+        </div>`;
+
+      const cl = document.getElementById('p-close');
+      if (cl) cl.onclick = () => (host.innerHTML = '');
     };
   });
 }

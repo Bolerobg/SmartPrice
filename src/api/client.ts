@@ -1095,6 +1095,13 @@ export const api = {
 
   snoozeNudge: () => rawRequest<{ ok: boolean; snoozedForMs: number }>('/api/me/snooze', { method: 'POST' }),
 
+  /** 👥 Кой къде отваря — за статистиката в админ панела. */
+  activity: (screen: string, platform?: string) =>
+    rawRequest<{ ok: boolean; counted: boolean }>('/api/me/activity', {
+      method: 'POST',
+      body: { screen, platform },
+    }),
+
   // ------------------------------------------------------------- Частни обяви (продавам)
   /** Цена, срок и колко снимки — за да го покажем още преди да е влязъл. */
   listingConfig: () => rawRequest<ListingConfigPublic>('/api/listings/config', { auth: false }),

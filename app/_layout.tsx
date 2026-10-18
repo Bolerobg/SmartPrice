@@ -13,6 +13,7 @@ import { DonationModal } from '@/components/DonationModal';
 import { AlertHost } from '@/components/AlertHost';
 import { ShareModal } from '@/components/ShareModal';
 import { RafflePromoHost } from '@/components/RafflePromoModal';
+import { ScreenTracker } from '@/components/ScreenTracker';
 import { AuthPromptModal } from '@/components/AuthPromptModal';
 import { FounderCelebration } from '@/components/FounderCelebration';
 // Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
@@ -319,6 +320,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         <ShareModal post={sharingPost} onClose={closeShare} />
         {/* Реклама на томболата: макс. 3 пъти, с X, на различни влизания */}
         <RafflePromoHost />
+        {/* 👥 Брои кой къде отваря — за статистиката в админ панела. */}
+        <ScreenTracker />
         {/* Гост натисна нещо, което иска профил → покана вместо суха грешка */}
         <AuthPromptModal
           visible={isAuthPromptOpen}

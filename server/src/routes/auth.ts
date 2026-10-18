@@ -12,6 +12,7 @@ import {
   verifyPassword,
 } from '../lib/auth.js';
 import { AppError, badRequest, conflict, unauthorized } from '../lib/errors.js';
+import { recordAuthEvent } from '../lib/analytics.js';
 import { loadFullProfile } from '../lib/profile.js';
 import { consumeCode, issueCode } from '../lib/verification.js';
 import { attachReferral } from '../lib/referrals.js';
@@ -97,6 +98,7 @@ function sessionPayload(app: FastifyInstance, userId: string, profile: unknown) 
 }
 
 export default async function authRoutes(app: FastifyInstance) {
+  // 👥 Статистиката се записва тук — виж lib/analytics.ts
   /**
    * Регистрация. Профилът се създава НЕпотвърден и НЕ връща токени —
    * потребителят трябва първо да въведе кода от имейла си.
@@ -467,6 +469,15 @@ export default async function authRoutes(app: FastifyInstance) {
         where id = $1 returning id`,
       [row.id]
     ).catch(() => undefined);
+
+    // 👥 Статистика: кой, кога, откъде и с какво устройство влезе.
+    await recordAuthEvent({
+      userId: row.id,
+      email,
+      kind: 'login',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] as string | undefined,
+    });
 
     return sessionPayload(app, row.id, await loadFullProfile(row.id));
   });
