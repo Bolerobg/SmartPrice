@@ -87,10 +87,29 @@ def fetch_rendered(url, wait_ms=9000, verbose=False):
         return None
     fd, profile = tempfile.mkstemp(prefix="sp-chrome-")
     os.close(fd)
+    # ВАЖНО (проверено на живо 18.10.2026): в Chrome 132+ СТАРИЯТ headless е
+    # премахнат и `--dump-dom` вече не връща нищо (и трите режима дават 0 знака).
+    # Затова този път е само резерва; надеждният начин е Chrome да се управлява
+    # през CDP (Playwright/Puppeteer), а не с `--dump-dom`.
+    # На сървъра това вече работи — там рендирането минава през Playwright
+    # (вж. server/src/lib/render.ts).
+    try:
+        for mode in ("--headless=old", "--headless", "--headless=new"):
+            html = _run_chrome(exe, profile, url, wait_ms, mode)
+            if html and len(html) > 2000 and not CHALLENGE.search(html[:4000]):
+                return html
+            log("  (режим %s даде %d знака)" % (mode, len(html or "")), verbose)
+        log("  рендирането не върна страница", verbose)
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+    return None
+
+
+def _run_chrome(exe, profile, url, wait_ms, mode):
     try:
         proc = subprocess.run(
             [
-                exe, "--headless=new", "--disable-gpu", "--no-sandbox",
+                exe, mode, "--disable-gpu", "--no-sandbox",
                 "--disable-dev-shm-usage", "--no-first-run", "--mute-audio",
                 "--blink-settings=imagesEnabled=false",
                 "--user-data-dir=" + profile,
@@ -99,15 +118,11 @@ def fetch_rendered(url, wait_ms=9000, verbose=False):
             ],
             capture_output=True, text=True, errors="replace", timeout=120,
         )
-        html = proc.stdout or ""
-        if len(html) > 2000 and not CHALLENGE.search(html[:4000]):
-            return html
-        log("  рендирането върна празна/защитена страница (%d знака)" % len(html), verbose)
+        return proc.stdout or ""
     except Exception as err:  # noqa: BLE001 — важно е да продължим, не да спрем
         log("  браузърът не успя: %s" % str(err)[:120], verbose)
-    finally:
-        shutil.rmtree(profile, ignore_errors=True)
-    return None
+        return ""
+
 
 
 def log(msg, verbose=True):
