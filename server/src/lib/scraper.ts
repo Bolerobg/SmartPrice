@@ -837,19 +837,33 @@ export function strictCardPrice(html: string): { price?: number; currency?: stri
     [/(?:€|EUR)\s?(\d[\d\s.,]*)/gi, 'EUR'],
     [/(?:лв\.?|BGN)\s?(\d[\d\s.,]*)/gi, 'BGN'],
   ];
+  // ВАЖНО: в картите първата цена често е ЛИЗИНГ/вноска („30 €/мес“) или „от 12,50 €“ —
+  // това НЕ е цената на продукта. Точно това даваше „SAMSUNG 55" телевизор за 30 €“
+  // на technomarket.bg. Затова събираме всички кандидати, отделяме вноските и:
+  //   • ако има пълна цена → взимаме НАЙ-ГОЛЯМАТА (тя е редовната/промо цената);
+  //   • ако има само вноски → по-добре без цена, отколкото грозна цена в приложението.
+  const all: number[] = [];
+  const full: number[] = [];
   for (const [re, currency] of patterns) {
     for (const m of text.matchAll(re)) {
       const price = parsePrice(m[1]!);
       if (!price || price <= 0 || price > 200_000) continue;
-      // ВАЖНО: в картите първата цена често е ЛИЗИНГ/вноска („30 €/мес“) или
-      // „от 12,50 €“ — това не е цената на продукта. Точно това даваше
-      // „SAMSUNG 55\" телевизор за 30 €“ на technomarket.bg.
-      const around = text.slice(Math.max(0, (m.index ?? 0) - 14), (m.index ?? 0) + (m[0]?.length ?? 0) + 16);
-      if (/(?:\/|\s)(?:мес|месец|mo|month)|leasing|лизинг|вноск|на\s+изплащане|^\s*от\b/i.test(around)) continue;
-      return { price, currency };
+      all.push(price);
+      const from = Math.max(0, (m.index ?? 0) - 16);
+      const around = text.slice(from, (m.index ?? 0) + (m[0]?.length ?? 0) + 18);
+      const isInstallment = /(?:\/|\s)(?:мес|месец|mo|month)|leasing|лизинг|вноск|на\s+изплащане|^\s*от\b|\bот\s*$/i.test(
+        around
+      );
+      if (!isInstallment) full.push(price);
+      void currency;
     }
   }
-  return {};
+  if (!all.length) return {};
+  if (!full.length) return {};
+  const currency = /€|eur/i.test(text) ? 'EUR' : /лв|bgn/i.test(text) ? 'BGN' : undefined;
+  // Има ли изобщо маркер за вноска? Ако да — взимаме най-голямата пълна цена.
+  const hasInstallment = /(?:\/|\s)(?:мес|месец|leasing|лизинг|вноск|изплащане)/i.test(text);
+  return { price: hasInstallment ? Math.max(...full) : full[0], currency };
 }
 
 export function extractListingProducts(html: string, pageUrl: string): RawProduct[] {

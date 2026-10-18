@@ -398,7 +398,7 @@ export async function checkShop(
   const viaApify = async (resident: boolean): Promise<ShopCheck | null> => {
     if (!(await apifyReady())) return null;
     if (!(await apifyBudgetAllows(0.15)).allowed) return null;
-    const r = await apifyRenderHtml([base.url], { resident });
+    const r = await apifyRenderHtml([base.url], { resident, timeoutMs: 130_000 });
     if (r.usd > 0) await addApifySpend(r.usd, `проверка ${base.domain}`);
     const page = r.pages.find((x) => x.html);
     if (!r.ok || !page?.html) return null;

@@ -125,25 +125,30 @@ export interface ApifyRenderResult {
  * Връща суровия HTML на страницата — за да го обработим със същата логика,
  * с която обработваме и нашите HTTP заявки.
  */
+/** Дължината на HTML-а, който връщаме (по-дълъг = по-скъпо, но ни трябва целият). */
+const MAX_HTML = 900_000;
+
+/**
+ * Функцията, която се изпълнява В браузъра на Apify.
+ *
+ * ВАЖНО (проверено на живо, 18.10.2026):
+ *   • `preNavigationHooks` в входа НЕ се приема — пускът пада с FAILED, затова НЕ го ползваме;
+ *   • снимките се спират през `launchContext.launchOptions.args` (работи), не с `page.route`;
+ *   • актьорът сам чака `networkidle` с 60 сек таймаут и `navigationTimeoutSecs` не го
+ *     променя — затова сайт, който не „утихва“ (Cloudflare проверка), пада с грешка
+ *     вместо да върне страницата. За такива сайтове не разчитай на Apify.
+ *   • `page.content()` е по-надеждно от `page.evaluate(() => documentElement.outerHTML)`.
+ */
 const PAGE_FUNCTION = `async function pageFunction(context) {
   const { page, request } = context;
+  let html = '';
+  let error = null;
   try {
-    // Снимки, шрифтове и видео само тежат — не ги теглим.
-    await page.route('**/*', (route) => {
-      const t = route.request().resourceType();
-      if (t === 'image' || t === 'media' || t === 'font') return route.abort();
-      return route.continue();
-    });
-    await page.setExtraHTTPHeaders({ 'Accept-Language': 'bg-BG,bg;q=0.9,en;q=0.8' });
-    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
-    await page.waitForTimeout(3000);
-    // Някои магазини слагат цената със закъснение — даваме им още малко.
-    await page.waitForTimeout(2000);
-    const html = await page.evaluate(() => document.documentElement.outerHTML);
-    return { url: request.url, html: String(html).slice(0, 900000) };
-  } catch (e) {
-    return { url: request.url, error: String((e && e.message) || e).slice(0, 300) };
-  }
+    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(function () {});
+    await page.waitForTimeout(3500);
+  } catch (e) { error = String((e && e.message) || e).slice(0, 300); }
+  try { html = await page.content(); } catch (e) { error = error || String((e && e.message) || e).slice(0, 300); }
+  return { url: request.url, html: String(html).slice(0, MAX_HTML), error: error };
 }`;
 
 /** Колко струва едно пускане (взимаме го от последния run на актьора). */
@@ -181,9 +186,11 @@ export async function apifyRenderHtml(
     startUrls: list.map((u) => ({ url: u })),
     pageFunction: PAGE_FUNCTION,
     maxPagesPerCrawl: list.length,
-    maxRequestRetries: 1,
+    maxRequestRetries: 0,
     pageFunctionTimeoutSecs: 90,
     memoryMbytes: 1024,
+    // Снимките не ги теглим — при residential прокси се плаща трафик.
+    launchContext: { useChrome: false, launchOptions: { args: ['--blink-settings=imagesEnabled=false'] } },
     proxyConfiguration: opts.resident
       ? { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] }
       : { useApifyProxy: true },
