@@ -55,3 +55,4 @@ web/tiktok/
 scripts/.local-scrape.env
 scripts/__pycache__/
 *.pyc
+scripts/.venv/
