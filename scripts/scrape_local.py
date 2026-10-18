@@ -68,11 +68,27 @@ SKIP_URL = re.compile(
     re.I,
 )
 # Продуктов адрес: или изричен път (/product/…), или слаг с тирета в последната част.
-PRODUCT_PATH = re.compile(r"/(?:product|produkt|item|goods|tovar|p)/[^/]+/?$", re.I)
+# ВАЖНО (dm-drogeriemarkt.bg, 18.10.2026): картата на сайта съдържа и страници на
+# МАГАЗИНИ (`/store/g02e/sofiya/bul-dzhavakharlal-neru-28`). Те завършват с число
+# и затова минаваха за продукти — роботът им слагаше безсмислена цена (50 €) и
+# „внасяше“ адреси на магазини като стоки. Затова: изрична забрана за такива пътища.
+STORE_PATH = re.compile(
+    r"/(?:store|stores|magazin|magazini|filial|filiali|branch|branches|dealer|showroom|"
+    r"lokaci|lokacii|location|locations|storelocator|kiosk|office|ofis)(?:/|\.|$|\?)",
+    re.I,
+)
+
+# ВАЖНО (dm, 18.10.2026): продуктът е /p/d/<id>/<слаг> — старият модел искаше
+# пътят да СВЪРШВА веднага след /p/, затова истинските продукти на dm не се
+# хващаха и влизаха статии. Затова: всичко след /p/ е продукт.
+PRODUCT_PATH = re.compile(r"/(?:product|produkt|item|goods|tovar|p)/[^?#]*$", re.I)
 PRODUCT_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+){1,}(?:\.html?)?$", re.I)
 
 
 def looks_like_product(url):
+    # Най-напред махаме страниците на магазини/обекти — те не са стоки.
+    if STORE_PATH.search(url):
+        return False
     if SKIP_URL.search(url):
         return False
     if PRODUCT_PATH.search(url):
@@ -319,7 +335,16 @@ def collect_product_urls(base, limit, verbose=False):
             continue
         entries = locs(xml)
         if re.search(r"<sitemapindex", xml, re.I):
-            # индекс: първо продуктовите под-карти, после останалите
+            # Индекс: първо продуктовите под-карти. Ако ИМА продуктова карта,
+            # прескачаме картите със статии/новини/магазини — оттам идваха
+            # „dm откри магазин в Пирдоп“ като „продукт“ с цена 50 € (dm, 18.10.2026).
+            has_products = any(re.search(r"product|goods|item", u, re.I) for u in entries)
+            if has_products:
+                entries = [
+                    u
+                    for u in entries
+                    if not re.search(r"content|news|novini|blog|article|statii|store|magazin", u, re.I)
+                ]
             children = sorted(
                 entries, key=lambda u: 0 if re.search(r"product|goods|item", u, re.I) else 1
             )
