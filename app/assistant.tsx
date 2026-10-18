@@ -299,7 +299,7 @@ export default function AssistantScreen() {
 
   /** Извиква сървъра и добавя отговора. */
   const ask = useCallback(
-    async (question: string, opts: { greeting?: boolean; resend?: boolean } = {}) => {
+    async (question: string, opts: { greeting?: boolean; resend?: boolean } = {}): Promise<boolean> => {
       setBusy(true);
       try {
         const history = messages
@@ -338,6 +338,7 @@ export default function AssistantScreen() {
           },
         ]);
         setQuotaLeft((n) => (n === null ? null : Math.max(0, n - 1)));
+        return true;
         // На телефон отговорът може да остане зад клавиатурата — скриваме я и
         // скролваме пак, за да се ВИДИ отговорът (иначе изглежда, че мълчи).
         if (Platform.OS !== 'web') Keyboard.dismiss();
@@ -359,6 +360,7 @@ export default function AssistantScreen() {
             at: Date.now(),
           },
         ]);
+        return false;
       } finally {
         setBusy(false);
         scrollToEnd();
@@ -397,7 +399,17 @@ export default function AssistantScreen() {
       setMessages((prev) => [...prev, { id: uid(), role: 'user', text: value, at: Date.now() }]);
       setInput('');
       scrollToEnd();
-      void ask(value);
+      void (async () => {
+        // Първи опит. Ако мрежата „преглътне“ заявката (точно това се случваше),
+        // пробваме ВЕДНЪЖ пак — преди да покажем грешка на човека.
+        const ok = await ask(value);
+        if (ok) return;
+        const again = await ask(value, { resend: true });
+        // ВАЖНО: ако и вторият опит не мине, НЕ оставяме човека без написаното —
+        // връщаме текста обратно в полето, за да може да го пусне пак с едно
+        // натискане (досега написането се губеше и изглеждаше, че нищо не работи).
+        if (!again) setInput((cur) => (cur.trim() ? cur : value));
+      })();
     },
     [ask, busy, input, scrollToEnd]
   );
