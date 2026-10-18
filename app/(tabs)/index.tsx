@@ -587,6 +587,36 @@ export default function FeedScreen() {
       </View>
 
       {/* РАЗГЪВАЕМ BENTO ПАНЕЛ: Кошница, Шринкфлация, Аларми, Томбола, Бързо качване и AI Асистент */}
+          {/* 🏷️ Продавам — входът е ВИНАГИ видим в лентата, не се крие в профила.
+              Досега човек не намираше откъде да пусне обява. */}
+          <View style={styles.sellCard}>
+            <View style={styles.sellIcon}>
+              <Ionicons name="pricetags" size={17} color={COLORS.black} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sellTitle} numberOfLines={1}>
+                Продавам нещо? Пусни обява 🏷️
+              </Text>
+              <Text style={styles.sellSub} numberOfLines={2}>
+                2 € за 60 дни · до 5 снимки · спираш я, когато я продадеш
+              </Text>
+              <TouchableOpacity
+                onPress={() => router.push('/listings' as never)}
+                activeOpacity={0.8}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={styles.sellMine}>Моите обяви →</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.sellBtn}
+              onPress={() => router.push('/listings/new' as never)}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.sellBtnText}>Пусни</Text>
+            </TouchableOpacity>
+          </View>
+
       {(isToolsExpanded || searchQuery.trim().length > 0) && (
         <View style={{ marginBottom: 6 }}>
           <View
@@ -685,36 +715,6 @@ export default function FeedScreen() {
               >
                 🔔 Аларми ({activeAlertsCount})
               </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* 🏷️ Продавам — входът е ВИНАГИ видим в лентата, не се крие в профила.
-              Досега човек не намираше откъде да пусне обява. */}
-          <View style={styles.sellCard}>
-            <View style={styles.sellIcon}>
-              <Ionicons name="pricetags" size={17} color={COLORS.black} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sellTitle} numberOfLines={1}>
-                Продавам нещо? Пусни обява 🏷️
-              </Text>
-              <Text style={styles.sellSub} numberOfLines={2}>
-                2 € за 60 дни · до 5 снимки · спираш я, когато я продадеш
-              </Text>
-              <TouchableOpacity
-                onPress={() => router.push('/listings' as never)}
-                activeOpacity={0.8}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              >
-                <Text style={styles.sellMine}>Моите обяви →</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={styles.sellBtn}
-              onPress={() => router.push('/listings/new' as never)}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.sellBtnText}>Пусни</Text>
             </TouchableOpacity>
           </View>
 

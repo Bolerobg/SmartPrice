@@ -420,7 +420,13 @@ export async function buildPuzzle(raffleId: string): Promise<Tile[]> {
       where p.status = 'published'
         and p.image_url is not null and btrim(p.image_url) <> ''
       group by 1
-      order by count(*) desc, min(p.created_at) desc
+      -- 🎁 По изрична заявка на собственика: предпочитаме ЧИСТИ продуктови
+      -- снимки (опаковка на бял фон) — такива идват от вноса от онлайн
+      -- магазини. Те са от СЪЩИЯ ВИД като в тренировката, но са си наши,
+      -- различни продукти. Ако няма достатъчно, падаме към останалите.
+      order by (count(*) filter (where coalesce(p.platform_tag,'') ilike '%магазин%'
+                                   or coalesce(p.place_name,'') ilike '%онлайн%')) desc,
+               count(*) desc, min(p.created_at) desc
       limit 12`
   );
 
