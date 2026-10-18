@@ -181,16 +181,6 @@ export function mapListing(source: ClassifiedSource, raw: Record<string, unknown
 
   if (source === 'imot') {
     const images = Array.isArray(raw.imageUrls) ? (raw.imageUrls as string[]) : [];
-    const attrs: Record<string, unknown> = {
-      'Кв.м': raw.area,
-      'Стаи': raw.rooms,
-      Етаж: raw.floor && raw.totalFloors ? `${raw.floor} от ${raw.totalFloors}` : raw.floor,
-      'Година на строеж': raw.yearBuilt,
-      'Тип': raw.propertyType,
-      'Строителство': raw.constructionType,
-      'Цена на кв.м': raw.pricePerSqm ? `${raw.pricePerSqm} €` : undefined,
-      Квартал: raw.neighborhoodBg || raw.neighborhood,
-    };
     // imot дава слабо заглавие („Продава 2-СТАЕН“). Правим истинско описание от
     // характеристиките: „2-стаен, 65 кв.м — София, Оборище“.
     // Внимание: imot връща стаите вече с наставка („1-стаен“) — не я удвояваме.
@@ -217,6 +207,16 @@ export function mapListing(source: ClassifiedSource, raw: Record<string, unknown
     const head = [rooms || kind, area].filter(Boolean).join(', ');
     const where = [cleanCity(String(raw.cityBg || raw.city || '')), hood].filter(Boolean).join(', ');
     const niceTitle = [head, where].filter(Boolean).join(' — ');
+    const attrs: Record<string, unknown> = {
+      'Кв.м': raw.area,
+      'Стаи': rooms || raw.rooms,
+      Етаж: raw.floor && raw.totalFloors ? `${raw.floor} от ${raw.totalFloors}` : raw.floor,
+      'Година на строеж': raw.yearBuilt,
+      'Тип': kind,
+      'Строителство': raw.constructionType,
+      'Цена на кв.м': raw.pricePerSqm ? `${raw.pricePerSqm} €` : undefined,
+      Квартал: raw.neighborhoodBg || raw.neighborhood,
+    };
     return {
       url,
       title: (niceTitle || String(raw.titleBg || raw.title || title)).trim().slice(0, 200),
