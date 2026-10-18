@@ -295,7 +295,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ------------------------------------------------------------ Зареждане на данни
 
-  const loadFeed = useCallback(async () => {
+  const lastFeedRef = useRef<{ key: string; at: number } | null>(null);
+
+  const loadFeed = useCallback(async (force = false) => {
+    // Предпазна мярка: два ефекта (първоначалното зареждане и смяната на филтрите)
+    // тръгваха един след друг и теглеха СЪЩАТА лента 3 пъти при всяко отваряне
+    // (3 × 143 KB на телефон). Ако същите филтри са теглени преди по-малко от
+    // 2 секунди, вторият опит се прескача. „Дръпни надолу“ (refreshAll) винаги
+    // тегли наново — то минава с force = true.
+    const feedKey = `${selectedPolarityFilter}|${selectedCategoryFilter}|${selectedCityFilter}`;
+    const now = Date.now();
+    const lastFeed = lastFeedRef.current;
+    if (!force && lastFeed && lastFeed.key === feedKey && now - lastFeed.at < 2000) return;
+    lastFeedRef.current = { key: feedKey, at: now };
+
     const feed = await api.feed({
       polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
       category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
@@ -346,7 +359,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshAll = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await Promise.all([loadFeed(), loadSideData()]);
+      await Promise.all([loadFeed(true), loadSideData()]);
       setError(null);
     } catch (err) {
       setError(messageOf(err));
