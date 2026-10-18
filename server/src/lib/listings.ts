@@ -732,10 +732,9 @@ export async function listingNudge(userId: string): Promise<{
   if (profile.listing_nudge_until && Date.parse(profile.listing_nudge_until) > Date.now()) {
     return { show: false, reason: 'Скоро е показван.', cooldownDays: NUDGE_COOLDOWN_DAYS, off: false };
   }
-  // Искаме човекът да е поне малко активен — да е разглеждал оферти.
-  if (Number(profile.posts_count ?? 0) === 0 && Number(profile.listing_nudge_seen) === 0) {
-    return { show: false, reason: 'Още не е разглеждал.', cooldownDays: NUDGE_COOLDOWN_DAYS, off: false };
-  }
+  // ВАЖНО: не искаме „активност“, преди да покажем модела — иначе подканата
+  // изобщо не се появява (човек без обяви не може да има публикации „за продан“).
+  // Достатъчно е профилът да не е съвсем нов и да няма собствени обяви.
   return { show: true, reason: 'Може да покажем подканата.', cooldownDays: NUDGE_COOLDOWN_DAYS, off: false };
 }
 
