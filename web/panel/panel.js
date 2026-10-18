@@ -2413,6 +2413,14 @@ async function renderScraper(box) {
     /* същото */
   }
 
+  // 🏷️ Обяви през Apify (OLX.bg, imot.bg, Alo.bg) — какви източници има и бюджет.
+  let classifieds = { sources: [], imported: [], apify: {} };
+  try {
+    classifieds = await api('/classifieds/info');
+  } catch {
+    /* endpoint-ът може да още не е качен */
+  }
+
   box.innerHTML = `
     ${scraperTabsHtml(candidates.queue?.pending || 0)}
 
@@ -2534,6 +2542,7 @@ async function renderScraper(box) {
     <div class="sc-pane" id="sc-pane-sched"><div id="sc-schedules">${scraperSchedulesHtml(schedules.items || [])}</div></div>
     <div class="sc-pane" id="sc-pane-hist"><div id="sc-history">${scraperHistoryHtml(jobs.items || [])}</div></div>
     <div class="sc-pane" id="sc-pane-progress">${scraperProgressHtml(cursors.items || [], catmap.items || [])}</div>
+    <div class="sc-pane" id="sc-pane-ads">${scraperAdsHtml(classifieds)}</div>
     <div class="sc-pane" id="sc-pane-sites"><div id="sc-sites">${scraperSitesHtml(info.sites || [])}</div></div>`;
 
   /* ------------------------------------------------------------ бутони */
@@ -2663,6 +2672,7 @@ async function renderScraper(box) {
   bindScraperStop();
   bindScraperSites();
   bindScraperProgress();
+  bindScraperAds();
   bindScraperSchedules();
 
   if (scraperJobId) await scraperLoadJob();
@@ -2681,6 +2691,7 @@ const SC_TABS = [
   ['sched', '📅 Разписания'],
   ['hist', '🕓 История'],
   ['progress', '📈 Напредък'],
+  ['ads', '🏷️ Обяви'],
   ['sites', '🌐 Сайтове'],
 ];
 const SC_PANES = {
@@ -2690,6 +2701,7 @@ const SC_PANES = {
   sched: 'sc-pane-sched',
   hist: 'sc-pane-hist',
   progress: 'sc-pane-progress',
+  ads: 'sc-pane-ads',
   sites: 'sc-pane-sites',
 };
 
@@ -3551,6 +3563,117 @@ function scraperSitesHtml(sites) {
  * \u043d\u0435 \u0441\u0435 \u0432\u0437\u0438\u043c\u0430\u0442 \u0441\u044a\u0449\u0438\u0442\u0435 \u043f\u0440\u043e\u0434\u0443\u043a\u0442\u0438 \u0432\u0442\u043e\u0440\u0438 \u043f\u044a\u0442) \u0438 \u201e\u043a\u0430\u043a\u0432\u043e \u0435 \u043d\u0430\u0443\u0447\u0438\u043b\u201c \u2014 \u0441\u044a\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u044f\u0442\u0430
  * \u201e\u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f \u043d\u0430 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u0430 \u2192 \u043d\u0430\u0448\u0430 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u201c.
  */
+/* ============================================ 🏷️ таб „Обяви“ (Apify) ============ */
+
+/**
+ * Обяви от сайтовете за обяви през Apify — OLX.bg, imot.bg, Alo.bg.
+ *
+ * Защо е отделен таб: темите „частни продавачи“, „имоти“ и „авто“ се пълнеха само
+ * от Facebook групи. Тези сайтове са истинският пазар на обяви и дават цена, град,
+ * снимки и дали продавачът е частно лице или фирма.
+ */
+function scraperAdsHtml(info) {
+  const sources = info.sources || [];
+  const imported = info.imported || [];
+  const apify = info.apify || {};
+  const badge = (key) => {
+    const row = imported.find((x) => x.source === key);
+    return row
+      ? `${num(row.n)} внесени · последно ${row.last ? ago(row.last) : '—'}`
+      : 'още нищо внесено оттук';
+  };
+  const budget =
+    apify.today !== undefined
+      ? `${Number(apify.today).toFixed(2)} / ${Number(apify.limit || 0).toFixed(2)} $`
+      : '—';
+
+  return `
+    <div class="card">
+      <div class="card-title">🏷️ Обяви през Apify <span class="pill pill-dim">${num(sources.length)} източника</span></div>
+      <div class="hint" style="margin:6px 0 12px">Истинският пазар на обяви в България. Внася се веднага, под профила „SmartPrice Редакция“ — с цена, град, снимка и данни за продавача. Телефони и имейли се махат автоматично.</div>
+      ${
+        sources.length
+          ? sources
+              .map(
+                (s) => `
+        <div style="border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px">
+          <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap">
+            <div style="min-width:220px">
+              <strong>${esc(s.label)}</strong>
+              <span class="pill pill-dim">${esc(s.input === 'url' ? 'адрес на категория' : 'дума за търсене')}</span>
+              <div class="hint" style="margin-top:4px">${esc(s.note || '')}</div>
+              <div class="hint" style="margin-top:2px">${badge(s.key)}</div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+              <input id="ads-q-${esc(s.key)}" placeholder="${esc(
+                  s.input === 'url' ? 'https://www.alo.bg/obiavi/avtomobili/' : 'напр. климатик'
+                )}" style="min-width:220px">
+              <input id="ads-n-${esc(s.key)}" type="number" value="20" min="1" max="200" style="width:84px">
+              <button class="btn" data-ads-run="${esc(s.key)}">▶ Пусни</button>
+            </div>
+          </div>
+        </div>`
+              )
+              .join('')
+          : `<div class="hint">Endpoint-ът още не е качен на сървъра.</div>`
+      }
+      <div class="hint">☁️ Apify днес: ${budget}${
+    apify.allowed === false ? ' · <strong>лимитът е стигнат</strong>' : ''
+  } <br>Едно пускане отнема 30–120 секунди и харчи стотинки.</div>
+      <div id="ads-out" style="margin-top:12px"></div>
+    </div>`;
+}
+
+/** Бутоните „▶ Пусни“ в таб „Обяви“. */
+function bindScraperAds() {
+  document.querySelectorAll('[data-ads-run]').forEach((b) => {
+    b.onclick = async () => {
+      const key = b.dataset.adsRun;
+      const q = ($(`#ads-q-${key}`)?.value || '').trim();
+      const n = Number($(`#ads-n-${key}`)?.value || 20);
+      const out = $('#ads-out');
+      if (q.length < 2) {
+        out.innerHTML = `<div class="hint warn">Напиши дума за търсене (или адрес на категория в alo.bg).</div>`;
+        return;
+      }
+      const label = b.textContent;
+      b.disabled = true;
+      b.textContent = '⏳ Работя…';
+      out.innerHTML = `<div class="hint"><span class="spinner"></span> Питам ${esc(
+        key.toUpperCase()
+      )}… това отнема 30–120 секунди, не затваряй панела.</div>`;
+      try {
+        const r = await api('/classifieds/scan', {
+          method: 'POST',
+          body: { source: key, query: q, maxItems: Math.max(1, Math.min(200, n || 20)) },
+        });
+        const res = r.result || {};
+        out.innerHTML = `
+          <div class="card" style="border-color:${res.ok ? 'rgba(34,197,94,.45)' : 'rgba(245,158,11,.45)'}">
+            <div class="card-title">${res.ok ? '✅' : '⚠️'} ${esc(res.label || key)}</div>
+            <div class="hint" style="margin-top:4px">${esc(res.note || '')}</div>
+            <div style="margin-top:10px">Намерени: <strong>${num(res.found)}</strong> ·
+              внесени: <strong>${num(res.imported)}</strong> · прескочени: ${num(res.skipped)}</div>
+            ${
+              (res.skippedReasons || []).length
+                ? `<div class="hint" style="margin-top:8px">${res.skippedReasons
+                    .map((x) => esc(x))
+                    .join('<br>')}</div>`
+                : ''
+            }
+            <div class="hint" style="margin-top:8px">Похарчени за това: ${Number(res.usd || 0).toFixed(3)} $</div>
+          </div>`;
+        toast(res.ok ? `Внесени ${res.imported} обяви` : 'Не успях — виж подробностите', res.ok ? 'ok' : 'warn');
+      } catch (e) {
+        out.innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
+      } finally {
+        b.disabled = false;
+        b.textContent = label;
+      }
+    };
+  });
+}
+
 function scraperProgressHtml(cursors, cats) {
   const cursorCard = `
     <div class="card">

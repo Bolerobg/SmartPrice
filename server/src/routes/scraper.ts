@@ -2,10 +2,17 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { many, one, query } from '../db.js';
 import { badRequest, notFound } from '../lib/errors.js';
-import { audit, requireAdminPanel } from '../lib/admin.js';
+import { audit, requireAdminPanel, requireFullAdmin } from '../lib/admin.js';
 import { importExternalProducts } from '../lib/externalImport.js';
 import { saveLocalShopPrices } from '../lib/shopPrice.js';
-import { apifyDailyLimit, apifyReady, apifySpent, setApifyDailyLimit } from '../lib/apifyBrowser.js';
+import {
+  apifyBudgetAllows,
+  apifyDailyLimit,
+  apifyReady,
+  apifySpent,
+  setApifyDailyLimit,
+} from '../lib/apifyBrowser.js';
+import { CLASSIFIED_SOURCES, scanClassifieds } from '../lib/classifieds.js';
 import { currentCursor, deleteCategoryMap, listCategoryMap, listCursors } from '../lib/scrapeCursor.js';
 import {
   discoverShops,
@@ -918,7 +925,68 @@ export default async function scraperRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  /* ------------------------------- 🏷️ обяви през Apify (OLX.bg / imot.bg / Alo.bg) --- */
+
+  /**
+   * Какви източници на обяви имаме и има ли бюджет.
+   * Темите „частни продавачи“, „имоти“ и „авто“ идват оттук, не само от FB групи.
+   */
+  app.get('/api/admin/classifieds/info', async (req) => {
+    await requireAdminPanel(req);
+    const budget = await apifyBudgetAllows(0.05).catch(() => ({ allowed: false, today: 0, limit: 0 }));
+    const imported = await many<Record<string, unknown>>(
+      `select source, count(*)::int as n, max(created_at)::text as last
+         from posts where source in ('olx','imot','alo')
+        group by source order by source`
+    );
+    return {
+      sources: Object.entries(CLASSIFIED_SOURCES).map(([key, m]) => ({
+        key,
+        label: m.label,
+        input: m.input,
+        note: m.note ?? null,
+        actor: m.actor,
+      })),
+      imported,
+      apify: { allowed: budget.allowed, today: budget.today, limit: budget.limit },
+    };
+  });
+
+  /**
+   * Пуска актьор за обяви и внася намереното.
+   * Харчи пари → иска ПЪЛЕН админ (модератор не може).
+   */
+  app.post('/api/admin/classifieds/scan', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z
+      .object({
+        source: z.enum(['olx', 'imot', 'alo']),
+        query: z.string().trim().min(2).max(160),
+        maxItems: z.coerce.number().int().min(1).max(200).default(20),
+      })
+      .parse(req.body ?? {});
+
+    const result = await scanClassifieds(input.source, input.query, input.maxItems);
+
+    await audit({
+      admin,
+      action: 'classifieds.scan',
+      targetLabel: `${result.label}: ${input.query}`.slice(0, 200),
+      details: {
+        source: input.source,
+        found: result.found,
+        imported: result.imported,
+        skipped: result.skipped,
+        usd: result.usd,
+      },
+      ip: req.ip,
+    });
+
+    return { ok: result.ok, result };
+  });
+
   /* -------------------------------------------------- едновременно вървящи */
+
 
   app.get('/api/admin/scraper/running', async (req) => {
     await requireAdminPanel(req);
