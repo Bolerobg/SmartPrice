@@ -11,8 +11,8 @@ import { many, one, query } from '../db.js';
 
 /** Откъде да започне следващата обиколка на този магазин. */
 export async function currentCursor(domain: string): Promise<number> {
-  const row = await one<{ offset: number }>(`select offset from scrape_cursors where domain = $1`, [domain]);
-  return Number(row?.offset ?? 0);
+  const row = await one<{ cursor_offset: number }>(`select cursor_offset from scrape_cursors where domain = $1`, [domain]);
+  return Number(row?.cursor_offset ?? 0);
 }
 
 /**
@@ -25,23 +25,23 @@ export async function currentCursor(domain: string): Promise<number> {
 export async function advanceCursor(domain: string, step: number, span?: number): Promise<number> {
   const move = Math.max(1, step);
   const size = Math.max(move, span && span > 0 ? span : move);
-  const row = await one<{ offset: number }>(
-    `insert into scrape_cursors (domain, offset, runs, last_span)
+  const row = await one<{ cursor_offset: number }>(
+    `insert into scrape_cursors (domain, cursor_offset, runs, last_span)
      values ($1, $2, 1, $3)
      on conflict (domain) do update set
-       offset = (scrape_cursors.offset + $2) % greatest($3, 1),
+       cursor_offset = (scrape_cursors.cursor_offset + $2) % greatest($3, 1),
        runs = scrape_cursors.runs + 1,
        last_span = $3,
        updated_at = now()
-     returning offset`,
+     returning cursor_offset`,
     [domain, move, size]
   );
-  return Number(row?.offset ?? 0);
+  return Number(row?.cursor_offset ?? 0);
 }
 
 export interface CursorOverview {
   domain: string;
-  offset: number;
+  cursor_offset: number;
   runs: number;
   last_span: number | null;
   updated_at: string | null;
@@ -50,7 +50,7 @@ export interface CursorOverview {
 /** За панела: къде сме в кой магазин. */
 export async function listCursors(limit = 50): Promise<CursorOverview[]> {
   return many<CursorOverview>(
-    `select c.domain, c.offset, c.runs, c.last_span, c.updated_at::text
+    `select c.domain, c.cursor_offset, c.runs, c.last_span, c.updated_at::text
        from scrape_cursors c
       order by c.updated_at desc
       limit $1`,
