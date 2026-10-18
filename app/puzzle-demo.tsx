@@ -34,19 +34,23 @@ const POOL: Array<{ key: string; label: string; url: string }> = [
 ];
 
 /** 12 плочки, сред тях 2 двойки (както в истинската томбола). */
+/**
+ * ТРЕНИРОВКА: дъската е от 6 ДВОЙКИ (12 карти) — трябва да се наредят ВСИЧКИ
+ * карти, докато остане празна дъска. (В истинската томбола се търсят само 2
+ * двойки; тук човекът тренира цялото нареждане, както поиска собственикът.)
+ */
+const DEMO_PAIRS = 6;
+
 function buildTiles(): { tiles: PuzzleTile[]; pairs: string[] } {
   const shuffled = [...POOL].sort(() => Math.random() - 0.5);
-  const pairA = shuffled[0];
-  const pairB = shuffled[1];
-  const distractors = shuffled.slice(2, 10);
+  // 6 продукта → 6 двойки → 12 карти, всички са двойки (няма разсейващи).
+  const chosen = shuffled.slice(0, DEMO_PAIRS);
 
-  const raw: Array<{ pairId: string | null; p: { key: string; label: string; url: string } }> = [
-    { pairId: pairA.key, p: pairA },
-    { pairId: pairA.key, p: pairA },
-    { pairId: pairB.key, p: pairB },
-    { pairId: pairB.key, p: pairB },
-    ...distractors.map((d) => ({ pairId: null, p: d })),
-  ];
+  const raw: Array<{ pairId: string | null; p: { key: string; label: string; url: string } }> =
+    chosen.flatMap((p) => [
+      { pairId: p.key, p },
+      { pairId: p.key, p },
+    ]);
   const mixed = raw.sort(() => Math.random() - 0.5);
   const tiles = mixed.map((m, i) => ({
     id: `demo-${i}-${Math.random().toString(36).slice(2, 7)}`,
@@ -63,7 +67,7 @@ function buildTiles(): { tiles: PuzzleTile[]; pairs: string[] } {
   // Самопроверка: трябва да има точно 2 двойки и всяка да е по 2 карти.
   const counts: Record<string, number> = {};
   for (const t of tiles) if (t.pairId) counts[t.pairId] = (counts[t.pairId] || 0) + 1;
-  const broken = pairs.length !== 2 || pairs.some((p) => counts[p] !== 2);
+  const broken = pairs.length !== DEMO_PAIRS || pairs.some((p) => counts[p] !== 2);
   if (broken) {
     // Не оставяме човека на нерешима дъска — построяваме я наново.
     return buildTiles();
@@ -158,7 +162,8 @@ export default function PuzzleDemoScreen() {
           <Text style={styles.heroTitle}>🎮 Играй колкото искаш</Text>
           <Text style={styles.heroText}>
             Това е тренировка — <Text style={{ fontWeight: '900' }}>без ограничения и не се брои</Text> за класацията.
-            Намери двете еднакви продукти, колкото по-бързо, толкова по-добре. Така се подготвяш за томболата.
+            Нареди <Text style={{ fontWeight: '900' }}>всичките 12 карти</Text> — намери всяка двойка продукти, докато
+            дъската остане празна. Колкото по-бързо, толкова по-добре. Така се подготвяш за томболата.
           </Text>
           {plays > 0 ? (
             <Text style={styles.heroHint}>
