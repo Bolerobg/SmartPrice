@@ -282,6 +282,7 @@ async function render(page, force = false) {
     if (page === 'security') return await renderSecurity(box, force);
     if (page === 'emails') return await renderEmails(box, force);
     if (page === 'audit') return await renderAudit(box, force);
+    if (page === 'social') return await renderSocial(box, force);
   } catch (e) {
     box.innerHTML = `<div class="card"><div class="hint warn">${esc(e.message)}</div></div>`;
   } finally {
@@ -6506,3 +6507,620 @@ enhanceSelects();
     logout(true);
   }
 })();
+
+
+/* ==================================================== 🎬 СОЦИАЛНИ МРЕЖИ ===
+ * Собствено меню за проучване на TikTok и Instagram.
+ *
+ * Защо е отделно от Скрапера: Скраперът пълни оферти в приложението, а тук
+ * събираме РЕКЛАМНО разузнаване — кои видеа гърмят, кои са реклами, кои продават
+ * продукт. Опциите не са записани тук, а идват от сървъра (`/social/info`), така
+ * че като добавим нова опция в кода, тя веднага се появява в панела.
+ */
+
+const SOC_TABS = [
+  ['new', '🚀 Ново сканиране'],
+  ['items', '📊 Резултати'],
+  ['ideas', '💡 Идеи за скриптове'],
+  ['hist', '📜 История'],
+  ['setup', '⚙️ Настройки'],
+];
+const SOC_PANES = {
+  new: 'soc-pane-new',
+  items: 'soc-pane-items',
+  ideas: 'soc-pane-ideas',
+  hist: 'soc-pane-hist',
+  setup: 'soc-pane-setup',
+};
+
+let socTab = 'new';
+let socInfo = null;
+let socRunning = null; // таймерът за чакане
+let socItemsFilter = { platform: '', run: '', q: '', minViews: 0, sort: 'views', onlyAds: false, onlyShop: false };
+let socForm = { platform: 'tiktok', mode: 'hashtag', targets: '', advanced: false, options: {} };
+
+function socTabsHtml() {
+  return `<div class="sc-tabs">${SOC_TABS.map(
+    ([id, label]) =>
+      `<button type="button" class="sc-tab${socTab === id ? ' active' : ''}" data-soc-tab="${id}">${esc(label)}</button>`
+  ).join('')}</div>`;
+}
+
+function socSwitchTab(name) {
+  socTab = name;
+  SOC_TABS.forEach(([id]) => {
+    const pane = document.getElementById(SOC_PANES[id]);
+    if (pane) pane.style.display = id === name ? '' : 'none';
+  });
+  document.querySelectorAll('[data-soc-tab]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.socTab === name);
+  });
+}
+
+function socStopPoll() {
+  if (socRunning) {
+    clearTimeout(socRunning);
+    socRunning = null;
+  }
+}
+
+/** Кой режим/платформа са избрани в момента. */
+function socPlatform() {
+  return (socInfo?.platforms || []).find((p) => p.id === socForm.platform) || null;
+}
+function socMode() {
+  const p = socPlatform();
+  return (p?.modes || []).find((m) => m.id === socForm.mode) || p?.modes?.[0] || null;
+}
+
+/** Една опция → HTML. Панелът не знае кои опции има — сървърът ги праща. */
+function socOptionHtml(o) {
+  const val = socForm.options[o.key] !== undefined ? socForm.options[o.key] : o.def;
+  const adv = o.advanced ? ' data-soc-adv="1"' : '';
+  const help = o.help ? `<div class="hint">${esc(o.help)}</div>` : '';
+  if (o.kind === 'checkbox') {
+    return `<label class="soc-opt soc-opt-check"${adv}>
+      <input type="checkbox" data-soc-opt="${esc(o.key)}" ${val ? 'checked' : ''} />
+      <span><b>${esc(o.label)}</b>${o.actor ? ' <span class="pill pill-gold">платено</span>' : ''}</span>
+    </label>${help}`;
+  }
+  if (o.kind === 'select') {
+    return `<label class="field soc-opt"${adv}><span>${esc(o.label)}</span>
+      <select data-soc-opt="${esc(o.key)}">${(o.options || [])
+        .map((x) => `<option value="${esc(x.value)}" ${String(val) === x.value ? 'selected' : ''}>${esc(x.label)}</option>`)
+        .join('')}</select>${help}</label>`;
+  }
+  if (o.kind === 'number') {
+    return `<label class="field soc-opt"${adv}><span>${esc(o.label)}</span>
+      <input type="number" data-soc-opt="${esc(o.key)}" value="${esc(String(val ?? 0))}"
+        ${o.min !== undefined ? `min="${o.min}"` : ''} ${o.max !== undefined ? `max="${o.max}"` : ''} />
+      ${help}</label>`;
+  }
+  return `<label class="field soc-opt"${adv}><span>${esc(o.label)}</span>
+    <input type="text" data-soc-opt="${esc(o.key)}" value="${esc(String(val ?? ''))}" />${help}</label>`;
+}
+
+function socSheetHtml() {
+  const p = socPlatform();
+  if (!p) return '';
+  const m = socMode() || { targetLabel: 'Какво търсим', hint: '', example: '' };
+  const required = (p.options || []).filter((o) => !o.advanced);
+  const advanced = (p.options || []).filter((o) => o.advanced);
+  const est = Number(socForm.options.resultsPerPage || socForm.options.resultsLimit || 30) * 0.004;
+
+  return `
+    <div class="grid grid-2" style="margin-bottom:14px">
+      ${(socInfo.platforms || [])
+        .map(
+          (x) => `<button type="button" class="soc-plat${socForm.platform === x.id ? ' active' : ''}" data-soc-plat="${x.id}">
+            <div class="soc-plat-top"><span class="soc-plat-icon">${x.icon}</span><b>${esc(x.label)}</b></div>
+            <div class="hint">${x.needsLogin ? '🔐 ' : '✅ '}${esc(x.note)}</div>
+          </button>`
+        )
+        .join('')}
+    </div>
+
+    <div class="card">
+      <div class="card-title">1️⃣ Как търсим</div>
+      <div class="sc-tabs" style="margin-bottom:12px">
+        ${(p.modes || [])
+          .map(
+            (x) => `<button type="button" class="sc-tab${socForm.mode === x.id ? ' active' : ''}" data-soc-mode="${x.id}">${esc(x.label)}</button>`
+          )
+          .join('')}
+      </div>
+      <label class="field"><span>${esc(m.targetLabel)}</span>
+        <textarea data-soc="targets" rows="4" placeholder="${esc(m.example)}">${esc(socForm.targets)}</textarea>
+        <div class="hint">${esc(m.hint)}</div>
+      </label>
+    </div>
+
+    <div class="card">
+      <div class="card-title">2️⃣ Опции <span class="muted">— какво да събираме</span></div>
+      <div class="grid grid-3">${required.map(socOptionHtml).join('')}</div>
+      <button type="button" class="btn btn-sm btn-ghost" data-soc="adv-toggle">
+        ${socForm.advanced ? '▲ Скрий разширените' : '⚙️ Разширени опции (' + advanced.length + ')'}
+      </button>
+      <div id="soc-adv" style="display:${socForm.advanced ? '' : 'none'};margin-top:12px">
+        <div class="grid grid-3">${advanced.map(socOptionHtml).join('')}</div>
+      </div>
+      <div class="hint" style="margin-top:12px">
+        Ориентировъчна цена: <b>≈ $${est.toFixed(3)}</b> за това пускане
+        (плаща се на резултат; нашият дневен лимит важи и тук).
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">3️⃣ Пусни</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button type="button" class="btn btn-primary" data-soc="run">▶️ Пусни сканирането</button>
+        <button type="button" class="btn" data-soc="save-defaults">💾 Запази като настройки по подразбиране</button>
+      </div>
+      <div id="soc-run-status" style="margin-top:12px"></div>
+    </div>`;
+}
+
+function socItemCard(it, i) {
+  const badge = [
+    it.is_ad ? '<span class="pill pill-red">РЕКЛАМА</span>' : '',
+    it.has_shop ? '<span class="pill pill-gold">с продукт</span>' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const tags = (it.hashtags || [])
+    .slice(0, 8)
+    .map((h) => `<span class="pill">#${esc(h)}</span>`)
+    .join(' ');
+  return `<div class="soc-item">
+    <div class="soc-rank">${i + 1}</div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+        <b>${num(it.views || 0)}</b> гледания · ${num(it.likes || 0)} 👍 · ${num(it.comments || 0)} 💬
+        ${it.duration ? ` · ${it.duration} сек` : ''} ${badge}
+      </div>
+      <div class="hint">@${esc(it.author || '?')} · ${esc(it.posted_at ? dt(it.posted_at) : '—')}</div>
+      <div style="margin:6px 0;font-size:13.5px">${esc((it.caption || '').slice(0, 260))}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${tags}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn btn-sm btn-ghost" href="${esc(it.url)}" target="_blank" rel="noopener">🔗 Отвори</a>
+        <button type="button" class="btn btn-sm btn-ok" data-soc-idea="${esc(it.id)}">💡 Запази като идея</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function socLoadItems(box) {
+  const pane = document.getElementById('soc-pane-items');
+  if (!pane) return;
+  const f = socItemsFilter;
+  const qs = new URLSearchParams({ limit: '60', sort: f.sort });
+  if (f.platform) qs.set('platform', f.platform);
+  if (f.run) qs.set('run', f.run);
+  if (f.q) qs.set('q', f.q);
+  if (f.minViews) qs.set('minViews', String(f.minViews));
+  if (f.onlyAds) qs.set('onlyAds', 'true');
+  if (f.onlyShop) qs.set('onlyShop', 'true');
+  const data = await api('/social/items?' + qs.toString());
+  const rows = data.items || [];
+  const list = document.getElementById('soc-items-list');
+  const runs = (socInfo?.runs || [])
+    .map((r) => `<option value="${esc(r.id)}" ${f.run === r.id ? 'selected' : ''}>${esc(dt(r.started_at))} · ${esc(r.platform)} · ${num(r.found)}</option>`)
+    .join('');
+  pane.innerHTML = `
+    <div class="card">
+      <div class="card-title">📊 Резултати <span class="muted">— ${num(rows.length)} показани</span></div>
+      <div class="grid grid-4">
+        <label class="field"><span>Платформа</span><select data-soc-f="platform">
+          <option value="">Всички</option>
+          <option value="tiktok" ${f.platform === 'tiktok' ? 'selected' : ''}>TikTok</option>
+          <option value="instagram" ${f.platform === 'instagram' ? 'selected' : ''}>Instagram</option>
+        </select></label>
+        <label class="field"><span>Пускане</span><select data-soc-f="run"><option value="">Всички</option>${runs}</select></label>
+        <label class="field"><span>Подреди по</span><select data-soc-f="sort">
+          <option value="views" ${f.sort === 'views' ? 'selected' : ''}>Гледания</option>
+          <option value="likes" ${f.sort === 'likes' ? 'selected' : ''}>Харесвания</option>
+          <option value="comments" ${f.sort === 'comments' ? 'selected' : ''}>Коментари</option>
+          <option value="recent" ${f.sort === 'recent' ? 'selected' : ''}>Най-нови</option>
+        </select></label>
+        <label class="field"><span>Минимум гледания</span><input type="number" data-soc-f="minViews" value="${f.minViews || 0}" min="0" /></label>
+      </div>
+      <div class="grid grid-3">
+        <label class="field"><span>Търси в текста</span><input type="text" data-soc-f="q" value="${esc(f.q)}" placeholder="напр. спестяване" /></label>
+        <label class="soc-opt soc-opt-check"><input type="checkbox" data-soc-f="onlyAds" ${f.onlyAds ? 'checked' : ''} /><span><b>Само реклами</b></span></label>
+        <label class="soc-opt soc-opt-check"><input type="checkbox" data-soc-f="onlyShop" ${f.onlyShop ? 'checked' : ''} /><span><b>Само с продукт</b></span></label>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button type="button" class="btn btn-primary btn-sm" data-soc="apply">🔎 Покажи</button>
+        <button type="button" class="btn btn-sm" data-soc="csv">⬇️ Свали CSV</button>
+      </div>
+    </div>
+    <div class="card">
+      ${rows.length ? rows.map(socItemCard).join('') : '<div class="hint">Още няма резултати. Пусни сканиране от „🚀 Ново сканиране“.</div>'}
+    </div>`;
+  pane.querySelectorAll('[data-soc-f]').forEach((el) => {
+    el.onchange = () => {
+      const k = el.dataset.socF;
+      socItemsFilter[k] = el.type === 'checkbox' ? el.checked : k === 'minViews' ? Number(el.value) || 0 : el.value;
+      socLoadItems(box);
+    };
+  });
+  pane.querySelectorAll('[data-soc]').forEach((b) => {
+    if (b.dataset.soc === 'apply') b.onclick = () => socLoadItems(box);
+    if (b.dataset.soc === 'csv') b.onclick = () => socDownloadCsv();
+  });
+  pane.querySelectorAll('[data-soc-idea]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api('/social/ideas', { method: 'POST', body: { itemId: b.dataset.socIdea } });
+        toast(r.ok ? 'Записано в „Идеи за скриптове“' : r.reason || 'Не стана');
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+      b.disabled = false;
+    };
+  });
+  enhanceSelects();
+}
+
+/** CSV се сваля с истинска заявка — иначе браузърът губи заглавката за вход. */
+function socDownloadCsv() {
+  const f = socItemsFilter;
+  const qs = new URLSearchParams({ limit: '300', sort: f.sort });
+  if (f.platform) qs.set('platform', f.platform);
+  if (f.run) qs.set('run', f.run);
+  if (f.minViews) qs.set('minViews', String(f.minViews));
+  fetch('/api/admin/social/export?' + qs.toString(), { headers: { Authorization: `Bearer ${state.token}` } })
+    .then((r) => r.blob())
+    .then((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `social-${f.platform || 'vsi'}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    })
+    .catch((e) => toast('Свалянето не стана: ' + e.message, 'err'));
+}
+
+async function socLoadIdeas() {
+  const pane = document.getElementById('soc-pane-ideas');
+  if (!pane) return;
+  const data = await api('/social/ideas?limit=100');
+  const rows = data.items || [];
+  pane.innerHTML = `
+    <div class="card">
+      <div class="card-title">💡 Идеи за скриптове <span class="muted">— ${num(rows.length)} запазени</span></div>
+      <div class="hint">Тук пазиш доказано работещи видеа, от които ще пишем наши скриптове. Добави си бележка и куката, която искаш да използваш.</div>
+    </div>
+    ${
+      rows.length
+        ? rows
+            .map(
+              (r) => `<div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <b>${num(r.views || 0)}</b> гледания · @${esc(r.author || '?')} · ${esc(r.platform)}
+        <a class="btn btn-sm btn-ghost" href="${esc(r.url)}" target="_blank" rel="noopener">🔗 Отвори</a>
+        <button type="button" class="btn btn-sm btn-danger" data-soc-del="${esc(r.id)}">🗑 Махни</button>
+      </div>
+      <div class="hint" style="margin:8px 0">${esc((r.caption || '').slice(0, 220))}</div>
+      <div class="grid grid-2">
+        <label class="field"><span>Каква кука ще ползваме</span>
+          <input type="text" data-soc-hook="${esc(r.id)}" value="${esc(r.hook || '')}" placeholder="напр. „Платих 84 лв за пет неща…“" /></label>
+        <label class="field"><span>Бележка</span>
+          <input type="text" data-soc-note="${esc(r.id)}" value="${esc(r.note || '')}" placeholder="защо ни е полезна" /></label>
+      </div>
+      <button type="button" class="btn btn-sm btn-ok" data-soc-idea-save="${esc(r.id)}">💾 Запази бележката</button>
+    </div>`
+            )
+            .join('')
+        : '<div class="card"><div class="hint">Още няма запазени идеи. От „📊 Резултати“ натисни „💡 Запази като идея“.</div></div>'
+    }`;
+  pane.querySelectorAll('[data-soc-del]').forEach((b) => {
+    b.onclick = async () => {
+      await api('/social/ideas/' + b.dataset.socDel, { method: 'DELETE' });
+      toast('Махнато');
+      socLoadIdeas();
+    };
+  });
+  pane.querySelectorAll('[data-soc-idea-save]').forEach((b) => {
+    b.onclick = async () => {
+      const id = b.dataset.socIdeaSave;
+      const hook = (document.querySelector(`[data-soc-hook="${id}"]`) || {}).value || '';
+      const note = (document.querySelector(`[data-soc-note="${id}"]`) || {}).value || '';
+      await api('/social/ideas', { method: 'POST', body: { itemId: id, hook, note } });
+      toast('Записано');
+    };
+  });
+}
+
+async function socLoadHist() {
+  const pane = document.getElementById('soc-pane-hist');
+  if (!pane) return;
+  const data = await api('/social/runs?limit=40');
+  const rows = data.items || [];
+  socInfo.runs = rows;
+  pane.innerHTML = `
+    <div class="card">
+      <div class="card-title">📜 История на сканиранията</div>
+      ${
+        rows.length
+          ? `<div class="table-wrap"><table>
+        <thead><tr><th>Кога</th><th>Платформа</th><th>Какво търсихме</th><th>Намерени</th><th>Похарчено</th><th>Състояние</th><th></th></tr></thead>
+        <tbody>${rows
+          .map(
+            (r) => `<tr>
+          <td>${esc(dt(r.started_at))}</td>
+          <td>${esc(r.platform)}</td>
+          <td>${esc((r.targets || []).join(', ').slice(0, 46))}</td>
+          <td><b>${num(r.found)}</b></td>
+          <td>$${Number(r.usd || 0).toFixed(3)}</td>
+          <td>${r.status === 'done' ? '<span class="pill pill-green">готово</span>' : r.status === 'running' ? '<span class="pill pill-gold">върви</span>' : '<span class="pill pill-red">провал</span>'}<div class="hint">${esc((r.note || '').slice(0, 90))}</div></td>
+          <td><button type="button" class="btn btn-sm btn-ghost" data-soc-show="${esc(r.id)}">Виж</button></td>
+        </tr>`
+          )
+          .join('')}</tbody></table></div>`
+          : '<div class="hint">Още няма пускания.</div>'
+      }
+    </div>`;
+  pane.querySelectorAll('[data-soc-show]').forEach((b) => {
+    b.onclick = () => {
+      socItemsFilter.run = b.dataset.socShow;
+      socItemsFilter.platform = '';
+      socSwitchTab('items');
+      socLoadItems(document.getElementById('page'));
+    };
+  });
+}
+
+async function socLoadSetup() {
+  const pane = document.getElementById('soc-pane-setup');
+  if (!pane) return;
+  const d = socInfo.defaults || {};
+  pane.innerHTML = `
+    <div class="card">
+      <div class="card-title">⚙️ Настройки по подразбиране</div>
+      <div class="hint">Попълват се сами при отваряне на „🚀 Ново сканиране“ — за да не пишеш едно и също всеки път.</div>
+      <div class="grid grid-2" style="margin-top:12px">
+        <label class="field"><span>Платформа</span><select id="soc-d-plat">
+          <option value="tiktok" ${d.platform === 'tiktok' ? 'selected' : ''}>TikTok</option>
+          <option value="instagram" ${d.platform === 'instagram' ? 'selected' : ''}>Instagram</option>
+        </select></label>
+        <label class="field"><span>Резултати на заявка</span><input type="number" id="soc-d-per" value="${num(d.resultsPerPage || 30)}" min="5" max="200" /></label>
+        <label class="field"><span>Минимум гледания</span><input type="number" id="soc-d-views" value="${num(d.minViews || 0)}" min="0" /></label>
+        <label class="soc-opt soc-opt-check"><input type="checkbox" id="soc-d-noads" ${d.excludeAds ? 'checked' : ''} /><span><b>Без реклами по подразбиране</b></span></label>
+      </div>
+      <label class="field"><span>Темите, с които обикновено работим</span>
+        <textarea id="soc-d-tags" rows="4">${esc(d.hashtags || '')}</textarea>
+        <div class="hint">По един на ред. Това са нашите теми: цени, спестяване, пазаруване…</div>
+      </label>
+      <button type="button" class="btn btn-primary" data-soc="save-setup">💾 Запази настройките</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔐 Instagram — вход (sessionid)</div>
+      <div class="hint">
+        Instagram БЕЗ вход връща празни записи (проверено на живо). За да работи, сложи стойността на
+        бисквитката <b>sessionid</b> от влязъл в Instagram профил (в браузъра: Разработчик → Application →
+        Cookies → instagram.com → sessionid). Пази се само в нашата база и никога не се показва обратно в панела.
+      </div>
+      <div class="hint" style="margin:10px 0">
+        Състояние: ${socInfo.hasInstagramCookie ? '<span class="pill pill-green">има записана бисквитка</span>' : '<span class="pill pill-red">няма бисквитка — Instagram няма да работи</span>'}
+      </div>
+      <label class="field"><span>Нова стойност (остави празно, за да я изтриеш)</span>
+        <input type="password" id="soc-ig-cookie" placeholder="sessionid=…" autocomplete="off" /></label>
+      <button type="button" class="btn btn-warn" data-soc="save-cookie">💾 Запази бисквитката</button>
+    </div>`;
+  pane.querySelectorAll('[data-soc]').forEach((b) => {
+    if (b.dataset.soc === 'save-setup') {
+      b.onclick = async () => {
+        await api('/social/defaults', {
+          method: 'POST',
+          body: {
+            platform: document.getElementById('soc-d-plat').value,
+            resultsPerPage: Number(document.getElementById('soc-d-per').value) || 30,
+            minViews: Number(document.getElementById('soc-d-views').value) || 0,
+            excludeAds: document.getElementById('soc-d-noads').checked,
+            hashtags: document.getElementById('soc-d-tags').value,
+          },
+        });
+        toast('Настройките са запазени');
+      };
+    }
+    if (b.dataset.soc === 'save-cookie') {
+      b.onclick = async () => {
+        const r = await api('/social/instagram-cookie', {
+          method: 'POST',
+          body: { cookie: document.getElementById('soc-ig-cookie').value },
+        });
+        socInfo.hasInstagramCookie = Boolean(r.hasCookie);
+        toast(r.hasCookie ? 'Бисквитката е записана' : 'Бисквитката е изтрита');
+        socLoadSetup();
+      };
+    }
+  });
+  enhanceSelects();
+}
+
+/** Чакаме пускането и опресняваме статуса — иначе човекът не знае какво става. */
+function socPollRun(box) {
+  socStopPoll();
+  const tick = async () => {
+    try {
+      const { run } = await api('/social/last');
+      const el = document.getElementById('soc-run-status');
+      if (el && run) {
+        el.innerHTML = run.running === false || run.status !== 'running'
+          ? `<div class="hint">${run.status === 'done' ? '<span class="pill pill-green">готово</span>' : '<span class="pill pill-red">провал</span>'} ${esc(run.note || '')} · $${Number(run.usd || 0).toFixed(3)}</div>
+             ${run.found ? '<div style="margin-top:8px"><button type="button" class="btn btn-sm btn-ok" data-soc="goto-items">📊 Виж ' + num(run.found) + ' резултата</button></div>' : ''}`
+          : `<div class="hint"><span class="spinner"></span> Върви… (TikTok отнема 20–60 сек)</div>`;
+        const go = el.querySelector('[data-soc="goto-items"]');
+        if (go) {
+          go.onclick = () => {
+            socItemsFilter.run = run.id || '';
+            socItemsFilter.platform = '';
+            socSwitchTab('items');
+            socLoadItems(box);
+          };
+        }
+      }
+      if (!run || run.status === 'running') socRunning = setTimeout(tick, 6000);
+      else {
+        socLoadHist();
+        socUpdateStats();
+      }
+    } catch {
+      socRunning = setTimeout(tick, 8000);
+    }
+  };
+  void tick();
+}
+
+function socUpdateStats() {
+  const el = document.getElementById('soc-stats');
+  if (!el || !socInfo) return;
+  const s = socInfo.stats || {};
+  el.innerHTML = `
+    <div class="pill">📼 ${num(s.items)} събрани видеа</div>
+    <div class="pill">🔁 ${num(s.runs)} пускания</div>
+    <div class="pill">💡 ${num(s.ideas)} идеи</div>
+    <div class="pill ${s.usdToday > 0 ? 'pill-gold' : ''}">💵 днес $${Number(s.usdToday || 0).toFixed(3)}</div>
+    ${socInfo.hasInstagramCookie ? '<div class="pill pill-green">🔐 Instagram: вход сложен</div>' : '<div class="pill pill-red">🔐 Instagram: без вход</div>'}`;
+}
+
+async function renderSocial(box) {
+  socStopPoll();
+  socInfo = await api('/social/info');
+  const d = socInfo.defaults || {};
+  // Формата се пълни от настройките — но само първия път.
+  if (!socForm.targets) {
+    socForm.platform = d.platform || 'tiktok';
+    socForm.targets = d.hashtags || '';
+  }
+  socForm.options = {
+    ...(socForm.platform === 'instagram'
+      ? { resultsLimit: d.resultsPerPage || 30 }
+      : { resultsPerPage: d.resultsPerPage || 30 }),
+    minViews: d.minViews || 0,
+    excludeAds: d.excludeAds !== false,
+    ...socForm.options,
+  };
+  socInfo.runs = [];
+
+  box.innerHTML = `
+    <div class="card">
+      <div class="card-title">🎬 Социални мрежи <span class="muted">— TikTok и Instagram за рекламно проучване</span></div>
+      <div class="hint">
+        Тук събираме <b>доказано работещи видеа</b> по нашите теми: колко гледания имат, кои са реклами
+        (значи конкурентите харчат пари), кои продават продукт и каква кука ползват. Всичко минава през
+        дневния лимит на Apify.
+      </div>
+      <div id="soc-stats" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"></div>
+    </div>
+    ${socTabsHtml()}
+    <div class="sc-pane" id="soc-pane-new"></div>
+    <div class="sc-pane" id="soc-pane-items" style="display:none"></div>
+    <div class="sc-pane" id="soc-pane-ideas" style="display:none"></div>
+    <div class="sc-pane" id="soc-pane-hist" style="display:none"></div>
+    <div class="sc-pane" id="soc-pane-setup" style="display:none"></div>`;
+
+  document.querySelectorAll('[data-soc-tab]').forEach((b) => {
+    b.onclick = () => {
+      socSwitchTab(b.dataset.socTab);
+      if (b.dataset.socTab === 'items') socLoadItems(box);
+      if (b.dataset.socTab === 'ideas') socLoadIdeas();
+      if (b.dataset.socTab === 'hist') socLoadHist();
+      if (b.dataset.socTab === 'setup') socLoadSetup();
+    };
+  });
+
+  const bindSheet = () => {
+    const pane = document.getElementById('soc-pane-new');
+    if (!pane) return;
+    pane.querySelectorAll('[data-soc-plat]').forEach((b) => {
+      b.onclick = () => {
+        socForm.platform = b.dataset.socPlat;
+        socForm.mode = (socPlatform()?.modes || [])[0]?.id || 'hashtag';
+        socForm.options = {};
+        socRenderSheet();
+      };
+    });
+    pane.querySelectorAll('[data-soc-mode]').forEach((b) => {
+      b.onclick = () => {
+        socForm.mode = b.dataset.socMode;
+        socRenderSheet();
+      };
+    });
+    pane.querySelectorAll('[data-soc-opt]').forEach((el) => {
+      const k = el.dataset.socOpt;
+      const read = () => (el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) || 0 : el.value);
+      socForm.options[k] = read();
+      el.onchange = () => {
+        socForm.options[k] = read();
+        socRenderSheet();
+      };
+    });
+    const ta = pane.querySelector('[data-soc="targets"]');
+    if (ta) ta.oninput = () => {
+      socForm.targets = ta.value;
+    };
+    const adv = pane.querySelector('[data-soc="adv-toggle"]');
+    if (adv)
+      adv.onclick = () => {
+        socForm.advanced = !socForm.advanced;
+        socRenderSheet();
+      };
+    const run = pane.querySelector('[data-soc="run"]');
+    if (run)
+      run.onclick = async () => {
+        run.disabled = true;
+        try {
+          const r = await api('/social/scan', {
+            method: 'POST',
+            body: {
+              platform: socForm.platform,
+              mode: socForm.mode,
+              targets: socForm.targets,
+              options: socForm.options,
+            },
+          });
+          if (!r.started) {
+            document.getElementById('soc-run-status').innerHTML = `<div class="hint warn">${esc(r.reason || 'Не тръгна.')}</div>`;
+          } else {
+            toast('Пуснато — чакам резултатите');
+            socPollRun(box);
+          }
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+        run.disabled = false;
+      };
+    const sd = pane.querySelector('[data-soc="save-defaults"]');
+    if (sd)
+      sd.onclick = async () => {
+        await api('/social/defaults', {
+          method: 'POST',
+          body: {
+            platform: socForm.platform,
+            resultsPerPage: Number(socForm.options.resultsPerPage || socForm.options.resultsLimit || 30),
+            minViews: Number(socForm.options.minViews || 0),
+            excludeAds: socForm.options.excludeAds !== false,
+            hashtags: socForm.targets,
+          },
+        });
+        toast('Записано като настройки по подразбиране');
+      };
+  };
+
+  const socRenderSheet = () => {
+    const pane = document.getElementById('soc-pane-new');
+    if (!pane) return;
+    pane.innerHTML = socSheetHtml();
+    bindSheet();
+    enhanceSelects();
+  };
+  window.__socRenderSheet = socRenderSheet;
+
+  socRenderSheet();
+  socUpdateStats();
+  if (socInfo.running) socPollRun(box);
+}

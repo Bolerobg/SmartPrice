@@ -25,6 +25,7 @@ import referralRoutes from './routes/referrals.js';
 import adminRoutes from './routes/admin.js';
 import assistantRoutes from './routes/assistant.js';
 import scraperRoutes from './routes/scraper.js';
+import socialRoutes from './routes/social.js';
 import fbReceiptRoutes from './routes/fbReceipts.js';
 import objectRoutes from './routes/objects.js';
 import publicDataRoutes from './routes/publicData.js';
@@ -187,6 +188,7 @@ export async function buildApp() {
   await app.register(assistantRoutes);
   // Скраперът на онлайн магазини (само от админ панела)
   await app.register(scraperRoutes);
+  await app.register(socialRoutes);
   // Сваляне и AI разчитане на касови бележки от публични Facebook групи (с одобрение)
   await app.register(fbReceiptRoutes);
   await app.register(objectRoutes);
