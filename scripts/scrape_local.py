@@ -24,6 +24,7 @@ import html as html_mod
 import json
 import os
 import re
+from urllib.parse import urljoin
 import shutil
 import subprocess
 import sys
@@ -429,6 +430,12 @@ def extract_product(html, url):
 
     for key in ("title", "description", "imageUrl"):
         item[key] = re.sub(r"\s+", " ", item[key] or "").strip()
+    # Снимката често е ОТНОСИТЕЛНА (bauhaus дава "/img/7616/640/640/product_7616.jpg").
+    # Без това приложението я търси на НАШИЯ домейн и картинката е счупена —
+    # точно това видя потребителят в хранилката.
+    img = item["imageUrl"]
+    if img and not re.match(r"^(https?:)?//", img) and not img.startswith("data:"):
+        item["imageUrl"] = urljoin(url, img)
     return item
 
 

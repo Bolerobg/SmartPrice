@@ -2834,6 +2834,47 @@ async function isCancelled(jobId: string): Promise<boolean> {
  *
  * Стъпки: откриване → четене → (AI) → внасяне. Спира моментално при „Спри“.
  */
+/**
+ * 🖥️ ПОСЛЕДНА ИНСТАНЦИЯ — „какъвто и сайт да дадеш, намира начин“.
+ *
+ * Сървърът не се справи (Cloudflare, цена само след JavaScript, непозната
+ * платформа). Слагаме сайта в опашката за ДОМАШНИЯ робот: той излиза от
+ * потребителски IP и има истински браузър, затова минава там, където
+ * датацентърът е блокиран. Връща true, ако наистина е сложен в опашката.
+ */
+async function routeToLocalRobot(
+  job: { domain: string; url: string; created_by: string | null },
+  jobId: string,
+  limit: number
+): Promise<boolean> {
+  // requested_by е NOT NULL — без него няма как да запишем заявката.
+  if (!job.created_by) return false;
+  try {
+    const ins = await one<{ id: string }>(
+      `insert into local_scan_queue (domain, url, count, status, requested_by, note, imported)
+       values ($1, $2, $3, 'pending', $4, $5, 0)
+       on conflict do nothing
+       returning id::text`,
+      [
+        job.domain,
+        job.url,
+        Math.max(5, Math.min(limit, 50)),
+        job.created_by,
+        'Автоматично от обиколка: сървърът не успя да прочете сайта',
+      ]
+    );
+    if (!ins) return false;
+    await query(`update scrape_jobs set strategy = $2 where id = $1`, [jobId, 'local-robot']);
+    await logLine(
+      jobId,
+      'Сървърът не се справи (защита или цена само след JavaScript) — предадох сайта на ДОМАШНИЯ робот, който ще го обходи от потребителски IP.'
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runJob(jobId: string): Promise<void> {
   const job = await one<JobRow>(
     `select id, url, domain, status, mode, options, target_count, schedule_id, created_by
@@ -3037,14 +3078,20 @@ export async function runJob(jobId: string): Promise<void> {
 
       if (!products.length && !urls.length) {
         await syncVisited(jobId);
+        // „Всеки сайт намира начин“: щом сървърът не се справи, сайтът отива
+        // при домашния робот (потребителски IP + истински браузър).
+        const queued = await routeToLocalRobot(job, jobId, limit);
         await setStatus(jobId, 'failed', {
-          error:
-            `Не намерих продукти в ${job.domain}. Пробвах: Shopify каталог, WooCommerce, магазинни ` +
-            `фийдове (Google/RSS), Magento GraphQL, sitemap (вкл. от robots.txt), категории, връзки в ` +
-            `листинга, карти в листинга, вграден JSON и отваряне с истински браузър. ` +
-            `Най-честите причини: сайтът блокира датацентъра (Cloudflare) — тогава го пусни ` +
-            `през „Обходи от моя компютър“; или е нестандартен — тогава дай ръчни селектори ` +
-            `(list: a.product@href, price: .price@text, image: img@src).`,
+          error: queued
+            ? `Не намерих продукти в ${job.domain} от сървъра (защита срещу роботи или JavaScript). ` +
+              `Предадох сайта на ДОМАШНИЯ робот — той ще го обходи от потребителски IP и продуктите ` +
+              `ще влязат сами. Виждаш го в таб „Търси магазини“ (🖥️ чакащи).`
+            : `Не намерих продукти в ${job.domain}. Пробвах: Shopify каталог, WooCommerce, магазинни ` +
+              `фийдове (Google/RSS), Magento GraphQL, sitemap (вкл. от robots.txt), категории, връзки в ` +
+              `листинга, карти в листинга, вграден JSON и отваряне с истински браузър. ` +
+              `Най-честите причини: сайтът блокира датацентъра (Cloudflare) — тогава го пусни ` +
+              `през „Обходи от моя компютър“; или е нестандартен — тогава дай ръчни селектори ` +
+              `(list: a.product@href, price: .price@text, image: img@src).`,
           finished_at: new Date(),
         });
         await logLine(jobId, 'Спирам: няма намерени продукти.');
@@ -3182,34 +3229,7 @@ export async function runJob(jobId: string): Promise<void> {
       // платформа). Слагаме сайта в опашката за ДОМАШНИЯ робот: той излиза от
       // потребителски IP и има истински браузър, затова минава там, където
       // датацентърът е блокиран. Човекът не остава с празни ръце.
-      let queued = false;
-      if (job.created_by) {
-        try {
-          const ins = await one<{ id: string }>(
-            `insert into local_scan_queue (domain, url, count, status, requested_by, note, imported)
-             values ($1, $2, $3, 'pending', $4, $5, 0)
-             on conflict do nothing
-             returning id::text`,
-            [
-              job.domain,
-              job.url,
-              Math.max(5, Math.min(limit, 50)),
-              job.created_by,
-              'Автоматично от обиколка: сървърът не успя да прочете сайта',
-            ]
-          );
-          queued = Boolean(ins);
-        } catch {
-          queued = false;
-        }
-      }
-      if (queued) {
-        await query(`update scrape_jobs set strategy = $2 where id = $1`, [jobId, 'local-robot']);
-        await logLine(
-          jobId,
-          'Сървърът не се справи (защита или цена само след JavaScript) — предадох сайта на ДОМАШНИЯ робот, който ще го обходи от потребителски IP.'
-        );
-      }
+      const queued = await routeToLocalRobot(job, jobId, limit);
       await setStatus(jobId, 'failed', {
         error: queued
           ? 'Предаден на домашния робот — ще бъде обходен от потребителски IP.'
