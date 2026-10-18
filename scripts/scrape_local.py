@@ -289,46 +289,54 @@ def locs(xml):
 
 
 def collect_product_urls(base, limit, verbose=False):
-    """Събира до `limit` продуктови адреса от sitemap-а на сайта."""
-    def is_product(u):
-        return looks_like_product(u)
+    """Събира до `limit` продуктови адреса от sitemap-а на сайта.
 
-    found, seen = [], set()
+    ВАЖНО: първо ИСТИНСКИТЕ продуктови адреси (`/p/123`, `/product/...`,
+    `/...-12345.html`), чак после „слаг с тирета“. Реален случай (bauhaus.bg,
+    18.10.2026): sitemap-ът започва със статии (/kak-da-poracham,
+    /vsichko-za-tapetite, /trabi-traboprovodi, /zasazhdane-esenni-lukovitsi),
+    които също имат тирета в слага, и роботът обхождаше тях вместо продуктите.
+    """
+    pool, seen = [], set()
+
+    def add(urls):
+        for u in urls:
+            u = u.split("#")[0]
+            if not looks_like_product(u) or u in seen:
+                continue
+            seen.add(u)
+            pool.append(u)
+
+    # Колко адреса да съберем, за да има от какво да избираме.
+    cap = max(limit * 20, 400)
     for sm in sitemap_urls(base):
+        if len(pool) >= cap:
+            break
         status, xml, _ = fetch(sm, verbose)
-        log(f"  sitemap {sm} → {status}", verbose)
+        log(f"  sitemap {sm} \u2192 {status}", verbose)
         if status != "200":
             continue
         entries = locs(xml)
         if re.search(r"<sitemapindex", xml, re.I):
             # индекс: първо продуктовите под-карти, после останалите
-            children = sorted(entries, key=lambda u: 0 if re.search(r"product|goods|item", u, re.I) else 1)
+            children = sorted(
+                entries, key=lambda u: 0 if re.search(r"product|goods|item", u, re.I) else 1
+            )
         else:
             children = [sm]
-            entries = [u for u in entries if is_product(u)]
         for child in children:
-            if len(found) >= limit:
+            if len(pool) >= cap:
                 break
             if child == sm:
-                pool = entries
+                add(entries)
             else:
                 st, sub, _ = fetch(child, verbose)
-                if st != "200":
-                    continue
-                pool = [u for u in locs(sub) if is_product(u)]
-            for u in pool:
-                if len(found) >= limit:
-                    break
-                u = u.split("#")[0]
-                if u in seen or SKIP_URL.search(u):
-                    continue
-                seen.add(u)
-                found.append(u)
-            if len(found) >= limit:
-                break
-        if found:
-            break
-    return found
+                if st == "200":
+                    add(locs(sub))
+
+    # Истинските продуктови адреси първи (устойчиво сортиране — пази вътрешния ред).
+    pool.sort(key=lambda u: 0 if PRODUCT_PATH.search(u) else 1)
+    return pool[:limit]
 
 
 def _price_from(text):
