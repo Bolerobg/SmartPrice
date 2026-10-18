@@ -27,6 +27,15 @@ import re
 import shutil
 import subprocess
 import sys
+
+# ВАЖНО: когато скриптът се пуска от планировчик/услуга, конзолата е cp1252 и
+# ВСЕКИ print на кирилица пада с UnicodeEncodeError (хванато на живо 18.10.2026,
+# при пуск от Windows Task Scheduler). Затова насилваме UTF-8 още в началото.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import tempfile
 import time
 
