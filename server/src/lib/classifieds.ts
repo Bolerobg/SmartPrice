@@ -193,10 +193,27 @@ export function mapListing(source: ClassifiedSource, raw: Record<string, unknown
     };
     // imot дава слабо заглавие („Продава 2-СТАЕН“). Правим истинско описание от
     // характеристиките: „2-стаен, 65 кв.м — София, Оборище“.
-    const rooms = raw.rooms ? `${raw.rooms}-стаен` : '';
+    // Внимание: imot връща стаите вече с наставка („1-стаен“) — не я удвояваме.
+    const rawRooms = String(raw.rooms ?? '').trim();
+    const rooms = !rawRooms ? '' : /стаен/i.test(rawRooms) ? rawRooms : `${rawRooms}-стаен`;
     const area = raw.area ? `${raw.area} кв.м` : '';
     const hood = cleanCity(String(raw.neighborhoodBg || raw.neighborhood || ''));
-    const kind = String(raw.propertyType || '').trim();
+    // Типът понякога идва на английски („apartment“) — превеждаме познатите.
+    const KIND_BG: Record<string, string> = {
+      apartment: 'апартамент',
+      house: 'къща',
+      plot: 'парцел',
+      land: 'земя',
+      garage: 'гараж',
+      office: 'офис',
+      villa: 'вила',
+      room: 'стая',
+      shop: 'магазин',
+      warehouse: 'склад',
+      studio: 'студио',
+    };
+    const rawKind = String(raw.propertyType || '').trim();
+    const kind = KIND_BG[rawKind.toLowerCase()] ?? rawKind;
     const head = [rooms || kind, area].filter(Boolean).join(', ');
     const where = [cleanCity(String(raw.cityBg || raw.city || '')), hood].filter(Boolean).join(', ');
     const niceTitle = [head, where].filter(Boolean).join(' — ');
