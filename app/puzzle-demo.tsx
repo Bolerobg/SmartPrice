@@ -48,15 +48,28 @@ function buildTiles(): { tiles: PuzzleTile[]; pairs: string[] } {
     ...distractors.map((d) => ({ pairId: null, p: d })),
   ];
   const mixed = raw.sort(() => Math.random() - 0.5);
-  return {
-    tiles: mixed.map((m, i) => ({
-      id: `demo-${i}-${Math.random().toString(36).slice(2, 7)}`,
-      imageUrl: m.p.url,
-      pairId: m.pairId,
-      label: m.p.label,
-    })),
-    pairs: [pairA.key, pairB.key],
-  };
+  const tiles = mixed.map((m, i) => ({
+    id: `demo-${i}-${Math.random().toString(36).slice(2, 7)}`,
+    imageUrl: m.p.url,
+    pairId: m.pairId,
+    label: m.p.label,
+  }));
+
+  // ВАЖНО: двойките се ИЗЧИСЛЯВАТ ОТ САМИТЕ КАРТИ (не се задават на ръка).
+  // Така е невъзможно „двойката в списъка“ да не отговаря на картите на дъската —
+  // точно това чупеше играта. Същият подход ползва и сървърът за томболата.
+  const pairs = Array.from(new Set(tiles.map((t) => t.pairId).filter((p): p is string => Boolean(p))));
+
+  // Самопроверка: трябва да има точно 2 двойки и всяка да е по 2 карти.
+  const counts: Record<string, number> = {};
+  for (const t of tiles) if (t.pairId) counts[t.pairId] = (counts[t.pairId] || 0) + 1;
+  const broken = pairs.length !== 2 || pairs.some((p) => counts[p] !== 2);
+  if (broken) {
+    // Не оставяме човека на нерешима дъска — построяваме я наново.
+    return buildTiles();
+  }
+
+  return { tiles, pairs };
 }
 
 /** Насърчителните надписи — според времето. Точно това „заразява“. */
