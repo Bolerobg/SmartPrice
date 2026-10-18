@@ -396,9 +396,14 @@ export async function checkShop(
    * Плаща се — затова само когато има дневен бюджет.
    */
   const viaApify = async (resident: boolean): Promise<ShopCheck | null> => {
+    // ВАЖНО: Apify пускът също яде от крайния срок. Иначе една блокирана от
+    // Cloudflare проба добавя 60–130 сек и цялата заявка от панела се реже
+    // (проверено на живо: 6 сайта → заявката умираше без отговор).
+    if (left() < 25_000) return null;
     if (!(await apifyReady())) return null;
     if (!(await apifyBudgetAllows(0.15)).allowed) return null;
-    const r = await apifyRenderHtml([base.url], { resident, timeoutMs: 130_000 });
+    const apTimeout = Math.max(20_000, Math.min(120_000, left() - 4_000));
+    const r = await apifyRenderHtml([base.url], { resident, timeoutMs: apTimeout });
     if (r.usd > 0) await addApifySpend(r.usd, `проверка ${base.domain}`);
     const page = r.pages.find((x) => x.html);
     if (!r.ok || !page?.html) return null;
@@ -803,7 +808,7 @@ export async function discoverShops(input: {
   // Проверката върви в една HTTP заявка през Cloudflare, която се реже на ~100 сек.
   // Затова спираме сами на 85 сек. и връщаме каквото сме проверили — честно,
   // вместо да върнем грешка и да загубим цялата работа.
-  const totalDeadline = Date.now() + 85_000;
+  const totalDeadline = Date.now() + 70_000;
   let stopped = false;
 
   const worker = async () => {
