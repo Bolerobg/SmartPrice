@@ -71,11 +71,16 @@ export const CLASSIFIED_SOURCES: Record<ClassifiedSource, SourceMeta> = {
     note: 'Имоти: цена, €/кв.м, кв.м, стаи, етаж, година, квартал.',
     disabled: true,
   },
+  // alo.bg — ИЗКЛЮЧЕН: актьорът отхвърля всички опитани форми на вход (400) и
+  // не публикува схемата си. Пробвани: startUrls/categoryUrls/urls, categoryUrl,
+  // searchUrl, searchQuery/query/keyword/search. Включи го, щом се намери
+  // точният вход — кодът за преобразуване е готов.
   alo: {
     actor: 'rainminer~alo-bg-scraper',
     label: 'alo.bg',
     input: 'url',
     note: 'Коли: пише се адресът на категорията в alo.bg (напр. /obiavi/avtomobili/).',
+    disabled: true,
   },
 };
 

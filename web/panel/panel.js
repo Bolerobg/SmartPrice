@@ -2421,6 +2421,14 @@ async function renderScraper(box) {
     /* endpoint-ът може да още не е качен */
   }
 
+  // 🏪 Обекти: колко са обогатени през Google Maps (рейтинг, часове, координати).
+  let places = { enriched: 0, pending: 0, recent: [], apify: {} };
+  try {
+    places = await api('/places/info');
+  } catch {
+    /* същото */
+  }
+
   box.innerHTML = `
     ${scraperTabsHtml(candidates.queue?.pending || 0)}
 
@@ -2543,6 +2551,7 @@ async function renderScraper(box) {
     <div class="sc-pane" id="sc-pane-hist"><div id="sc-history">${scraperHistoryHtml(jobs.items || [])}</div></div>
     <div class="sc-pane" id="sc-pane-progress">${scraperProgressHtml(cursors.items || [], catmap.items || [])}</div>
     <div class="sc-pane" id="sc-pane-ads">${scraperAdsHtml(classifieds)}</div>
+    <div class="sc-pane" id="sc-pane-places">${scraperPlacesHtml(places)}</div>
     <div class="sc-pane" id="sc-pane-sites"><div id="sc-sites">${scraperSitesHtml(info.sites || [])}</div></div>`;
 
   /* ------------------------------------------------------------ бутони */
@@ -2673,6 +2682,7 @@ async function renderScraper(box) {
   bindScraperSites();
   bindScraperProgress();
   bindScraperAds();
+  bindScraperPlaces();
   bindScraperSchedules();
 
   if (scraperJobId) await scraperLoadJob();
@@ -2692,6 +2702,7 @@ const SC_TABS = [
   ['hist', '🕓 История'],
   ['progress', '📈 Напредък'],
   ['ads', '🏷️ Обяви'],
+  ['places', '🏪 Обекти'],
   ['sites', '🌐 Сайтове'],
 ];
 const SC_PANES = {
@@ -2702,6 +2713,7 @@ const SC_PANES = {
   hist: 'sc-pane-hist',
   progress: 'sc-pane-progress',
   ads: 'sc-pane-ads',
+  places: 'sc-pane-places',
   sites: 'sc-pane-sites',
 };
 
@@ -3572,6 +3584,123 @@ function scraperSitesHtml(sites) {
  * от Facebook групи. Тези сайтове са истинският пазар на обяви и дават цена, град,
  * снимки и дали продавачът е частно лице или фирма.
  */
+/* ============================================ 🏪 таб „Обекти“ (Google Maps) ============ */
+
+/**
+ * Обогатяване на обектите през Google Maps.
+ *
+ * Обектът в SmartPrice (магазин, сервиз, майстор) се ражда от сигналите на
+ * хората — знаем само име, град и цени. Google Maps дава рейтинг, брой отзиви,
+ * работно време по дни, телефон, сайт, точни координати и квартал.
+ */
+function scraperPlacesHtml(info) {
+  const recent = info.recent || [];
+  const apify = info.apify || {};
+  // Показваме ДНЕШНОТО работно време, а ако денят не се познае — първия ред.
+  const BG_DAYS = ['неделя', 'понеделник', 'вторник', 'сряда', 'четвъртък', 'петък', 'събота'];
+  const hours = (h) => {
+    if (!Array.isArray(h) || !h.length) return '—';
+    const today = BG_DAYS[new Date().getDay()] || '';
+    const row =
+      h.find((x) => String(x.day || '').toLowerCase().startsWith(today.slice(0, 5)) && today.length > 3) || h[0];
+    return row ? `${esc(row.day)}: ${esc(row.hours)}` : '—';
+  };
+  const budget =
+    apify.today !== undefined
+      ? `${Number(apify.today).toFixed(2)} / ${Number(apify.limit || 0).toFixed(2)} $`
+      : '—';
+
+  return `
+    <div class="card">
+      <div class="card-title">🏪 Обекти — обогатяване през Google Maps</div>
+      <div class="hint" style="margin:6px 0 12px">Всеки обект (магазин, сервиз, майстор) получава рейтинг, брой отзиви, работно време, телефон, сайт и точни координати — така страницата му става полезна, без никой да пише нищо.</div>
+      <div class="kpi-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px">
+        <div class="card kpi" style="flex:1; min-width:140px"><div class="kpi-label">Обогатени</div><div class="kpi-value cyan">${num(info.enriched)}</div></div>
+        <div class="card kpi" style="flex:1; min-width:140px"><div class="kpi-label">Чакат</div><div class="kpi-value gold">${num(info.pending)}</div></div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+        <input id="pl-n" type="number" value="10" min="1" max="50" style="width:84px">
+        <button class="btn" id="pl-run">▶ Обогати обектите</button>
+        <span class="hint">☁️ Apify днес: ${budget}${apify.allowed === false ? ' · <strong>лимитът е стигнат</strong>' : ''}</span>
+      </div>
+      <div class="hint" style="margin-top:8px">Работи за 30–90 секунди. Google Maps се таксува на място (≈ $4 / 1000 обекта).</div>
+      <div id="pl-out" style="margin-top:12px"></div>
+      ${
+        recent.length
+          ? `<div class="table-wrap" style="margin-top:14px">
+              <table>
+                <thead><tr><th>Обект</th><th>Град</th><th>Категория</th><th>Рейтинг</th><th>Отзиви</th><th>Работно време</th><th>Карта</th></tr></thead>
+                <tbody>${recent
+                  .map(
+                    (p) => `<tr>
+                  <td><strong>${esc(p.place_name)}</strong><div class="hint">${esc((p.address || '').slice(0, 60))}</div></td>
+                  <td>${esc(p.city)}</td>
+                  <td>${esc(p.category || '—')}</td>
+                  <td>${p.rating ? Number(p.rating).toFixed(1) : '—'}${p.rating ? ' ⭐' : ''}</td>
+                  <td>${num(p.reviews_count)}</td>
+                  <td>${hours(p.hours)}</td>
+                  <td>${p.maps_url ? `<a href="${esc(p.maps_url)}" target="_blank" rel="noopener">отвори</a>` : '—'}</td>
+                </tr>`
+                  )
+                  .join('')}</tbody>
+              </table>
+            </div>`
+          : `<div class="hint" style="margin-top:12px">Още няма обогатени обекти.</div>`
+      }
+    </div>`;
+}
+
+/** Бутонът „▶ Обогати обектите“. */
+function bindScraperPlaces() {
+  const btn = $('#pl-run');
+  const out = $('#pl-out');
+  if (!btn || !out) return;
+  const post = (res) => {
+    out.innerHTML = `
+      <div class="card" style="border-color:${res.running ? 'rgba(96,165,250,.45)' : res.ok ? 'rgba(34,197,94,.45)' : 'rgba(245,158,11,.45)'}">
+        <div class="card-title">${res.running ? '⏳' : res.ok ? '✅' : '⚠️'} ${esc(res.note || '')}</div>
+        <div style="margin-top:8px">Питахме за: <strong>${num(res.targeted)}</strong> ·
+          намерени в Google: <strong>${num(res.found)}</strong> · записани: <strong>${num(res.saved)}</strong></div>
+        <div class="hint" style="margin-top:8px">Похарчени за това: ${Number(res.usd || 0).toFixed(3)} $</div>
+      </div>`;
+  };
+  btn.onclick = async () => {
+    const n = Math.max(1, Math.min(50, Number($('#pl-n')?.value || 10)));
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Работя…';
+    out.innerHTML = `<div class="hint"><span class="spinner"></span> Питам Google Maps… 30–90 секунди, не затваряй панела.</div>`;
+    try {
+      const r = await api('/places/enrich', { method: 'POST', body: { limit: n } });
+      if (!r.started) {
+        out.innerHTML = `<div class="hint warn">${esc(r.reason || 'Не успях да пусна.')}</div>`;
+        return;
+      }
+      let last = null;
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((done) => setTimeout(done, 4000));
+        try {
+          const s = await api('/places/last');
+          last = s.run || null;
+        } catch {
+          /* още не е готово */
+        }
+        if (last) {
+          post(last);
+          if (!last.running) break;
+        }
+      }
+      if (!last) out.innerHTML = `<div class="hint warn">Върви по-дълго от очакваното — отвори панела пак след минута.</div>`;
+      else toast(`Обогатени ${num(last.saved)} обекта`, last.ok ? 'ok' : 'warn');
+    } catch (e) {
+      out.innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  };
+}
+
 function scraperAdsHtml(info) {
   const sources = info.sources || [];
   const imported = info.imported || [];

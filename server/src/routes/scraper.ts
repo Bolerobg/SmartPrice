@@ -17,6 +17,7 @@ import {
   lastClassifiedsRun,
   startClassifiedsScan,
 } from '../lib/classifieds.js';
+import { enrichObjects, lastPlacesRun, placesInfo, recentEnriched, startPlacesEnrich } from '../lib/placesEnrich.js';
 import { currentCursor, deleteCategoryMap, listCategoryMap, listCursors } from '../lib/scrapeCursor.js';
 import {
   discoverShops,
@@ -992,6 +993,47 @@ export default async function scraperRoutes(app: FastifyInstance) {
   app.get('/api/admin/classifieds/last', async (req) => {
     await requireAdminPanel(req);
     return { run: await lastClassifiedsRun() };
+  });
+
+  /* ------------------------------- 🏪 обекти: обогатяване през Google Maps --- */
+
+  /**
+   * Какво знаем за обектите и колко чакат обогатяване.
+   * Обект = място (магазин, сервиз, майстор) + град; Google Maps дава рейтинг,
+   * отзиви, работно време, телефон, сайт и точни координати.
+   */
+  app.get('/api/admin/places/info', async (req) => {
+    await requireAdminPanel(req);
+    const [info, recent, last] = await Promise.all([
+      placesInfo(),
+      recentEnriched(20).catch(() => []),
+      lastPlacesRun().catch(() => null),
+    ]);
+    const budget = await apifyBudgetAllows(0.1).catch(() => ({ allowed: false, today: 0, limit: 0 }));
+    return { ...info, recent, last, apify: { allowed: budget.allowed, today: budget.today, limit: budget.limit } };
+  });
+
+  /** Обогатяване на обектите — ФОНОВО (Google Maps отнема 30–90 сек). Харчи пари. */
+  app.post('/api/admin/places/enrich', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z
+      .object({ limit: z.coerce.number().int().min(1).max(50).default(10) })
+      .parse(req.body ?? {});
+    const started = await startPlacesEnrich(input.limit);
+    await audit({
+      admin,
+      action: 'places.enrich',
+      targetLabel: `Google Maps: до ${input.limit} обекта`,
+      details: { started: started.started, reason: started.reason ?? null },
+      ip: req.ip,
+    });
+    return { ok: started.started, started: started.started, reason: started.reason ?? null };
+  });
+
+  /** Проверка на конкретен обект без чакане (за диагностика). */
+  app.get('/api/admin/places/last', async (req) => {
+    await requireAdminPanel(req);
+    return { run: await lastPlacesRun() };
   });
 
   /* -------------------------------------------------- едновременно вървящи */
