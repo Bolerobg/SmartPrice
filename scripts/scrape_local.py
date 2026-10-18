@@ -75,12 +75,18 @@ def chrome_path():
 
 
 def fetch_rendered(url, wait_ms=9000, verbose=False):
-    """Чете страницата с ИСТИНСКИ браузър (headless Chrome/Edge).
+    """Чете страницата с ИСТИНСКИ браузър.
 
-    Защо: част от сайтовете (bauhaus.bg, jysk.bg, ikea.bg, mr-bricolage.bg…)
-    връщат HTML без цени — те идват чак след като JavaScript-ът се изпълни.
-    `--virtual-time-budget` дава на страницата време да си свърши работата.
+    Ред: Playwright (надеждният начин, ползва НАЛИЧНИЯ Chrome — без сваляне на
+    браузър) → ако го няма, `--dump-dom` (работи само на Chrome < 132).
+    Защо: част от сайтовете (jysk.bg, ikea.bg, mr-bricolage.bg…) връщат HTML без
+    цени — те идват чак след като JavaScript-ът се изпълни. Проверено на живо
+    (18.10.2026): jysk.bg през Playwright дава 782 KB и 75 цени в DOM-а, докато
+    обикновена заявка дава страница без нито една цена.
     """
+    html = fetch_rendered_playwright(url, wait_ms, verbose)
+    if html:
+        return html
     exe = chrome_path()
     if not exe:
         log("  (няма Chrome/Edge за рендиране)", verbose)
@@ -102,6 +108,45 @@ def fetch_rendered(url, wait_ms=9000, verbose=False):
         log("  рендирането не върна страница", verbose)
     finally:
         shutil.rmtree(profile, ignore_errors=True)
+    return None
+
+
+def fetch_rendered_playwright(url, wait_ms=9000, verbose=False):
+    """Отваря адреса с Playwright (истински Chrome). Връща None, ако не стане.
+
+    Playwright работи и на Chrome 132+ (за разлика от `--dump-dom`) и може да
+    чака колкото трябва. Снимките се спират, за да е по-бързо.
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: PLC0415
+    except Exception:
+        log("  (Playwright не е инсталиран — ползвам --dump-dom)", verbose)
+        return None
+    try:
+        with sync_playwright() as pw:
+            # `channel="chrome"` = ползва инсталирания Chrome (не тегли браузър).
+            browser = pw.chromium.launch(
+                channel="chrome",
+                headless=True,
+                args=["--blink-settings=imagesEnabled=false", "--disable-dev-shm-usage", "--no-sandbox"],
+            )
+            ctx = browser.new_context(locale="bg-BG")
+            ctx.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in ("image", "media", "font")
+                else route.continue_(),
+            )
+            page = ctx.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(int(wait_ms))
+            html = page.content()
+            browser.close()
+        if html and len(html) > 2000 and not CHALLENGE.search(html[:4000]):
+            return html
+        log("  Playwright върна %d знака" % len(html or ""), verbose)
+    except Exception as err:  # noqa: BLE001 — важно е да продължим
+        log("  Playwright не успя: %s" % str(err)[:120], verbose)
     return None
 
 
