@@ -50,6 +50,8 @@ interface SourceMeta {
   /** Какво чака актьорът: търсене по дума или адрес на категория. */
   input: 'query' | 'url';
   note?: string;
+  /** Изключен източник — не се показва в панела и не се пуска. */
+  disabled?: boolean;
 }
 
 export const CLASSIFIED_SOURCES: Record<ClassifiedSource, SourceMeta> = {
@@ -59,11 +61,15 @@ export const CLASSIFIED_SOURCES: Record<ClassifiedSource, SourceMeta> = {
     input: 'query',
     note: 'Цена в евро центове, град/област, състояние, данни за коли и имоти.',
   },
+  // imot.bg — ИЗКЛЮЧЕН по решение на собственика (18.10.2026): имотите от този
+  // сайт не са полезни за приложението. Кодът за преобразуване остава тук, за да
+  // може да се включи с една дума (`disabled: false`), ако потрябва.
   imot: {
     actor: 'logiover~imot-bg-scraper-bulgaria-real-estate',
     label: 'imot.bg',
     input: 'query',
     note: 'Имоти: цена, €/кв.м, кв.м, стаи, етаж, година, квартал.',
+    disabled: true,
   },
   alo: {
     actor: 'rainminer~alo-bg-scraper',
@@ -263,6 +269,7 @@ export async function runClassifiedsActor(
 ): Promise<ActorRunResult> {
   const meta = CLASSIFIED_SOURCES[source];
   if (!meta) return { ok: false, items: [], usd: 0, reason: 'Непознат източник.' };
+  if (meta.disabled) return { ok: false, items: [], usd: 0, reason: 'Този източник е изключен.' };
   const token = await apifyToken();
   if (!token) return { ok: false, items: [], usd: 0, reason: 'Няма Apify токен.' };
   if (!(await apifyReady())) return { ok: false, items: [], usd: 0, reason: 'Apify не е готов.' };

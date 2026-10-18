@@ -944,13 +944,16 @@ export default async function scraperRoutes(app: FastifyInstance) {
         group by source order by source`
     );
     return {
-      sources: Object.entries(CLASSIFIED_SOURCES).map(([key, m]) => ({
-        key,
-        label: m.label,
-        input: m.input,
-        note: m.note ?? null,
-        actor: m.actor,
-      })),
+      // Показваме само ВКЛЮЧЕНИТЕ източници (imot.bg е изключен по решение).
+      sources: Object.entries(CLASSIFIED_SOURCES)
+        .filter(([, m]) => !m.disabled)
+        .map(([key, m]) => ({
+          key,
+          label: m.label,
+          input: m.input,
+          note: m.note ?? null,
+          actor: m.actor,
+        })),
       imported,
       apify: { allowed: budget.allowed, today: budget.today, limit: budget.limit },
     };
