@@ -13,6 +13,8 @@
  * Употреба: node fix-index-html.mjs /out/index.html
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
 
 const path = process.argv[2];
 if (!path) {
@@ -116,9 +118,83 @@ html = html.replace(
   '<title>SmartPrice — реални цени, честни места</title>\n    <meta name="description" content="Споделяй реални цени, откривай изгодното и разобличавай капаните. Без реклами и платени ревюта." />'
 );
 
+// 5. Проверка за нова версия — вграден номер на билда + малка проверка.
+//
+//    Защо: телефонът (особено инсталираното приложение на iPhone) пази СТАРИЯ
+//    вариант и новите неща „не се виждат“, докато човекът не изтрие иконата и
+//    не я сложи наново. Затова вграждаме номера на билда в самата страница и
+//    добавяме проверка: щом на сървъра номерът е друг, долу се появява
+//    дискретно съобщение „Нова версия е готова“ — с едно натискане приложението
+//    се обновява. Нищо не се презарежда само, за да не се губи написаното.
+const version = createHash('md5').update(html).digest('hex').slice(0, 12);
+
+const VERSION_JS = `<script id="smartprice-version">
+(function(){
+  var BUILD = '${version}';
+  var shown = false;
+  function pill(){
+    var el = document.getElementById('sp-new-version');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'sp-new-version';
+    el.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483000;' +
+      'display:flex;align-items:center;gap:8px;padding:11px 16px;border-radius:999px;cursor:pointer;' +
+      'max-width:92vw;background:linear-gradient(135deg,#0B1424,#12213A);' +
+      'border:1px solid rgba(34,211,238,0.5);box-shadow:0 12px 34px rgba(0,0,0,0.5);color:#F8FAFC;' +
+      'font:800 13.5px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
+      '-webkit-tap-highlight-color:transparent';
+    el.textContent = '\uD83D\uDD04 Нова версия е готова — натисни, за да се обнови';
+    el.onclick = function(){
+      el.textContent = 'Обновявам…';
+      try {
+        if (window.caches && caches.keys) {
+          caches.keys()
+            .then(function(keys){ return Promise.all(keys.map(function(k){ return caches.delete(k); })); })
+            .then(function(){ location.reload(); })['catch'](function(){ location.reload(); });
+          setTimeout(function(){ location.reload(); }, 900);
+          return;
+        }
+      } catch (e) {}
+      location.reload();
+    };
+    (document.body || document.documentElement).appendChild(el);
+    return el;
+  }
+  function check(){
+    fetch('/version.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if (!j || !j.v || j.v === BUILD) return;
+        if (shown) return;
+        shown = true;
+        pill();
+      })['catch'](function(){});
+  }
+  setInterval(check, 60000);
+  document.addEventListener('visibilitychange', check);
+  window.addEventListener('focus', check);
+  window.addEventListener('pageshow', check);
+  setTimeout(check, 4000);
+})();
+</script>`;
+
+if (html.includes('</body>')) {
+  html = html.replace('</body>', `${VERSION_JS}\n  </body>`);
+} else {
+  html = html.replace('</head>', `${VERSION_JS}\n  </head>`);
+}
+
 writeFileSync(path, html, 'utf8');
+
+// Номерът на билда като отделен файл — това проверява приложението
+writeFileSync(
+  join(dirname(path), 'version.json'),
+  JSON.stringify({ v: version, at: new Date().toISOString() }) + '\n',
+  'utf8'
+);
 
 console.log('[fix-index-html] готово');
 console.log('  viewport-fit=cover:', html.includes('viewport-fit=cover'));
 console.log('  мобилен CSS:', html.includes('smartprice-mobile-fit'));
 console.log('  език bg:', html.includes('<html lang="bg">'));
+console.log('  проверка за нова версия:', html.includes('smartprice-version'), '· билд', version);

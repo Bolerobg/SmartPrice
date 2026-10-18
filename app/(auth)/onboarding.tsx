@@ -254,6 +254,81 @@ const DonateDemo: React.FC = () => {
   );
 };
 
+/** 13. Продавам нещо — натискаш и минаваш през снимки → цена → плащане */
+const ListingDemo: React.FC = () => {
+  const [step, setStep] = useState(0);
+  // 0 = празна, 1 = със снимки, 2 = с цена и плащане, 3 = публикувана
+  const filled = step >= 1;
+  return (
+    <View style={[demo.card, demo.cardGreen]}>
+      <View style={demo.row}>
+        <Text style={demo.emoji}>🏷️</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={demo.title}>Детско колело, 20 цола</Text>
+          <Text style={demo.place}>
+            {step === 0 ? 'Празна обява — добави снимки' : 'София · за продажба'}
+          </Text>
+        </View>
+        {step >= 2 ? (
+          <View style={demo.priceTag}>
+            <Text style={[demo.price, { color: COLORS.greenBright }]}>45.00 €</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={demo.grid}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <View key={i} style={[demo.tile, filled && demo.tileFound]}>
+            <Text style={demo.tileEmoji}>{filled ? '🖼️' : '➕'}</Text>
+          </View>
+        ))}
+      </View>
+
+      {step >= 2 ? (
+        <View style={[demo.histRow, { marginTop: 10 }]}>
+          <Ionicons name="lock-closed" size={13} color={COLORS.accentCyan} />
+          <Text style={[demo.histLabel, { flex: 1 }]}>Плащане през Stripe — обявата стои 60 дни</Text>
+          <Text style={[demo.histPrice, { color: COLORS.accentCyan }]}>2.00 €</Text>
+        </View>
+      ) : null}
+
+      <TouchableOpacity
+        style={demo.actionBtn}
+        onPress={() => setStep((s) => (s >= 3 ? 0 : s + 1))}
+        activeOpacity={0.85}
+      >
+        <Ionicons
+          name={step === 0 ? 'camera' : step === 1 ? 'pricetag' : step === 2 ? 'card' : 'refresh'}
+          size={14}
+          color={COLORS.greenBright}
+        />
+        <Text style={[demo.hint, { color: COLORS.greenBright }]}>
+          {step === 0
+            ? 'Качи 5 снимки'
+            : step === 1
+            ? 'Сложи цена 45 €'
+            : step === 2
+            ? 'Пусни обявата за 2 €'
+            : 'Пак отначало'}
+        </Text>
+      </TouchableOpacity>
+
+      <View style={demo.hintRow}>
+        <Ionicons
+          name={step >= 3 ? 'checkmark-circle' : 'people'}
+          size={14}
+          color={COLORS.accentCyan}
+        />
+        <Text style={[demo.hint, { color: COLORS.accentCyan }]}>
+          {step >= 3
+            ? 'Жива е 60 дни — спираш я или отбелязваш „Продадено“ с едно натискане'
+            : 'Продавам нещо? Пусни обява — вижда я цялата страна'}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
 
 /** 6. Жива цена — натисни „Бях на място“, за да видиш как се дописва историята */
 const PriceHistoryDemo: React.FC = () => {
@@ -786,6 +861,16 @@ export default function OnboardingScreen() {
         body:
           'Всяка оферта има собствен линк. Изпращаш я в WhatsApp, Viber, Telegram, Facebook или по имейл — с едно натискане.\n\nПолучателят вижда снимката, цената и мястото, дори да няма профил. Така една находка стига до стотици хора.',
         interactive: <ShareDemo />,
+      },
+      {
+        key: 'listing',
+        emoji: '🏷️',
+        gradient: ['#052E2B', '#0B0F1A'],
+        eyebrow: 'ПРОДАВАМ',
+        title: 'Пусни обява за нещо свое',
+        body:
+          'Имаш нещо излишно? Пусни го с до 5 снимки, цена, място и кратко описание — обявата стои 60 дни за 2 €.\n\nХората я виждат в лентата и ти пишат. Когато го продадеш, отбелязваш „Продадено“ с едно натискане; ако размислиш — спираш я. Плащането минава през Stripe.',
+        interactive: <ListingDemo />,
       },
       {
         key: 'offerid',
