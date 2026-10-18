@@ -936,8 +936,12 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
     const prices = deduped.map((p) => p.price!).sort((a, b) => a - b);
     const median = prices[Math.floor(prices.length / 2)]!;
     if (median >= 50) {
+      // Долу: под 5% от медианата = вноска/такса, не цена.
       const floor = median * 0.05;
-      return deduped.filter((p) => (p.price ?? 0) >= floor);
+      // Горе: над 30× медианата = сметка от скрипт на страницата (home-max.bg
+      // даваше „161157 €“ за продукт от 10 €).
+      const ceiling = median * 30;
+      return deduped.filter((p) => (p.price ?? 0) >= floor && (p.price ?? 0) <= ceiling);
     }
   }
   return deduped;
