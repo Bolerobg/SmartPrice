@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -88,57 +88,22 @@ export default function PuzzleDemoScreen() {
   const router = useRouter();
   const [round, setRound] = useState(0);
   const [{ tiles, pairs }, setBoard] = useState(() => buildTiles());
-  /** true = плочките са ИСТИНСКИТЕ от томболата (същите продукти и снимки). */
-  const [realTiles, setRealTiles] = useState(false);
   const [result, setResult] = useState<number | null>(null);
   const [best, setBest] = useState<number | null>(null);
   const [plays, setPlays] = useState(0);
   const [offMsg, setOffMsg] = useState('');
 
   /**
-   * Взимаме плочките от СЪЩАТА томбола (режим „тренировка“) — така тренировката
-   * е с истинските продукти и снимки, точно както ще е в истинската томбола, и с
-   * всичките 12 полета. Ако няма активна томбола или не сме влезли — падаме към
-   * местните 12 полета, за да може човек да тренира винаги.
+   * ВАЖНО (по изрична заявка на собственика): тренировката ползва СВОИ картинки
+   * от същия вид (чисти продуктови снимки на опаковки) — НЕ същите като в
+   * истинската томбола. Истинската томбола си има собствени продукти и снимки.
+   * Така двете са в един стил, но с различни продукти, както трябва.
    */
-  const loadReal = useCallback(async (): Promise<{ tiles: PuzzleTile[]; pairs: string[] } | null> => {
-    try {
-      const list = await api.raffles();
-      const active = (list.items || []).find((r) => (r as { status?: string }).status === 'active') || (list.items || [])[0];
-      if (!active?.id) return null;
-      const puzzle = await api.rafflePuzzle(active.id, 'practice');
-      if (!puzzle?.tiles?.length || !puzzle?.pairs?.length) return null;
-      return { tiles: puzzle.tiles, pairs: puzzle.pairs };
-    } catch {
-      return null;
-    }
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const real = await loadReal();
-      if (alive && real) {
-        setBoard(real);
-        setRealTiles(true);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [loadReal]);
-
-  const nextRound = useCallback(async () => {
+  const nextRound = useCallback(() => {
     setResult(null);
     setRound((r) => r + 1);
-    const real = await loadReal();
-    if (real) {
-      setBoard(real);
-      setRealTiles(true);
-    } else {
-      setBoard(buildTiles());
-    }
-  }, [loadReal]);
+    setBoard(buildTiles());
+  }, []);
 
   const onFinish = useCallback(
     async (timeMs: number) => {
@@ -196,7 +161,7 @@ export default function PuzzleDemoScreen() {
               key={round}
               tiles={tiles}
               targetPairs={pairs}
-              badge={realTiles ? 'Тренировка · същите продукти' : 'Тренировка'}
+              badge="Тренировка" 
               onFinish={(ms) => void onFinish(ms)}
             />
           </View>
