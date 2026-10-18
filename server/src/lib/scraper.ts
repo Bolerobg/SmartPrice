@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { many, one, query, tx } from '../db.js';
 import { env, features } from '../env.js';
+import { addApifySpend, apifyBudgetAllows, apifyReady, apifyRenderHtml } from './apifyBrowser.js';
+import { browserAvailable, renderHtml } from './render.js';
 import { putImage, publicUrl } from './storage.js';
 
 /**
@@ -178,6 +180,11 @@ function countVisit(jobId: string | undefined) {
 
 export function visitedCount(jobId: string): number {
   return fetchCounters.get(jobId) ?? 0;
+}
+
+/** Отчита „обходена страница“ и когато сме я отворили с истински браузър. */
+export function noteVisited(jobId: string | undefined, n = 1): void {
+  for (let i = 0; i < n; i++) countVisit(jobId);
 }
 
 async function sleep(ms: number) {
@@ -1686,6 +1693,266 @@ export function extractRichDescription(html: string): string | undefined {
 
 /* ------------------------------------------------------ страница продукт */
 
+/* ============================ лов на продукти в JSON, вграден в страницата */
+
+/**
+ * Много магазини слагат данните направо в HTML-а като JSON, а не като видим текст:
+ * `__NEXT_DATA__` (Next.js), `window.__NUXT__`, `window.__INITIAL_STATE__`,
+ * `var product = {...}`, `data-product="..."` (Angular SSR), `application/ld+json`.
+ * В HTML няма нито цена, нито снимка — в този JSON ги има. Затова тук ровим
+ * във всеки JSON-блок и търсим обект, който прилича на продукт: име + цена.
+ *
+ * Това е „универсалната“ част на скрапера: работи без значение коя платформа е
+ * сайтът, стига данните да са в страницата (а не да идват с отделна заявка).
+ */
+
+/** Взима JSON-телата от всички <script> тагове, които изобщо може да съдържат продукти. */
+function jsonBodies(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(/<script\b[^>]*>([\s\S]{0,600000}?)<\/script>/gi)) {
+    const body = m[1] ?? '';
+    if (body.length < 40) continue;
+    if (!/\{/.test(body)) continue;
+    // Скъпо е да парсваме всеки скрипт — взимаме само тези, в които има намек
+    // за продукт (цена/име). Аналитика и тракери отпадат веднага.
+    if (!/(price|Price|PRICE|amount|сум|цена|product|Product)/.test(body)) continue;
+    if (/google-analytics|googletagmanager|gtag\(|fbq\(|hotjar|clarity/i.test(body) && !/price/i.test(body)) continue;
+    out.push(body);
+  }
+  return out;
+}
+
+/** Най-големият балансиран JSON в текст (започва от първия { или [). */
+function biggestJson(text: string): unknown | null {
+  for (const startCh of ['{', '[']) {
+    const start = text.indexOf(startCh);
+    if (start < 0) continue;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = start; i < text.length && i < start + 600_000; i++) {
+      const c = text[i]!;
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{' || c === '[') depth++;
+      else if (c === '}' || c === ']') {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(text.slice(start, i + 1));
+          } catch {
+            return null;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+const NAME_KEYS = ['name', 'title', 'productName', 'product_name', 'label', 'наименование'];
+const PRICE_KEYS = ['price', 'final_price', 'finalPrice', 'priceValue', 'currentPrice', 'salePrice', 'priceWithVat', 'priceWithTax', 'minPrice', 'value', 'amount'];
+const OLD_PRICE_KEYS = ['oldPrice', 'old_price', 'regularPrice', 'regular_price', 'listPrice', 'list_price', 'compareAtPrice', 'priceBefore', 'highPrice'];
+const IMAGE_KEYS = ['image', 'imageUrl', 'image_url', 'img', 'photo', 'thumbnail', 'picture', 'mainImage', 'images'];
+
+function numFrom(v: unknown): number | undefined {
+  if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : undefined;
+  if (typeof v === 'string') {
+    const p = parsePrice(v);
+    return p && p > 0 ? p : undefined;
+  }
+  return undefined;
+}
+
+function firstImageIn(v: unknown, depth = 0): string | undefined {
+  if (depth > 4) return undefined;
+  if (typeof v === 'string') return /\.(jpe?g|png|webp|avif)(\?|$)/i.test(v) || /^https?:\/\//i.test(v) ? v : undefined;
+  if (Array.isArray(v)) {
+    for (const it of v) {
+      const got = firstImageIn(it, depth + 1);
+      if (got) return got;
+    }
+    return undefined;
+  }
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    for (const k of ['url', 'src', 'href', 'path', ...IMAGE_KEYS]) {
+      const got = firstImageIn(o[k], depth + 1);
+      if (got) return got;
+    }
+  }
+  return undefined;
+}
+
+function currencyIn(v: unknown, depth = 0): string | undefined {
+  if (depth > 3 || !v || typeof v !== 'object') return undefined;
+  const o = v as Record<string, unknown>;
+  for (const k of ['currency', 'currencyCode', 'currency_code', 'priceCurrency']) {
+    if (typeof o[k] === 'string' && /^[A-Za-z]{3}$/.test(o[k] as string)) return String(o[k]);
+  }
+  for (const val of Object.values(o)) {
+    const got = currencyIn(val, depth + 1);
+    if (got) return got;
+  }
+  return undefined;
+}
+
+/** Търси цена в обект (вкл. вложени `price: {value, currency}` и `offers`). */
+function priceIn(obj: Record<string, unknown>, depth = 0): number | undefined {
+  if (depth > 3) return undefined;
+  for (const k of PRICE_KEYS) {
+    if (k in obj && !OLD_PRICE_KEYS.includes(k)) {
+      const n = numFrom(obj[k]);
+      if (n !== undefined) return n;
+      // `price: {value: 12.5, currency: 'EUR'}` или `price: {final: ...}`
+      const inner = obj[k];
+      if (inner && typeof inner === 'object') {
+        const nested = priceIn(inner as Record<string, unknown>, depth + 1);
+        if (nested !== undefined) return nested;
+      }
+    }
+  }
+  for (const k of ['offers', 'prices', 'priceInfo', 'price_range', 'minimum_price', 'final_price', 'data']) {
+    const inner = obj[k];
+    if (inner && typeof inner === 'object') {
+      const nested = priceIn(inner as Record<string, unknown>, depth + 1);
+      if (nested !== undefined) return nested;
+    }
+  }
+  return undefined;
+}
+
+function nameIn(obj: Record<string, unknown>, depth = 0): string | undefined {
+  for (const k of NAME_KEYS) {
+    const v = obj[k];
+    if (typeof v === 'string' && v.trim().length >= 2) return v.trim();
+  }
+  if (depth === 0) return undefined;
+  return undefined;
+}
+
+/** Върви по JSON-а и събира всичко, което прилича на продукт (име + цена). */
+function huntProducts(node: unknown, out: RawProduct[], base: string, depth = 0): void {
+  if (depth > 9 || out.length > 400) return;
+  if (Array.isArray(node)) {
+    for (const it of node) huntProducts(it, out, base, depth + 1);
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  const obj = node as Record<string, unknown>;
+
+  const name = nameIn(obj);
+  if (name) {
+    const price = priceIn(obj);
+    if (price !== undefined && price > 0 && price < 200_000) {
+      const img = firstImageIn(obj[IMAGE_KEYS.find((k) => k in obj) ?? 'image'] ?? obj.image ?? obj.images ?? obj.thumbnail, 0);
+      const url =
+        (typeof obj.url === 'string' && obj.url) ||
+        (typeof obj.link === 'string' && obj.link) ||
+        (typeof obj.href === 'string' && obj.href) ||
+        (typeof obj.slug === 'string' && obj.slug) ||
+        base;
+      out.push({
+        sourceUrl: resolveUrl(String(url), base) ?? base,
+        title: name,
+        description: typeof obj.description === 'string' ? stripCssRules(obj.description).slice(0, 2000) : undefined,
+        price,
+        currency: currencyIn(obj) ?? 'EUR',
+        imageUrl: img ? resolveUrl(img, base) : undefined,
+        breadcrumb: typeof obj.category === 'string' ? obj.category : undefined,
+        via: 'embedded-json',
+      });
+    }
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') huntProducts(v, out, base, depth + 1);
+  }
+}
+
+/** Всички продукти, които успеем да извадим от JSON-а, вграден в страницата. */
+export function extractEmbeddedProducts(html: string, pageUrl: string): RawProduct[] {
+  const out: RawProduct[] = [];
+  for (const body of jsonBodies(html)) {
+    const parsed = biggestJson(body);
+    if (parsed) huntProducts(parsed, out, pageUrl, 0);
+    if (out.length > 400) break;
+  }
+  // Махаме боклука и повторенията — иначе една карта влиза 5 пъти.
+  const seen = new Set<string>();
+  return out.filter((p) => {
+    if (!looksLikeJunkProduct(p)) return false;
+    const key = `${(p.title ?? '').toLowerCase()}|${p.price}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Избира най-подходящия продукт от вградения JSON за дадена страница. */
+export function pickBestEmbedded(items: RawProduct[], hint?: string): RawProduct | null {
+  if (!items.length) return null;
+  if (hint) {
+    const h = hint.toLowerCase().trim();
+    const exact = items.find((p) => (p.title ?? '').toLowerCase().trim() === h);
+    if (exact) return exact;
+    const near = items.find((p) => {
+      const t = (p.title ?? '').toLowerCase();
+      return t.length > 4 && (t.includes(h.slice(0, 18)) || h.includes(t.slice(0, 18)));
+    });
+    if (near) return near;
+  }
+  // Иначе: този с най-много данни (снимка + описание) и разумна цена.
+  return [...items].sort((a, b) => scoreProduct(b) - scoreProduct(a))[0] ?? null;
+}
+
+/** Колко „истински“ изглежда един продукт (за подреждане и за проверки). */
+export function scoreProduct(p: { title?: string; price?: number; imageUrl?: string; description?: string }): number {
+  let s = 0;
+  if (p.imageUrl) s += 3;
+  if (p.description && p.description.length > 40) s += 2;
+  if (p.price && p.price > 1) s += 2;
+  const t = p.title ?? '';
+  if (t.length >= 8 && t.length <= 120) s += 2;
+  if (t.split(/\s+/).length >= 2) s += 1;
+  return s;
+}
+
+/** Маха категориите/банерите с цена — за да не влизат в обявите. */
+function clean(products: RawProduct[]): RawProduct[] {
+  return products.filter((p) => !!p.title && !looksLikeJunkProduct(p));
+}
+
+/**
+ * Боклук ли е това „продукт“?
+ *
+ * Реални случаи, които това спира (иначе влизат в приложението като оферти):
+ *   • zora.bg → „A++“ (енергиен клас от категорийна картинка) за 239 €;
+ *   • bauhaus.bg → „Навеси за автомобили“ (категория, цена от рекламна картинка);
+ *   • technomarket.bg → заглавие „1111111“.
+ */
+export function looksLikeJunkProduct(p: { title?: string; price?: number; imageUrl?: string }): boolean {
+  const t = (p.title ?? '').replace(/\s+/g, ' ').trim();
+  if (t.length < 4 || t.length > 200) return true;
+  // Трябва да има поне 3 букви/цифри в поне две „думи“ ИЛИ една дълга дума.
+  const letters = (t.match(/[A-Za-zА-Яа-яЁё0-9]/g) ?? []).length;
+  if (letters < 4) return true; // „A++“, „1111111“
+  if (/^[\d\s.,+-]+$/.test(t)) return true; // само числа
+  if (/^(категория|всички|всички продукти|category|каталог|catalog|разгледай|виж всички)\b/i.test(t)) return true;
+  const price = p.price ?? 0;
+  if (!price || price <= 0 || price > 200_000) return true;
+  // Снимка от CMS/банер/икона/категория не е продуктова снимка.
+  const img = p.imageUrl ?? '';
+  if (img && /\/(cms|content\/images|banner|banners|slider|sprite|icon|icons|logo|placeholder|category_property|no[-_]?image|default)\//i.test(img)) {
+    return true;
+  }
+  return false;
+}
+
 export function parseProductPage(html: string, pageUrl: string, selectors: Record<string, string> = {}): RawProduct {
   const jsonld = extractJsonLd(html);
   const product = jsonld.find((j) => j.name);
@@ -1695,13 +1962,21 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
 
   const fromSel = (key: string) => (selectors[key] ? selectFirst(html, selectors[key]!) : undefined);
 
+  // Данните може да са в JSON, вграден в страницата (Next.js/Nuxt/Angular SSR):
+  // тогава в HTML-а няма видима цена, но в JSON-а я ИМА. Пускаме лова само ако
+  // страницата изобщо съдържа такъв JSON — иначе е излишно ровене.
+  const embedded = /__(NUXT|NEXT_DATA|INITIAL_STATE)__|window\.__|application\/ld\+json/i.test(html)
+    ? pickBestEmbedded(extractEmbeddedProducts(html, pageUrl), meta['og:title'] ?? meta.title)
+    : null;
+
   const title =
     fromSel('title') ??
     product?.name ??
     meta['og:title'] ??
     selectFirst(html, 'h1') ??
     (meta.title ? htmlToText(meta.title) : undefined) ??
-    micro.title;
+    micro.title ??
+    embedded?.title;
 
   let rawDesc =
     fromSel('description') ??
@@ -1723,7 +1998,8 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
     resolveUrl(meta['og:image:secure_url'] ?? meta['og:image'] ?? meta['twitter:image'], pageUrl) ??
     resolveUrl(micro.imageUrl, pageUrl) ??
     // Последна надежда — първата голяма снимка в страницата (и lazy-load вариантите).
-    extractGenericImage(html, pageUrl);
+    extractGenericImage(html, pageUrl) ??
+    resolveUrl(embedded?.imageUrl, pageUrl);
 
   const offersPrice = fromOffers(product?.offers);
   // Редовната (зачертана) цена при промоция — за „платено ↔ обичайна“.
@@ -1731,11 +2007,12 @@ export function parseProductPage(html: string, pageUrl: string, selectors: Recor
   const priceFromSel = parsePrice(fromSel('price'));
   const priceFromMeta = parsePrice(meta['product:price:amount'] ?? meta['og:price:amount']);
   const priceFromMicro = micro.price;
-  let price = priceFromSel ?? offersPrice.price ?? priceFromMeta ?? priceFromMicro;
+  let price = priceFromSel ?? offersPrice.price ?? priceFromMeta ?? priceFromMicro ?? embedded?.price;
   // Дали цената е от структурирани данни (вярна) или от обща евристика (проверява се долу).
   let priceWeak = false;
 
-  let currency: string | undefined = offersPrice.currency ?? meta['product:price:currency'] ?? meta['og:price:currency'];
+  let currency: string | undefined =
+    offersPrice.currency ?? meta['product:price:currency'] ?? meta['og:price:currency'] ?? embedded?.currency;
 
   // Класове, които почти винаги носят истинската цена (WooCommerce, Shopify теми,
   // стари магазини). Редът е от най-специфичния към най-общия.
@@ -2565,7 +2842,9 @@ export async function runJob(jobId: string): Promise<void> {
           const home = await politeFetch(job.url, fo);
           // Първо най-бързото: продуктите, изброени в самия листинг. За
           // PrestaShop и повечето магазини това стига — една заявка вместо 30.
-          const cards = extractListingProducts(home.text, home.url);
+          // ВАЖНО: картите често съдържат и категории с цена от рекламна картинка
+          // (bauhaus.bg: „Навеси за автомобили“ 14.83 €). Такива НЕ са продукти.
+          const cards = extractListingProducts(home.text, home.url).filter((c) => !looksLikeJunkProduct(c));
           if (cards.length >= 2) {
             products = cards.slice(0, limit);
             strategy = 'listing-cards';
@@ -2600,14 +2879,73 @@ export async function runJob(jobId: string): Promise<void> {
         strategy = 'listing';
       }
 
+      // Последна стъпка преди да се откажем: ако сайтът се рисува с JavaScript,
+      // HTTP-отговорът е празна черупка. Отваряме началния адрес с истински браузър.
+      if (!products.length && !urls.length && browserAvailable()) {
+        await logLine(jobId, 'В HTTP отговора няма продукти — сайтът вероятно е JavaScript. Отварям го с истински браузър.');
+        const r = await renderHtml(job.url, { waitMs: 1500 });
+        if (r?.html) {
+          noteVisited(jobId);
+          const deepCards = extractListingProducts(r.html, r.url).filter((c) => !looksLikeJunkProduct(c));
+          const deepJson = extractEmbeddedProducts(r.html, r.url);
+          if (deepCards.length >= 2) {
+            products = deepCards.slice(0, limit);
+            strategy = 'render-cards';
+          } else if (deepJson.length >= 2) {
+            products = deepJson.slice(0, limit);
+            strategy = 'render-json';
+          } else {
+            const links = extractProductLinks(r.html, r.url, o.selectors?.list);
+            if (links.length) {
+              urls = links;
+              strategy = 'render-listing';
+            }
+          }
+          await logLine(jobId, `След рендиране: ${products.length} продукта в картите/JSON-а, ${urls.length} връзки.`);
+        } else {
+          await logLine(jobId, 'Браузърът не успя да отвори сайта (или рендирането е изключено).');
+        }
+      }
+
+      // Последна инстанция: сайтът може да блокира нашия сървър (Cloudflare).
+      // Apify с жилищно прокси минава оттам.
+      if (!products.length && !urls.length && (await apifyReady()) && (await apifyBudgetAllows(0.2)).allowed) {
+        await logLine(jobId, 'Пробвам през Apify (истински браузър + residential IP)…');
+        const r = await apifyRenderHtml([job.url], { resident: true });
+        if (r.usd > 0) await addApifySpend(r.usd, `${job.domain}: начален адрес`);
+        const page = r.pages.find((x) => x.html);
+        if (page?.html) {
+          noteVisited(jobId);
+          const cards = clean(extractListingProducts(page.html, page.url || job.url));
+          const emb = extractEmbeddedProducts(page.html, page.url || job.url);
+          if (cards.length >= 1) {
+            products = cards.slice(0, limit);
+            strategy = 'apify';
+          } else if (emb.length >= 1) {
+            products = emb.slice(0, limit);
+            strategy = 'apify';
+          } else {
+            const links = extractProductLinks(page.html, page.url || job.url, o.selectors?.list);
+            if (links.length) {
+              urls = links;
+              strategy = 'apify';
+            }
+          }
+          await logLine(jobId, `Apify: ${products.length} продукта, ${urls.length} връзки.`);
+        } else if (r.reason) {
+          await logLine(jobId, `Apify не успя: ${r.reason}`);
+        }
+      }
+
       if (!products.length && !urls.length) {
         await syncVisited(jobId);
         await setStatus(jobId, 'failed', {
           error:
             `Не намерих продукти в ${job.domain}. Пробвах: Shopify каталог, WooCommerce, магазинни ` +
             `фийдове (Google/RSS), Magento GraphQL, sitemap (вкл. от robots.txt), категории, връзки в ` +
-            `листинга и карти в листинга. Най-честата причина: сайтът е с JavaScript ` +
-            `(съдържанието идва чак след зареждане), или е нестандартен. Тогава дай ръчни селектори ` +
+            `листинга, карти в листинга, вграден JSON и отваряне с истински браузър. ` +
+            `Най-честите причини: сайтът блокира датацентъра (Cloudflare) — тогава го пусни ` +
+            `през „Обходи от моя компютър“; или е нестандартен — тогава дай ръчни селектори ` +
             `(list: a.product@href, price: .price@text, image: img@src).`,
           finished_at: new Date(),
         });
@@ -2633,6 +2971,15 @@ export async function runJob(jobId: string): Promise<void> {
       }
       if (!products.length) {
       const maxRead = Math.min(urls.length, limit * 2, o.maxPages * 60);
+      // Колко страници имаме право да отворим с истински браузър. Всяко отваряне
+      // струва ~5 сек и ~200 MB памет — затова има твърд таван.
+      const renderCap = Math.min(limit, 12);
+      let renders = 0;
+      const canRender = () => renders < renderCap && browserAvailable();
+      // Страниците, които не успяхме да прочетем (JavaScript цена или блокировка).
+      // Накрая, ако има бюджет, ги отваряме наведнъж през Apify.
+      const forApify: string[] = [];
+      let blocked = false;
       for (const url of urls.slice(0, maxRead)) {
         if (await isCancelled(jobId)) {
           await logLine(jobId, 'Спряно от потребителя.');
@@ -2641,11 +2988,12 @@ export async function runJob(jobId: string): Promise<void> {
         if (products.length >= limit) break;
 
         let parsed: RawProduct | null = null;
+        // OpenCart: връзките в листинга водят към AJAX „бърз преглед“ —
+        // истинската страница с цената е product/product със същия product_id.
+        const fetchUrl = realProductUrl(url);
         try {
-          // OpenCart: връзките в листинга водят към AJAX „бърз преглед“ —
-          // истинската страница с цената е product/product със същия product_id.
-          const fetchUrl = realProductUrl(url);
           const res = await politeFetch(fetchUrl, fo);
+          if (res.status === 403 || res.status === 429 || res.status === 503) blocked = true;
           if (res.ok && res.text) parsed = parseProductPage(res.text, res.url, o.selectors ?? {});
           if (!strategy) strategy = parsed?.via ?? 'heuristics';
         } catch (err) {
@@ -2654,7 +3002,33 @@ export async function runJob(jobId: string): Promise<void> {
           await syncVisited(jobId);
           continue;
         }
-        if (!parsed) continue;
+        // Магазин, който се рисува с JavaScript: в HTML-а няма цена (technomarket.bg,
+        // technopolis.bg, bauhaus.bg…). Отваряме страницата с истински браузър и
+        // четем пак — там цената вече я има, защото JavaScript-ът е свършил работа.
+        if (parsed && !parsed.price && canRender()) {
+          renders++;
+          const r = await renderHtml(fetchUrl, { waitMs: 900 });
+          if (r?.html) {
+            noteVisited(jobId);
+            const deep = parseProductPage(r.html, r.url, o.selectors ?? {});
+            if (deep.price && !looksLikeJunkProduct(deep)) {
+              parsed = deep;
+              if (!strategy || ['heuristics', 'sitemap', 'listing'].includes(strategy)) strategy = 'render';
+              await logLine(jobId, `Цената не беше в HTML-а — взех я след като отворих страницата с браузър (${renders}/${renderCap}).`);
+            }
+          }
+        }
+        // Без цена след нашите опити → оставяме я за Apify (наведнъж, най-накрая).
+        if (parsed && !parsed.price && forApify.length < 8) forApify.push(fetchUrl);
+        if (!parsed) {
+          if (forApify.length < 8) forApify.push(fetchUrl);
+          continue;
+        }
+        // Боклук (категория, енергиен клас, банер с цена) не влиза в обявите.
+        if (looksLikeJunkProduct(parsed)) {
+          await bump(jobId, 'skipped');
+          continue;
+        }
         // Категория/марка от sitemap-а не е продукт — не влиза в обявите.
         // Приемаме страницата, ако адресът ѝ изглежда продуктов ИЛИ данните ѝ са добри.
         if (strategy === 'sitemap' && !sitemapFromProducts && !looksLikeProductUrl(url)) {
@@ -2669,6 +3043,34 @@ export async function runJob(jobId: string): Promise<void> {
         products.push(parsed);
         await bump(jobId, 'parsed');
         await syncVisited(jobId);
+      }
+
+      // Накрая: адресите, които не успяхме да прочетем (JS цена / блокировка),
+      // се отварят НАВЕДНЪЖ през Apify — един actor run вместо осем заявки.
+      if (forApify.length && products.length < limit && (await apifyReady()) && (await apifyBudgetAllows(0.2)).allowed) {
+        await logLine(
+          jobId,
+          `Останали ${forApify.length} непрочетени страници — отварям ги през Apify (истински браузър${blocked ? ' + residential IP' : ''}).`
+        );
+        const r = await apifyRenderHtml(forApify, { resident: blocked });
+        if (r.usd > 0) await addApifySpend(r.usd, `${job.domain}: ${forApify.length} стр.`);
+        for (const page of r.pages) {
+          if (!page.html || products.length >= limit) continue;
+          const deep = parseProductPage(page.html, page.url || job.url, o.selectors ?? {});
+          const cards = clean(extractListingProducts(page.html, page.url || job.url));
+          const emb = extractEmbeddedProducts(page.html, page.url || job.url);
+          const best =
+            (deep.title && deep.price && !looksLikeJunkProduct(deep) && deep) ||
+            cards[0] ||
+            emb[0];
+          if (!best) continue;
+          products.push(best);
+          await bump(jobId, 'parsed');
+        }
+        if (r.pages.length) {
+          strategy = strategy && strategy !== 'heuristics' ? strategy : 'apify';
+          await logLine(jobId, `Apify върна ${r.pages.length} страници (${r.usd.toFixed(3)} $).`);
+        }
       }
       } // край на „ако картите от листинга не са ни дали продуктите“
     } else {

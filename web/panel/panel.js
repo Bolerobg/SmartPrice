@@ -2510,7 +2510,7 @@ async function renderScraper(box) {
     </div>
     </div><!-- /sc-pane-new -->
 
-    <div class="sc-pane" id="sc-pane-discover">${scraperDiscoverHtml(candidates.items || [], candidates.queue || {})}</div>
+    <div class="sc-pane" id="sc-pane-discover">${scraperDiscoverHtml(candidates.items || [], candidates.queue || {}, candidates.apify || {})}</div>
 
     <div class="sc-pane" id="sc-pane-live">
       <div id="sc-running">${scraperRunningHtml(runningList.items || [])}</div>
@@ -2701,6 +2701,8 @@ function bindScraperTabs() {
 
 const SHOP_STATUS = {
   ok: ['Сканируем сега', 'pill-green'],
+  robots: ['Само без robots.txt', 'pill-gold'],
+  apify: ['Сканируем през Apify', 'pill-cyan'],
   local: ['Иска домашен IP', 'pill-gold'],
   manual: ['Трябват селектори', 'pill-dim'],
   error: ['Не отговаря', 'pill-red'],
@@ -2729,9 +2731,12 @@ function scraperCandidateRowHtml(c) {
     .join('');
 
   const btns = [];
-  if (c.status === 'ok') {
+  if (c.status === 'ok' || c.status === 'apify') {
     btns.push(`<button class="btn btn-sm btn-primary" data-act="scan" data-domain="${d}">▶ Сканирай сега</button>`);
     btns.push(`<button class="btn btn-sm" data-act="sched" data-domain="${d}">📅 Разписание</button>`);
+  }
+  if (c.status === 'robots') {
+    btns.push(`<button class="btn btn-sm btn-primary" data-act="scan-norobots" data-domain="${d}">▶ Сканирай (без robots.txt)</button>`);
   }
   if (c.status === 'local') {
     btns.push(`<button class="btn btn-sm btn-warn" data-act="queue" data-domain="${d}">🖥️ Обходи от моя компютър</button>`);
@@ -2761,12 +2766,20 @@ function scraperCandidateRowHtml(c) {
 }
 
 /** Списъкът с намерени магазини — групиран по присъда, за да се вижда кои стават. */
-function scraperCandidatesHtml(items, queue) {
+function scraperCandidatesHtml(items, queue, apify) {
   const list = items || [];
   const q = queue || {};
-  const ok = list.filter((c) => c.status === 'ok');
+  const ap = apify || {};
+  const apifyLine = ap.limit
+    ? `<span class="pill pill-cyan" title="Дневен лимит за Apify — скенерът спира сам, когато го стигне">☁️ Apify днес: $${Number(ap.spentToday || 0).toFixed(3)} / $${Number(ap.limit).toFixed(2)} · месец $${Number(ap.spentMonth || 0).toFixed(2)}</span>`
+    : ap.ready === false
+      ? `<span class="pill pill-dim">Apify: няма токен</span>`
+      : '';
+  const ok = list.filter((c) => c.status === 'ok' || c.status === 'robots' || c.status === 'apify');
   const loc = list.filter((c) => c.status === 'local');
-  const rest = list.filter((c) => c.status !== 'ok' && c.status !== 'local');
+  const rest = list.filter(
+    (c) => c.status !== 'ok' && c.status !== 'local' && c.status !== 'robots' && c.status !== 'apify'
+  );
 
   const head = `<div class="hint" style="margin:0 0 10px">
     ${
@@ -2776,6 +2789,7 @@ function scraperCandidatesHtml(items, queue) {
         : 'Още нищо не е търсено. Напиши ключова дума горе и натисни „Търси и провери“.'
     }
     ${q.pending ? ` · 🖥️ чакат моя компютър: <strong>${num(q.pending)}</strong>` : ''}
+    ${apifyLine ? ` ${apifyLine}` : ''}
   </div>`;
 
   if (!list.length) return head;
@@ -2797,7 +2811,7 @@ function scraperCandidatesHtml(items, queue) {
 }
 
 /** Самият таб: търсене по ключова дума + проверка на дадени адреси. */
-function scraperDiscoverHtml(items, queue) {
+function scraperDiscoverHtml(items, queue, apify) {
   return `
     <div class="card" style="border-color:rgba(251,191,36,.45)">
       <div class="card-title">🔎 Търси магазини, които стават за сканиране</div>
@@ -2827,7 +2841,7 @@ function scraperDiscoverHtml(items, queue) {
         <button class="btn" id="sd-bulk" title="Задай разписание за всички намерени сканируеми магазини">📅 Разписание за всички сканируеми</button>
         <span class="hint" style="margin:0">Проверката прави истински заявки към сайтовете — учтива е и помни резултата 12 часа.</span>
       </div>
-      <div id="sd-out" style="margin-top:12px">${scraperCandidatesHtml(items, queue)}</div>
+      <div id="sd-out" style="margin-top:12px">${scraperCandidatesHtml(items, queue, apify)}</div>
     </div>`;
 }
 
@@ -2858,7 +2872,7 @@ function bindScraperDiscovery() {
         const locN = (r.items || []).filter((i) => i.status === 'local').length;
         toast(`Проверени ${r.checked} · сканируеми ${okN}${locN ? ` · за моя компютър ${locN}` : ''}`);
         if (r.note) toast(r.note, 'warn');
-        out.innerHTML = scraperCandidatesHtml(r.items || [], r.queue || {});
+        out.innerHTML = scraperCandidatesHtml(r.items || [], r.queue || {}, r.apify || {});
       } catch (e) {
         out.innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
       }
@@ -2877,10 +2891,13 @@ function bindScraperDiscovery() {
       const count = Number(countEl ? countEl.value : 20) || 20;
       btn.disabled = true;
       try {
-        if (act === 'scan') {
+        if (act === 'scan' || act === 'scan-norobots') {
+          const body = { count };
+          // Сайт, който забранява на ботове в robots.txt, минава само с тази отметка.
+          if (act === 'scan-norobots') body.options = { respectRobots: false };
           const r = await api(`/scraper/candidates/${encodeURIComponent(domain)}/scan`, {
             method: 'POST',
-            body: { count },
+            body,
           });
           toast(`Обиколката тръгна: ${r.domain}`);
           scraperJobId = r.jobId;
@@ -2914,7 +2931,7 @@ function bindScraperDiscovery() {
           toast(`Проверявам пак ${domain}…`);
           const r = await api(`/scraper/candidates/${encodeURIComponent(domain)}/rescan`, { method: 'POST' });
           const fresh = await api('/scraper/candidates?limit=40');
-          out.innerHTML = scraperCandidatesHtml(fresh.items || [], fresh.queue || {});
+          out.innerHTML = scraperCandidatesHtml(fresh.items || [], fresh.queue || {}, fresh.apify || {});
           const first = (r.items || [])[0];
           toast(`Готово: ${first ? first.status : '—'}${first && first.reason ? ` — ${first.reason.slice(0, 60)}` : ''}`);
           return;

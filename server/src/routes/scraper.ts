@@ -5,6 +5,7 @@ import { badRequest, notFound } from '../lib/errors.js';
 import { audit, requireAdminPanel } from '../lib/admin.js';
 import { importExternalProducts } from '../lib/externalImport.js';
 import { saveLocalShopPrices } from '../lib/shopPrice.js';
+import { apifyDailyLimit, apifyReady, apifySpent, setApifyDailyLimit } from '../lib/apifyBrowser.js';
 import {
   discoverShops,
   finishLocalScan,
@@ -873,6 +874,23 @@ export default async function scraperRoutes(app: FastifyInstance) {
     return { domain, site: site ?? null, ...stats };
   });
 
+  /* ------------------------------------------------------ Apify (платено) --- */
+
+  /** Колко е похарчено и колко е лимитът — за да не изяде скенерът целия план. */
+  app.get('/api/admin/scraper/apify', async (req) => {
+    await requireAdminPanel(req);
+    const [ready, limit, spent] = await Promise.all([apifyReady(), apifyDailyLimit(), apifySpent()]);
+    return { ready, limit, spentToday: spent.today, spentMonth: spent.month };
+  });
+
+  app.post('/api/admin/scraper/apify/limit', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { usd } = z.object({ usd: z.coerce.number().min(0).max(19) }).parse(req.body ?? {});
+    await setApifyDailyLimit(usd);
+    await audit({ admin, action: 'scraper.apify_limit', targetLabel: String(usd), ip: req.ip });
+    return { ok: true, limit: await apifyDailyLimit() };
+  });
+
   /* -------------------------------------------------- едновременно вървящи */
 
   app.get('/api/admin/scraper/running', async (req) => {
@@ -936,7 +954,12 @@ export default async function scraperRoutes(app: FastifyInstance) {
       })
       .parse(req.query ?? {});
     const items = await listCandidates(q);
-    return { items, queue: await localQueueStats() };
+    const spent = await apifySpent();
+    return {
+      items,
+      queue: await localQueueStats(),
+      apify: { ready: await apifyReady(), limit: await apifyDailyLimit(), spentToday: spent.today, spentMonth: spent.month },
+    };
   });
 
   app.post('/api/admin/scraper/candidates/:domain/reject', async (req) => {

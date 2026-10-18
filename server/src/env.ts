@@ -68,6 +68,18 @@ const schema = z.object({
   // Твърд таван на разхода на отговор (вкл. „мислене“).
   ASSISTANT_MAX_TOKENS: z.coerce.number().int().min(200).max(4000).default(1800),
 
+  // --- Рендиране с истински браузър (за магазини на JavaScript) -------------
+  // Големите вериги (technomarket.bg, technopolis.bg, bauhaus.bg…) връщат HTML
+  // БЕЗ цена — тя се появява чак след като браузърът изпълни JavaScript-а.
+  // Ако това е изключено или Chromium липсва, скраперът просто пропуска стъпката
+  // (и го казва честно в дневника), вместо да се чупи.
+  SCRAPER_BROWSER: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
+  CHROMIUM_PATH: z.string().default('/usr/bin/chromium'),
+  SCRAPER_RENDER_TIMEOUT_MS: z.coerce.number().int().min(5000).max(60000).default(25000),
+
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
   STRIPE_CURRENCY: z.string().default('eur'),

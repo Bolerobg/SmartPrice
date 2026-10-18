@@ -17,11 +17,15 @@
  */
 import { many, one, query } from '../db.js';
 import { env, features } from '../env.js';
+import { addApifySpend, apifyBudgetAllows, apifyReady, apifyRenderHtml } from './apifyBrowser.js';
+import { browserAvailable, renderHtml } from './render.js';
 import {
   collectFromOpencart,
   collectFromSitemap,
   extractCategoryLinks,
+  extractEmbeddedProducts,
   extractListingProducts,
+  looksLikeJunkProduct,
   extractProductLinks,
   normalizeStartUrl,
   parseProductPage,
@@ -210,7 +214,7 @@ export async function aiSuggestShops(keyword: string, count = 10): Promise<Found
 
 /* ============================================== може ли да се сканира сайтът */
 
-export type CheckStatus = 'ok' | 'local' | 'manual' | 'error';
+export type CheckStatus = 'ok' | 'local' | 'manual' | 'error' | 'robots' | 'apify';
 
 export interface SampleProduct {
   title?: string;
@@ -276,8 +280,20 @@ function toSample(products: RawProduct[], base: string): SampleProduct[] {
     }));
 }
 
+/**
+ * Годи ли се резултатът за „този сайт става“?
+ *
+ * Достатъчно е ЕДИН истински продукт (заглавие + цена + не е боклук). Проверката
+ * `looksLikeJunkProduct` е важна: без нея bauhaus.bg минаваше за сканируем заради
+ * категорията „Навеси за автомобили“ с цена от рекламна картинка.
+ */
 function good(products: RawProduct[] | null): boolean {
-  return !!products && products.some((p) => !!p.title && (p.price ?? 0) > 0);
+  return !!products && products.some((p) => !!p.title && (p.price ?? 0) > 0 && !looksLikeJunkProduct(p));
+}
+
+/** Маха категориите/банерите с цена от резултата, за да не заблуждават. */
+function clean(products: RawProduct[]): RawProduct[] {
+  return products.filter((p) => p.title && !looksLikeJunkProduct(p));
 }
 
 /**
@@ -305,13 +321,25 @@ export async function checkShop(
     reason: 'Не успях да отворя сайта.',
   };
 
+  /**
+   * Ако сайтът е станал само с изключен robots.txt, го показваме като отделен
+   * статус — човекът трябва да знае, че обиколката ще мине само с тази отметка.
+   */
+  const finish = (r: ShopCheck): ShopCheck =>
+    r.status === 'ok' && robotsBlocked
+      ? { ...r, status: 'robots' as const, reason: `Работи, но само с ИЗКЛЮЧЕН robots.txt (сайтът забранява на ботове). ${r.reason}` }
+      : r;
+
   // Проверката върви в HTTP заявка през Cloudflare, която се реже след ~100 сек.
   // Затова всяка заявка получава толкова време, колкото остава до крайния срок —
   // така една бавна страница не прахосва целия бюджет.
   const deadline = opts.deadline ?? Date.now() + 45_000;
   const left = () => deadline - Date.now();
+  // Ако robots.txt забранява на ботове (technopolis.bg), питаме с изключен robots —
+  // иначе сайтът изглежда „не става“, а всъщност става (панелът има тази опция).
+  let robotsBlocked = false;
   const fopts = (): FetchOpts => ({
-    respectRobots: true,
+    respectRobots: !robotsBlocked,
     delayMs: opts.delayMs ?? 200,
     timeoutMs: Math.max(2500, Math.min(12_000, left())),
     maxPages: 3,
@@ -332,17 +360,66 @@ export async function checkShop(
     if (res.url) base.url = res.url;
     if (!res.ok && !res.text.trim()) {
       base.reason = `Сайтът отговори с HTTP ${res.status} и празно тяло.`;
-      return base;
+      return finish(base);
     }
   } catch (err) {
     const msg = (err as Error).message ?? '';
-    base.status = 'error';
-    base.reason = /robots\.txt/i.test(msg) ? 'robots.txt на сайта забранява обхождането.' : msg;
-    return base;
+    if (!/robots\.txt/i.test(msg)) {
+      base.status = 'error';
+      base.reason = msg;
+      return finish(base);
+    }
+    // robots.txt забранява на ботове. Питаме още веднъж с изключен robots — така
+    // разбираме дали сайтът ИНАЧЕ става, вместо просто да го отпишем.
+    robotsBlocked = true;
+    try {
+      const res = await politeFetch(base.url, fopts());
+      home = res.text;
+      homeStatus = res.status;
+      base.pagesProbed++;
+      base.httpStatus = res.status;
+      if (res.url) base.url = res.url;
+    } catch (err2) {
+      base.status = 'robots';
+      base.reason = `robots.txt забранява обхождането, а с изключен robots страницата пак не се отвори (${(err2 as Error)
+        .message.slice(0, 70)}).`;
+      return finish(base);
+    }
   }
 
   // robots.txt може да е забранил само вътрешните адреси — тогава home е празен.
   base.platform = home ? detectPlatform(home) : 'other';
+
+  /**
+   * Пробва през Apify: истински браузър от тяхна машина, при нужда с жилищно
+   * (residential) прокси. Точно това минава Cloudflare, който не пуска сървъра.
+   * Плаща се — затова само когато има дневен бюджет.
+   */
+  const viaApify = async (resident: boolean): Promise<ShopCheck | null> => {
+    if (!(await apifyReady())) return null;
+    if (!(await apifyBudgetAllows(0.15)).allowed) return null;
+    const r = await apifyRenderHtml([base.url], { resident });
+    if (r.usd > 0) await addApifySpend(r.usd, `проверка ${base.domain}`);
+    const page = r.pages.find((x) => x.html);
+    if (!r.ok || !page?.html) return null;
+    const at = page.url || base.url;
+    const found = [...clean(extractListingProducts(page.html, at)), ...extractEmbeddedProducts(page.html, at)];
+    const single = parseProductPage(page.html, at, {});
+    if (single.title && single.price && !looksLikeJunkProduct(single)) found.push(single);
+    if (!good(found)) return null;
+    return {
+      ...base,
+      status: 'apify',
+      strategy: 'apify',
+      scrapable: true,
+      fromServer: true,
+      platform: detectPlatform(page.html),
+      pagesProbed: base.pagesProbed + 1,
+      productsFound: found.length,
+      sample: toSample(found, at),
+      reason: `Работи през Apify (истински браузър${resident ? ' + residential IP' : ''}) — сайтът не пуска нашия сървър.`,
+    };
+  };
 
   const wall = wallReason(homeStatus, home);
   if (wall) {
@@ -352,7 +429,11 @@ export async function checkShop(
     if (homeStatus >= 200 && homeStatus < 500) {
       base.reason += ' Ще го обходи домашният робот (scripts/scrape_local.py).';
     }
-    return base;
+    // Първо пробваме с Apify + residential — това е начинът да минем Cloudflare
+    // без да зависим от това дали домашният компютър е включен.
+    const ap = await viaApify(true);
+    if (ap) return finish(ap);
+    return finish(base);
   }
 
   const origin = new URL(base.url).origin;
@@ -383,7 +464,7 @@ export async function checkShop(
         base.productsFound = items!.length;
         base.sample = toSample(items!, base.url);
         base.reason = `Работи веднага от сървъра (${a.name}).`;
-        return base;
+        return finish(base);
       }
     } catch {
       /* следващата стратегия */
@@ -392,7 +473,7 @@ export async function checkShop(
 
   // ---- 3. Картите на началната страница (0 допълнителни заявки) ------------
   if (home) {
-    const cards = extractListingProducts(home, base.url);
+    const cards = clean(extractListingProducts(home, base.url));
     if (good(cards)) {
       base.status = 'ok';
       base.scrapable = true;
@@ -401,7 +482,50 @@ export async function checkShop(
       base.productsFound = cards.length;
       base.sample = toSample(cards, base.url);
       base.reason = 'Работи от картите на началната страница.';
-      return base;
+      return finish(base);
+    }
+  }
+
+  // ---- 3б. Вграден JSON в страницата (0 заявки) --------------------------
+  // Next.js/Nuxt/Angular SSR магазини слагат данните в JSON вътре в HTML-а.
+  if (home) {
+    const embedded = extractEmbeddedProducts(home, base.url);
+    if (good(embedded)) {
+      base.status = 'ok';
+      base.scrapable = true;
+      base.fromServer = true;
+      base.strategy = 'embedded-json';
+      base.productsFound = embedded.length;
+      base.sample = toSample(embedded, base.url);
+      base.reason = 'Работи от данните, вградени в страницата (JSON).';
+      return finish(base);
+    }
+  }
+
+  // ---- 3в. Истински браузър — сайтовете, които се рисуват с JavaScript -----
+  // technomarket.bg и подобни връщат HTML без цени; цените идват след като
+  // JavaScript-ът се изпълни. Затова тук отваряме страницата с Chromium.
+  if (browserAvailable()) {
+    const r = await renderHtml(base.url, { waitMs: 1500 });
+    if (r?.html) {
+      base.pagesProbed++;
+      const rendered = [
+        ...clean(extractListingProducts(r.html, r.url)),
+        ...extractEmbeddedProducts(r.html, r.url),
+      ];
+      const parsed = parseProductPage(r.html, r.url, {});
+      if (parsed.title && parsed.price && !looksLikeJunkProduct(parsed)) rendered.push(parsed);
+      if (good(rendered)) {
+        base.status = 'ok';
+        base.scrapable = true;
+        base.fromServer = true;
+        base.platform = detectPlatform(r.html);
+        base.strategy = 'render';
+        base.productsFound = rendered.length;
+        base.sample = toSample(rendered, r.url);
+        base.reason = 'Работи след отваряне с истински браузър (сайтът е JavaScript).';
+        return finish(base);
+      }
     }
   }
 
@@ -419,7 +543,7 @@ export async function checkShop(
         base.productsFound = items!.length;
         base.sample = toSample(items!, base.url);
         base.reason = `Работи от сървъра (${a.name}).`;
-        return base;
+        return finish(base);
       }
     } catch {
       /* следващата стратегия */
@@ -439,8 +563,18 @@ export async function checkShop(
           try {
             const page = await politeFetch(u, fopts());
             base.pagesProbed++;
-            const p = parseProductPage(page.text, page.url, {});
-            if (p.title && (p.price ?? 0) > 0) sampled.push(p);
+            let p = parseProductPage(page.text, page.url, {});
+            // Цената може да е само след като JavaScript-ът се изпълни
+            // (technomarket.bg) — тогава отваряме продуктовата страница с браузър.
+            if (!p.price && browserAvailable()) {
+              const r = await renderHtml(u, { waitMs: 900 });
+              if (r?.html) {
+                base.pagesProbed++;
+                const deep = parseProductPage(r.html, r.url, {});
+                if (deep.price) p = deep;
+              }
+            }
+            if (p.title && (p.price ?? 0) > 0 && !looksLikeJunkProduct(p)) sampled.push(p);
           } catch {
             /* пропускаме */
           }
@@ -453,7 +587,7 @@ export async function checkShop(
           base.productsFound = sm.urls.length;
           base.sample = toSample(sampled, base.url);
           base.reason = `Работи през sitemap (${sm.usedSitemap ?? 'sitemap.xml'}).`;
-          return base;
+          return finish(base);
         }
       }
     } catch {
@@ -478,7 +612,7 @@ export async function checkShop(
           base.productsFound = cards.length;
           base.sample = toSample(cards, base.url);
           base.reason = 'Работи от листинга на категория.';
-          return base;
+          return finish(base);
         }
         const links = extractProductLinks(page.text, page.url);
         for (const link of links.slice(0, 2)) {
@@ -494,13 +628,19 @@ export async function checkShop(
             base.productsFound = links.length;
             base.sample = toSample([p], base.url);
             base.reason = 'Работи през страница на продукт.';
-            return base;
+            return finish(base);
           }
         }
       } catch {
         /* следващата категория */
       }
     }
+  }
+
+  // ---- 5б. Apify без residential (по-евтино) — ако собственият браузър не помогна
+  {
+    const ap = await viaApify(false);
+    if (ap) return finish(ap);
   }
 
   // ---- 6. Не стана автоматично, но сайтът отговаря -----------------------
