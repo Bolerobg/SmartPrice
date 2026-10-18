@@ -192,13 +192,16 @@ export async function enrichObjects(limit = 10): Promise<EnrichResult> {
           .filter((h) => h && h.day && h.hours)
           .map((h) => ({ day: String(h.day), hours: String(h.hours) }))
       : null;
+    // ВНИМАНИЕ: всеки параметър трябва да се използва, иначе Postgres дава
+    // „could not determine data type of parameter $N“ (проверено на живо).
+    // Затова slug се смята от СЪЩИТЕ $1/$2, които отиват и в колоните.
     await query(
       `insert into place_enrichment (
          slug, place_name, city, address, neighborhood, latitude, longitude,
          rating, reviews_count, category, phone, website, hours, maps_url, image_url, updated_at
        ) values (
-         (select md5(lower($2) || '|' || lower($3))), $2, $3, $4, $5, $6, $7,
-         $8, $9, $10, $11, $12, $13::jsonb, $14, $15, now()
+         (select md5(lower($1) || '|' || lower($2))), $1, $2, $3, $4, $5, $6,
+         $7, $8, $9, $10, $11, $12::jsonb, $13, $14, now()
        )
        on conflict (slug) do update set
          address = excluded.address,
@@ -215,7 +218,6 @@ export async function enrichObjects(limit = 10): Promise<EnrichResult> {
          image_url = excluded.image_url,
          updated_at = now()`,
       [
-        t.slug,
         t.place_name.slice(0, 200),
         t.city.slice(0, 80),
         (row.address ?? '').slice(0, 300) || null,
