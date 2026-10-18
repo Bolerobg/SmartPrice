@@ -458,11 +458,20 @@ export async function buildPuzzle(raffleId: string): Promise<Tile[]> {
     tiles.push({ id: `t${tileSeq++}`, imageUrl: spare.images[0]!, pairId, label: spare.label });
   }
 
-  // Разсейващи: изображения от други продукти (без да повтаряме вече ползвани).
+  // Разсейващи: изображения от други продукти.
+  // ВАЖНО (проверено на живо 18.10.2026): разсейваща карта НЕ бива да показва
+  // СЪЩАТА снимка като продукт-двойка — иначе играчът вижда три еднакви карти,
+  // обръща две от тях и играта казва „грешно“ (двете изглеждат еднакви!).
+  // Затова: махаме вече ползваните продукти И вече ползваните снимки.
   const usedKeys = new Set(withPairs.slice(0, PUZZLE_PAIRS).map((g) => g.key));
+  const usedImages = new Set(
+    withPairs.slice(0, PUZZLE_PAIRS).flatMap((g) => g.images.slice(0, 2))
+  );
   const distractors: Tile[] = [];
   for (const group of groups) {
     if (usedKeys.has(group.key)) continue;
+    if (usedImages.has(group.images[0]!)) continue;
+    usedImages.add(group.images[0]!);
     distractors.push({
       id: `d${distractors.length}`,
       imageUrl: group.images[0]!,
