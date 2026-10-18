@@ -6,6 +6,7 @@ import { audit, requireAdminPanel } from '../lib/admin.js';
 import { importExternalProducts } from '../lib/externalImport.js';
 import { saveLocalShopPrices } from '../lib/shopPrice.js';
 import { apifyDailyLimit, apifyReady, apifySpent, setApifyDailyLimit } from '../lib/apifyBrowser.js';
+import { currentCursor, deleteCategoryMap, listCategoryMap, listCursors } from '../lib/scrapeCursor.js';
 import {
   discoverShops,
   finishLocalScan,
@@ -248,7 +249,11 @@ export default async function scraperRoutes(app: FastifyInstance) {
     const u = normalizeStartUrl(input.url);
     const domain = u.hostname.replace(/^www\./, '');
 
-    const options = await optionsForSite(domain, { ...(input.options ?? {}), count: input.count });
+    // Откъде да започне обиколката: ако човекът не е казал, продължаваме от
+    // запомнения курсор за този магазин (за да не връщаме същите продукти).
+    const withCursor: Record<string, unknown> = { ...(input.options ?? {}), count: input.count };
+    if (withCursor.startOffset === undefined) withCursor.startOffset = await currentCursor(domain);
+    const options = await optionsForSite(domain, withCursor);
 
     const job = await one<{ id: string }>(
       `insert into scrape_jobs (created_by, url, domain, mode, options, target_count, status)
@@ -891,6 +896,28 @@ export default async function scraperRoutes(app: FastifyInstance) {
     return { ok: true, limit: await apifyDailyLimit() };
   });
 
+  /* ------------------------------------------- 🧭 курсори и 🏷️ категории --- */
+
+  /** Докъде сме стигнали във всеки магазин (за панела). */
+  app.get('/api/admin/scraper/cursors', async (req) => {
+    await requireAdminPanel(req);
+    return { items: await listCursors(60) };
+  });
+
+  /** Съответствия „категория на магазина → наша категория“. */
+  app.get('/api/admin/scraper/categories', async (req) => {
+    await requireAdminPanel(req);
+    return { items: await listCategoryMap(300) };
+  });
+
+  app.delete('/api/admin/scraper/categories/:source', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { source } = z.object({ source: z.string().min(2).max(120) }).parse(req.params);
+    await deleteCategoryMap(source);
+    await audit({ admin, action: 'scraper.category_unmap', targetLabel: source, ip: req.ip });
+    return { ok: true };
+  });
+
   /* -------------------------------------------------- едновременно вървящи */
 
   app.get('/api/admin/scraper/running', async (req) => {
@@ -994,7 +1021,9 @@ export default async function scraperRoutes(app: FastifyInstance) {
 
     const u = normalizeStartUrl(`https://${domain}/`);
     const clean = u.hostname.replace(/^www\./, '');
-    const options = await optionsForSite(clean, { ...(input.options ?? {}), count: input.count });
+    const withCursor2: Record<string, unknown> = { ...(input.options ?? {}), count: input.count };
+    if (withCursor2.startOffset === undefined) withCursor2.startOffset = await currentCursor(clean);
+    const options = await optionsForSite(clean, withCursor2);
     const job = await one<{ id: string }>(
       `insert into scrape_jobs (created_by, url, domain, mode, options, target_count, status)
        values ($1,$2,$3,$4,$5::jsonb,$6,'queued') returning id::text`,

@@ -2743,6 +2743,9 @@ function scraperCandidateRowHtml(c) {
   }
   if (c.status === 'manual') {
     btns.push(`<button class="btn btn-sm" data-act="probe" data-domain="${d}">🔍 Проба със селектори</button>`);
+    // Сайт, който отговаря, но цените му идват от вътрешно API (bauhaus.bg,
+    // emag.bg, jysk.bg, praktis.bg), също може да се обходи от домашния робот.
+    btns.push(`<button class="btn btn-sm btn-warn" data-act="queue" data-domain="${d}">🖥️ Обходи от моя компютър</button>`);
   }
   btns.push(`<button class="btn btn-sm btn-ghost" data-act="rescan" data-domain="${d}">⟳ Провери пак</button>`);
   btns.push(`<button class="btn btn-sm btn-ghost" data-act="reject" data-domain="${d}">✕ Скрий</button>`);

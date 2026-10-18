@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { many, one, query, tx } from '../db.js';
 import { env, features } from '../env.js';
 import { addApifySpend, apifyBudgetAllows, apifyReady, apifyRenderHtml } from './apifyBrowser.js';
+import { advanceCursor } from './scrapeCursor.js';
 import { browserAvailable, renderHtml } from './render.js';
 import { putImage, publicUrl } from './storage.js';
 
@@ -3146,6 +3147,9 @@ export async function runJob(jobId: string): Promise<void> {
       jobId,
       `Прочетох ${products.length} продукта (стратегия: ${strategy || products[0]?.via}). Обходени страници: ${visitedCount(jobId)}.`
     );
+    // 🧭 Отместваме курсора: следващата обиколка на този магазин продължава
+    // напред, вместо да започва отначало и да внася същите продукти.
+    await advanceCursor(job.domain, products.length, products.length).catch(() => undefined);
 
     /* --------------------------------------------------- 2) AI обогатяване */
     let enriched: EnrichedItem[] = [];
