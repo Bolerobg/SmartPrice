@@ -688,6 +688,36 @@ export default function FeedScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* 🏷️ Продавам — входът е ВИНАГИ видим в лентата, не се крие в профила.
+              Досега човек не намираше откъде да пусне обява. */}
+          <View style={styles.sellCard}>
+            <View style={styles.sellIcon}>
+              <Ionicons name="pricetags" size={17} color={COLORS.black} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sellTitle} numberOfLines={1}>
+                Продавам нещо? Пусни обява 🏷️
+              </Text>
+              <Text style={styles.sellSub} numberOfLines={2}>
+                2 € за 60 дни · до 5 снимки · спираш я, когато я продадеш
+              </Text>
+              <TouchableOpacity
+                onPress={() => router.push('/listings' as never)}
+                activeOpacity={0.8}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={styles.sellMine}>Моите обяви →</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.sellBtn}
+              onPress={() => router.push('/listings/new' as never)}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.sellBtnText}>Пусни</Text>
+            </TouchableOpacity>
+          </View>
+
           {isToolsExpanded && (
             <>
               <View style={styles.quickUploadBar}>
@@ -1062,6 +1092,35 @@ export default function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
+  sellCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.greenBorder,
+    backgroundColor: 'rgba(34,197,94,0.09)',
+    marginBottom: 10,
+  },
+  sellIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.greenPrimary,
+  },
+  sellTitle: { color: COLORS.textPrimary, fontSize: 14.5, fontWeight: '900' },
+  sellSub: { color: COLORS.textSecondary, fontSize: 11.5, marginTop: 2, lineHeight: 15 },
+  sellMine: { color: COLORS.greenBright, fontSize: 11.5, fontWeight: '800', marginTop: 5 },
+  sellBtn: {
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: COLORS.greenPrimary,
+  },
+  sellBtnText: { color: COLORS.black, fontSize: 13, fontWeight: '900' },
   guestCard: {
     marginHorizontal: 2,
     marginTop: 12,
