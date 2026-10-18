@@ -26,6 +26,7 @@ import {
   downloadImage,
 } from './scraper.js';
 import { apifyToken, apifyReady, apifyBudgetAllows, addApifySpend } from './apifyBrowser.js';
+import { env, features } from '../env.js';
 
 export type ClassifiedSource = 'olx' | 'imot' | 'alo';
 
@@ -377,6 +378,16 @@ export async function importClassifieds(
     ).slice(0, 1200);
     const description = stripShopMentions(body, meta.label).slice(0, 4000);
 
+    // AI-изчистване: маха „ПИШЕТЕ СЪОБЩЕНИЕ!!!“, КАПС-а и следите от сайта.
+    // При провал остава фактологичното описание по-горе.
+    let finalTitle = title;
+    let finalDescription = description;
+    const tidied = await aiTidyListing(title, description, attrs).catch(() => null);
+    if (tidied) {
+      finalTitle = tidied.title;
+      if (tidied.description.length >= 20) finalDescription = tidied.description;
+    }
+
     const city = l.city || 'Онлайн';
     const seller = l.sellerType === 'private' ? 'private' : 'business';
     const tags = [
@@ -398,8 +409,8 @@ export async function importClassifieds(
         authorId,
         guessCategory(blob),
         `Обява ${meta.label}`.slice(0, 60),
-        title,
-        description,
+        finalTitle,
+        finalDescription,
         (l.region ? `${l.region}${city !== 'Онлайн' ? ', ' + city : ''}` : city).slice(0, 200),
         city,
         Number(priceEur.toFixed(2)),
@@ -415,6 +426,72 @@ export async function importClassifieds(
   }
 
   return { imported, skipped, skippedReasons: skippedReasons.slice(0, 30) };
+}
+
+/* ------------------------------------------------------------ AI изчистване */
+
+const AI_TIDY_SYSTEM = `Ти си редактор в SmartPrice — приложение за сравняване на цени в България.
+Пренаписваш обяви от сайтове за обяви в неутрален, фактологичен тон.
+
+ЗАДЪЛЖИТЕЛНО:
+- НЕ споменавай име на сайт, име на продавач, телефон, имейл, "пишете съобщение", "обадете се", "на лично".
+- МАХАШ КАПС ЛОК букви, "!!!", емотикони и рекламни викове.
+- Запазваш САМО фактите: какво е стоката, ключови характеристики, състояние, град.
+- Заглавие: до 70 знака, конкретно (напр. "Климатик Fujitsu 18 000 BTU, използван").
+- Описание: 1–3 кратки изречения само с факти. БЕЗ цена в текста — цената е отделно поле.
+
+Отговаряй само с JSON: {"title": "...", "description": "..."}`;
+
+/**
+ * Пренаписва обявата с AI — маха рекламните викове и следите от сайта.
+ * Връща null при всякакъв проблем, за да остане фактологичното описание.
+ * По ЕДНА обява на заявка: при групи AI-ят тихо връща невалиден JSON.
+ */
+export async function aiTidyListing(
+  title: string,
+  description: string,
+  attrs: Record<string, string>
+): Promise<{ title: string; description: string } | null> {
+  if (!features.assistant || !env.DEEPSEEK_API_KEY) return null;
+  try {
+    const res = await fetch(`${env.DEEPSEEK_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: env.ASSISTANT_MODEL,
+        max_tokens: 600,
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: AI_TIDY_SYSTEM },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              title: title.slice(0, 200),
+              description: description.slice(0, 1200),
+              attributes: attrs,
+            }),
+          },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const txt = data?.choices?.[0]?.message?.content ?? '';
+    if (!txt) return null;
+    const parsed = JSON.parse(txt) as { title?: string; description?: string };
+    const t = String(parsed.title ?? '').trim().slice(0, 200);
+    const d = String(parsed.description ?? '').trim().slice(0, 1200);
+    if (t.length < 4) return null;
+    return { title: t, description: d };
+  } catch {
+    return null;
+  }
 }
 
 /* ---------------------------------------------------------------- целият път */
