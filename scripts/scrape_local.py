@@ -577,11 +577,15 @@ def run_queue(api, token, count, mode, verbose=False, dry_run=False):
         imported = int(result.get("imported") or 0)
         skipped = int(result.get("skipped") or 0)
         print(f"  внесени: {imported} | прескочени: {skipped}")
+        for reason in (result.get("skippedReasons") or [])[:5]:
+            print(f"    – {reason}")
         total["imported"] += imported
         total["skipped"] += skipped
+        # ВАЖНО: ok е „обхождането успя“, не „внесох нови“. Иначе сайт, който вече
+        # е бил обходен, остава завинаги в списъка „не става за сканиране“.
         admin_call(api, token, "/api/admin/scraper/local-queue/finish",
-                   {"domain": domain, "ok": imported > 0, "imported": imported,
-                    "note": ("внесени %d" % imported) if imported else "нищо ново"})
+                   {"domain": domain, "ok": bool(items), "imported": imported,
+                    "note": ("внесени %d" % imported) if imported else "обходено, няма нови продукти"})
 
     print(f"\nОбщо от опашката: внесени {total['imported']}, прескочени {total['skipped']}")
     return 0
