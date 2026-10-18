@@ -190,9 +190,18 @@ export function mapListing(source: ClassifiedSource, raw: Record<string, unknown
       'Цена на кв.м': raw.pricePerSqm ? `${raw.pricePerSqm} €` : undefined,
       Квартал: raw.neighborhoodBg || raw.neighborhood,
     };
+    // imot дава слабо заглавие („Продава 2-СТАЕН“). Правим истинско описание от
+    // характеристиките: „2-стаен, 65 кв.м — София, Оборище“.
+    const rooms = raw.rooms ? `${raw.rooms}-стаен` : '';
+    const area = raw.area ? `${raw.area} кв.м` : '';
+    const hood = cleanCity(String(raw.neighborhoodBg || raw.neighborhood || ''));
+    const kind = String(raw.propertyType || '').trim();
+    const head = [rooms || kind, area].filter(Boolean).join(', ');
+    const where = [cleanCity(String(raw.cityBg || raw.city || '')), hood].filter(Boolean).join(', ');
+    const niceTitle = [head, where].filter(Boolean).join(' — ');
     return {
       url,
-      title: String(raw.titleBg || raw.title || title).trim().slice(0, 200),
+      title: (niceTitle || String(raw.titleBg || raw.title || title)).trim().slice(0, 200),
       description: String(raw.descriptionBg || raw.description || '').slice(0, 1200),
       priceEur: num(raw.price),
       city: cleanCity(String(raw.cityBg || raw.city || '')),
@@ -291,9 +300,21 @@ export async function runClassifiedsActor(
     } catch {
       return { ok: false, items: [], usd: 0, reason: 'Актьорът върна нещо, което не е списък.' };
     }
-    // Приблизителен разход: Apify таксува на резултат; пазим го, за да има
-    // бюджетна картина (по-точно число идва от самите пускове).
-    const usd = Math.min(0.5, items.length * 0.004);
+    // Разходът се взима от САМИЯ Apify (usageTotalUsd на последния пуск).
+    // Първата версия слагаше груба оценка 0.004 $/запис — при 70 имота това
+    // надуваше вътрешния брояч до 0.28 $ и след два пуска изкуствено „стигаше“
+    // дневния лимит, макар реално да бяха похарчени стотинки.
+    let usd = Math.min(0.5, items.length * 0.0005);
+    try {
+      const uRes = await fetch('https://api.apify.com/v2/actor-runs?limit=1', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const uJson = (await uRes.json()) as { data?: { items?: Array<{ usageTotalUsd?: number }> } };
+      const real = uJson?.data?.items?.[0]?.usageTotalUsd;
+      if (typeof real === 'number' && real >= 0) usd = Math.min(0.5, real);
+    } catch {
+      /* остава резервната оценка */
+    }
     if (usd > 0) await addApifySpend(usd, `обяви ${meta.label}: ${items.length} записа`).catch(() => undefined);
     return { ok: true, items: items.slice(0, limit), usd, reason: `${items.length} записа за ${Math.round((Date.now() - started) / 1000)} сек.` };
   } catch (err) {
