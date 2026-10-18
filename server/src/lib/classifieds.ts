@@ -601,8 +601,16 @@ export async function startClassifiedsScan(
   const q = (query || '').trim();
   if (q.length < 2) return { started: false, reason: 'Липсва дума за търсене (или адрес на категория).' };
 
+  // Заключване с остаряване: ако предишната обиколка е била убита (деплой,
+  // рестарт, спрян панел), състоянието остава `running: true` завинаги и
+  // блокира всички следващи пускове. Реален случай: 18.10.2026 — след убит
+  // пуск дневният робот не можеше да тръгне („Вече върви друга обиколка“).
   const current = await lastClassifiedsRun().catch(() => null);
-  if (current?.running) return { started: false, reason: 'Вече върви друга обиколка — изчакай да свърши.' };
+  const ageMs = current?.at ? Date.now() - Date.parse(current.at) : Number.NaN;
+  const stale = !Number.isFinite(ageMs) || ageMs > 10 * 60 * 1000;
+  if (current?.running && !stale) {
+    return { started: false, reason: 'Вече върви друга обиколка — изчакай да свърши.' };
+  }
 
   const limit = Math.max(1, Math.min(200, Math.floor(maxItems) || 20));
   await saveRunState({
