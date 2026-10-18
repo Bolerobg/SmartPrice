@@ -74,9 +74,21 @@ export const CLASSIFIED_SOURCES: Record<ClassifiedSource, SourceMeta> = {
 
 /* ------------------------------------------------------------------ помощни */
 
+/** Маха покани за връзка от описанието — те не са част от стоката. */
+export function stripContactPrompts(text: string): string {
+  return (text || '')
+    .replace(
+      /[^.!?]{0,80}(пишете\s+(ми\s+)?(съобщение|на\s+лично)|обад(и|е)те\s+се|звънн?ете|на\s+телефона|viber|whatsapp|whats\s?app|по\s+имейл|на\s+лс|на\s+лични)[^.!?]{0,80}/gi,
+      ' '
+    )
+    .replace(/[>\-–—]{2,}\s*$/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /** Маха телефони и имейли от описанието — обявите са пълни с тях. */
 export function stripContacts(text: string): string {
-  return (text || '')
+  return stripContactPrompts(text)
     // телефони: 08xx xxx xxx, +359..., с интервали/тирета/скоби
     .replace(/(\+?\d[\d\s().-]{6,}\d)/g, (m) => {
       const digits = m.replace(/\D/g, '');
@@ -103,12 +115,40 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/** Ключовете на характеристиките идват на английски от сайтовете — превеждаме ги. */
+const ATTR_LABELS: Record<string, string> = {
+  state: 'Състояние',
+  condition: 'Състояние',
+  floor: 'Етаж',
+  floors: 'Етажи',
+  rooms: 'Стаи',
+  area: 'Кв.м',
+  'built area': 'Кв.м',
+  year: 'Година',
+  yearbuilt: 'Година на строеж',
+  mileage: 'Пробег',
+  kilometers: 'Пробег',
+  fuel: 'Гориво',
+  fueltype: 'Гориво',
+  transmission: 'Скоростна кутия',
+  gearbox: 'Скоростна кутия',
+  engine: 'Двигател',
+  power: 'Мощност',
+  color: 'Цвят',
+  brand: 'Марка',
+  model: 'Модел',
+  make: 'Марка',
+  negotiable: 'Договаряне',
+};
+
 /** Прави списък „характеристика: стойност“ от обект, без празните. */
 function attrPairs(attrs?: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(attrs || {})) {
     const val = typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
-    if (val) out[k] = val.slice(0, 60);
+    if (!val) continue;
+    const label = ATTR_LABELS[k.toLowerCase().replace(/[\s_]/g, '')] ?? ATTR_LABELS[k.toLowerCase()] ?? k;
+    out[label] = val.slice(0, 60);
   }
   return out;
 }
