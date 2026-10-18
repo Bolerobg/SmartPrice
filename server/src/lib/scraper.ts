@@ -927,6 +927,19 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
     const top = Math.max(...byPrice.values());
     if (top >= 3 && top / deduped.length >= 0.6) return [];
   }
+
+  // Цена, която е абсурдно ниска спрямо останалите в СЪЩИЯ листинг, е артефакт
+  // (вноска, такса, подарък), не цена на продукт. Реален случай: technomarket.bg
+  // даваше „SAMSUNG 55\" телевизор — 30 €“ сред 83 продукта с медиана ~400 €.
+  // Медианата е устойчива на изключения, за да не срине правилото един скъп артикул.
+  if (deduped.length >= 10) {
+    const prices = deduped.map((p) => p.price!).sort((a, b) => a - b);
+    const median = prices[Math.floor(prices.length / 2)]!;
+    if (median >= 50) {
+      const floor = median * 0.05;
+      return deduped.filter((p) => (p.price ?? 0) >= floor);
+    }
+  }
   return deduped;
 }
 
