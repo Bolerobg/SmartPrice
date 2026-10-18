@@ -941,7 +941,7 @@ export default async function scraperRoutes(app: FastifyInstance) {
     const budget = await apifyBudgetAllows(0.05).catch(() => ({ allowed: false, today: 0, limit: 0 }));
     const imported = await many<Record<string, unknown>>(
       `select source, count(*)::int as n, max(created_at)::text as last
-         from posts where source in ('olx','imot','alo')
+         from posts where source in ('olx','imot','alo','facebook')
         group by source order by source`
     );
     return {
@@ -968,7 +968,7 @@ export default async function scraperRoutes(app: FastifyInstance) {
     const admin = await requireFullAdmin(req);
     const input = z
       .object({
-        source: z.enum(['olx', 'imot', 'alo']),
+        source: z.enum(['olx', 'imot', 'alo', 'facebook']),
         query: z.string().trim().min(2).max(160),
         maxItems: z.coerce.number().int().min(1).max(200).default(20),
       })

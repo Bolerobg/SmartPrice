@@ -173,6 +173,114 @@ async function lastRunCost(token: string): Promise<number> {
  * `resident: true` пуска през жилищни (residential) проксита — това е начинът да
  * минем Cloudflare, който не пуска датацентрове. По-скъпо е, затова не е винаги.
  */
+/**
+ * Универсален обход на УПОРИТ сайт през Apify Website Content Crawler.
+ *
+ * Защо: този актьор е с безплатен модел на резултат (плащаш само изчислителни
+ * единици) и минава там, където нашият сървър и домашният робот се провалят.
+ * Проверено на живо (18.10.2026): ikea.bg (13 195 знака), decathlon.bg
+ * (Cloudflare!), mr-bricolage.bg — по $0.02–0.07 на обход. emag.bg дава
+ * капча (511) и този актьор НЕ го решава — не обещаваме чудеса.
+ *
+ * Връща и HTML (за нашите селектори), и markdown (за AI), и кода на отговора.
+ */
+export interface CrawlPage {
+  url: string;
+  html: string;
+  markdown: string;
+  title: string;
+  /** HTTP кодът, който сайтът е върнал (511 = капча, значи не сме влезли). */
+  status: number;
+}
+
+export async function apifyCrawl(
+  urls: string[],
+  opts: { maxPages?: number; resident?: boolean; timeoutMs?: number } = {}
+): Promise<{ ok: boolean; pages: CrawlPage[]; usd: number }> {
+  const empty = { ok: false, pages: [] as CrawlPage[], usd: 0 };
+  const token = await apifyToken().catch(() => '');
+  if (!token) return empty;
+  if (!(await apifyReady().catch(() => false))) return empty;
+  if (!(await apifyBudgetAllows(0.05).catch(() => ({ allowed: false }))).allowed) return empty;
+
+  const maxPages = Math.max(1, Math.min(10, opts.maxPages ?? 3));
+  // Без residential сайтовете зад Cloudflare ни отказват — същото като при
+  // проверката на цената. Затова по подразбиране е включен.
+  const resident = opts.resident ?? true;
+  const input = {
+    startUrls: urls.slice(0, 5).map((u) => ({ url: u })),
+    maxCrawlPages: maxPages,
+    maxCrawlDepth: 1,
+    crawlerType: 'playwright:adaptive',
+    ...(resident
+      ? { proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] } }
+      : {}),
+  };
+
+  const api = async (path: string, method = 'GET', body?: unknown): Promise<unknown> => {
+    const res = await fetch(`https://api.apify.com/v2${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`apify ${res.status}`);
+    return res.json();
+  };
+
+  try {
+    const started = (await api(
+      `/acts/apify~website-content-crawler/runs?token=${encodeURIComponent(token)}`,
+      'POST',
+      input
+    )) as { data?: { id?: string } };
+    const runId = started?.data?.id;
+    if (!runId) return empty;
+
+    // Обходът на 3–5 страници отнема 40–120 сек.
+    const deadline = Date.now() + Math.max(30_000, Math.min(240_000, opts.timeoutMs ?? 150_000));
+    let status = 'RUNNING';
+    let datasetId = '';
+    let spend = 0;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 6_000));
+      const run = (await api(`/actor-runs/${runId}`)) as {
+        data?: { status?: string; defaultDatasetId?: string; usageTotalUsd?: number };
+      };
+      status = run?.data?.status ?? 'RUNNING';
+      datasetId = run?.data?.defaultDatasetId ?? '';
+      spend = run?.data?.usageTotalUsd ?? 0;
+      if (['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'].includes(status)) break;
+    }
+    // Разходът се записва и при провал — иначе бюджетът излиза от синхрон.
+    if (spend > 0) await addApifySpend(spend, `обход ${urls[0]?.slice(0, 40) ?? ''}`).catch(() => undefined);
+    if (status !== 'SUCCEEDED' || !datasetId) return { ok: false, pages: [], usd: spend };
+
+    const items = (await api(`/datasets/${datasetId}/items?limit=${maxPages + 2}`)) as Array<{
+      url?: string;
+      html?: string;
+      markdown?: string;
+      text?: string;
+      crawl?: { httpStatusCode?: number };
+      metadata?: { title?: string };
+    }>;
+    const pages: CrawlPage[] = (Array.isArray(items) ? items : []).map((it) => ({
+      url: String(it.url ?? ''),
+      html: String(it.html ?? ''),
+      markdown: String(it.markdown ?? it.text ?? ''),
+      title: String(it.metadata?.title ?? ''),
+      status: Number(it.crawl?.httpStatusCode ?? 0),
+    }));
+    return { ok: pages.length > 0, pages, usd: spend };
+  } catch {
+    return empty;
+  }
+}
+
 export async function apifyRenderHtml(
   urls: string[],
   opts: { resident?: boolean; timeoutMs?: number } = {}

@@ -17,7 +17,13 @@
  */
 import { many, one, query } from '../db.js';
 import { env, features } from '../env.js';
-import { addApifySpend, apifyBudgetAllows, apifyReady, apifyRenderHtml } from './apifyBrowser.js';
+import {
+  addApifySpend,
+  apifyBudgetAllows,
+  apifyCrawl,
+  apifyReady,
+  apifyRenderHtml,
+} from './apifyBrowser.js';
 import { browserAvailable, renderHtml } from './render.js';
 import {
   collectFromOpencart,
@@ -464,6 +470,50 @@ export async function checkShop(
     };
   };
 
+  /**
+   * Универсален обход през Apify Website Content Crawler.
+   *
+   * Защо след Apify-браузъра: този актьор е с безплатен модел на резултат и
+   * минава сайтове, които иначе отписваме като „не става“ — проверено на живо
+   * на ikea.bg, decathlon.bg (Cloudflare) и mr-bricolage.bg. Цената е 2–7 цента
+   * на обход, тоест по-евтино от истински браузър при Apify.
+   * Продуктите се търсят в СЪЩИТЕ селектори — само източникът на HTML е друг.
+   */
+  const viaCrawler = async (): Promise<ShopCheck | null> => {
+    // Обходът отнема 40–120 сек — не влизаме, ако заявката няма време.
+    if (left() < 45_000) return null;
+    const r = await apifyCrawl([base.url], { maxPages: 3, resident: true }).catch(() => null);
+    if (!r?.ok) return null;
+    for (const page of r.pages) {
+      // Капча или грешка от сайта (emag.bg дава 511) — не е успех, не лъжем.
+      if (page.status && page.status >= 400) continue;
+      const src = page.html || '';
+      if (!src) continue;
+      const at = page.url || base.url;
+      const found = [
+        ...clean(extractListingProducts(src, at)),
+        ...extractEmbeddedProducts(src, at),
+      ];
+      const single = parseProductPage(src, at, {});
+      if (single.title && single.price && !looksLikeJunkProduct(single)) found.push(single);
+      if (!good(found)) continue;
+      return {
+        ...base,
+        status: 'apify',
+        strategy: 'wcc',
+        scrapable: true,
+        fromServer: true,
+        platform: detectPlatform(src),
+        pagesProbed: base.pagesProbed + r.pages.length,
+        productsFound: found.length,
+        sample: toSample(found, at),
+        reason:
+          'Работи през Apify Website Content Crawler (универсален обход) — сайтът не пуска нашия сървър.',
+      };
+    }
+    return null;
+  };
+
   const wall = wallReason(homeStatus, home);
   if (wall) {
     base.status = 'local';
@@ -476,6 +526,10 @@ export async function checkShop(
     // без да зависим от това дали домашният компютър е включен.
     const ap = await viaApify(true);
     if (ap) return finish(ap);
+    // По-евтината резерва: универсалният обход. Точно той минава Cloudflare
+    // на decathlon.bg, където истинският браузър при Apify даваше отказ.
+    const cw = await viaCrawler();
+    if (cw) return finish(cw);
     return finish(base);
   }
 
@@ -684,6 +738,14 @@ export async function checkShop(
   {
     const ap = await viaApify(false);
     if (ap) return finish(ap);
+  }
+
+  // ---- 5в. Универсалният обход: последната автоматична стъпка преди „ръчно“.
+  // Точно тук се спасяват сайтовете, които иначе отписвахме: ikea.bg (Sitecore
+  // с празен div), mr-bricolage.bg (SPA), decathlon.bg (Cloudflare).
+  {
+    const cw = await viaCrawler();
+    if (cw) return finish(cw);
   }
 
   // ---- 6. Не стана автоматично, но сайтът отговаря -----------------------
