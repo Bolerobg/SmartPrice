@@ -19,8 +19,12 @@ import { goBack } from '@/src/lib/navigation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/theme';
+import { useAuth } from '@/src/auth/AuthContext';
 
-export const ONBOARDING_SEEN_KEY = '@smartprice_onboarding_seen_v1';
+// ВАЖНО: версията е в името. Като добавим нов екран (сега са 13), вдигаме
+// версията — тогава обяснението излиза ВЕДНЪЖ и на хората, които вече са го
+// виждали, за да видят новото. Пропуска се с „Пропусни“ с едно натискане.
+export const ONBOARDING_SEEN_KEY = '@smartprice_onboarding_seen_v2';
 
 interface Page {
   key: string;
@@ -767,6 +771,9 @@ export default function OnboardingScreen() {
    */
   const { review, cta } = useLocalSearchParams<{ review?: string; cta?: string }>();
   const isReview = review === '1';
+  // Влязъл ли е човекът. Ако да — последният екран не бива да го праща към
+  // регистрация (той вече има профил), а направо в приложението.
+  const { isAuthenticated } = useAuth();
   /**
    * Отваряне от екрана за вход/регистрация: /tour?review=1&cta=register
    * Тогава последният бутон не е „Готово“, а „Регистрирай се безплатно“ —
@@ -936,8 +943,9 @@ export default function OnboardingScreen() {
       return;
     }
     await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, '1');
-    router.replace('/(auth)/register');
-  }, [router, isReview, ctaRegister]);
+    // Влязъл човек вече има профил — не го пращаме към регистрация.
+    router.replace(isAuthenticated ? '/(tabs)' : '/(auth)/register');
+  }, [router, isReview, ctaRegister, isAuthenticated]);
 
   const skip = useCallback(async () => {
     if (isReview) {
@@ -1057,10 +1065,16 @@ export default function OnboardingScreen() {
               activeOpacity={0.9}
             >
               <Text style={styles.primaryBtnText}>
-                {ctaRegister ? 'Регистрирай се безплатно' : isReview ? 'Готово' : 'Създай профил'}
+                {isReview
+                  ? 'Готово'
+                  : isAuthenticated
+                    ? 'Готово — към приложението'
+                    : ctaRegister
+                      ? 'Регистрирай се безплатно'
+                      : 'Създай профил'}
               </Text>
             </TouchableOpacity>
-            {!isReview && (
+            {!isReview && !isAuthenticated && (
               <>
                 <TouchableOpacity
                   style={styles.ghostBtn}
