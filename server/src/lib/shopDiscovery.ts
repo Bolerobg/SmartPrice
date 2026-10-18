@@ -960,6 +960,16 @@ export async function queueLocalScan(input: {
 }
 
 export async function pendingLocalScans(limit = 20): Promise<LocalScanRow[]> {
+  // ВАЖНО (поука от живия пуск, 18.10.2026): ако роботът бъде убит, докато
+  // обхожда, заявките остават във 'taken' и вече НИКОЙ не ги поглежда —
+  // сайтовете засядат завинаги. Затова 'taken' по-стар от 30 минути се връща
+  // сам в опашката (наем с изтичане).
+  await query(
+    `update local_scan_queue
+        set status = 'pending', taken_at = null,
+            note = coalesce(note, '') || ' (върната след прекъснат пуск)'
+      where status = 'taken' and taken_at < now() - interval '30 minutes'`
+  );
   return many<LocalScanRow>(
     `select id::text, domain, url, count, status, note, created_at::text
        from local_scan_queue
