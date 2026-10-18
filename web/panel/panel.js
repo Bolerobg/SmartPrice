@@ -2399,6 +2399,20 @@ async function renderScraper(box) {
     /* оставяме празно */
   }
 
+  // 📈 Напредък: докъде сме стигнали във всеки магазин + какви категории е научил.
+  let cursors = { items: [] };
+  let catmap = { items: [] };
+  try {
+    cursors = await api('/scraper/cursors');
+  } catch {
+    /* endpoint-ът още не е наличен — табът пак се отваря */
+  }
+  try {
+    catmap = await api('/scraper/categories');
+  } catch {
+    /* същото */
+  }
+
   box.innerHTML = `
     ${scraperTabsHtml(candidates.queue?.pending || 0)}
 
@@ -2519,6 +2533,7 @@ async function renderScraper(box) {
 
     <div class="sc-pane" id="sc-pane-sched"><div id="sc-schedules">${scraperSchedulesHtml(schedules.items || [])}</div></div>
     <div class="sc-pane" id="sc-pane-hist"><div id="sc-history">${scraperHistoryHtml(jobs.items || [])}</div></div>
+    <div class="sc-pane" id="sc-pane-progress">${scraperProgressHtml(cursors.items || [], catmap.items || [])}</div>
     <div class="sc-pane" id="sc-pane-sites"><div id="sc-sites">${scraperSitesHtml(info.sites || [])}</div></div>`;
 
   /* ------------------------------------------------------------ бутони */
@@ -2647,6 +2662,7 @@ async function renderScraper(box) {
   bindScraperHistory();
   bindScraperStop();
   bindScraperSites();
+  bindScraperProgress();
   bindScraperSchedules();
 
   if (scraperJobId) await scraperLoadJob();
@@ -2664,6 +2680,7 @@ const SC_TABS = [
   ['live', '🔄 Вървящи'],
   ['sched', '📅 Разписания'],
   ['hist', '🕓 История'],
+  ['progress', '📈 Напредък'],
   ['sites', '🌐 Сайтове'],
 ];
 const SC_PANES = {
@@ -2672,6 +2689,7 @@ const SC_PANES = {
   live: 'sc-pane-live',
   sched: 'sc-pane-sched',
   hist: 'sc-pane-hist',
+  progress: 'sc-pane-progress',
   sites: 'sc-pane-sites',
 };
 
@@ -3524,6 +3542,86 @@ function scraperSitesHtml(sites) {
         </table>
       </div>
     </div>`;
+}
+
+/* ============================================ \ud83d\udcc8 таб \u201e\u041d\u0430\u043f\u0440\u0435\u0434\u044a\u043a\u201c ============ */
+
+/**
+ * \u201e\u0414\u043e\u043a\u044a\u0434\u0435 \u0441\u043c\u0435 \u0441\u0442\u0438\u0433\u043d\u0430\u043b\u0438\u201c \u2014 \u043f\u043e \u043c\u0430\u0433\u0430\u0437\u0438\u043d (\u043a\u0443\u0440\u0441\u043e\u0440\u044a\u0442 \u043f\u043e\u043c\u043d\u0438 \u043e\u0442\u043a\u044a\u0434\u0435 \u0434\u0430 \u043f\u0440\u043e\u0434\u044a\u043b\u0436\u0438, \u0437\u0430 \u0434\u0430
+ * \u043d\u0435 \u0441\u0435 \u0432\u0437\u0438\u043c\u0430\u0442 \u0441\u044a\u0449\u0438\u0442\u0435 \u043f\u0440\u043e\u0434\u0443\u043a\u0442\u0438 \u0432\u0442\u043e\u0440\u0438 \u043f\u044a\u0442) \u0438 \u201e\u043a\u0430\u043a\u0432\u043e \u0435 \u043d\u0430\u0443\u0447\u0438\u043b\u201c \u2014 \u0441\u044a\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u044f\u0442\u0430
+ * \u201e\u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f \u043d\u0430 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u0430 \u2192 \u043d\u0430\u0448\u0430 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u201c.
+ */
+function scraperProgressHtml(cursors, cats) {
+  const cursorCard = `
+    <div class="card">
+      <div class="card-title">\ud83e\udded \u0414\u043e\u043a\u044a\u0434\u0435 \u0441\u043c\u0435 \u0441\u0442\u0438\u0433\u043d\u0430\u043b\u0438 <span class="pill pill-dim">${num(cursors.length)}</span></div>
+      <div class="hint" style="margin:6px 0 10px">\u0412\u0441\u0435\u043a\u0438 \u043c\u0430\u0433\u0430\u0437\u0438\u043d \u0441\u0435 \u043f\u043e\u043c\u043d\u0438 \u0434\u043e\u043a\u044a\u0434\u0435 \u0435 \u043e\u0431\u0445\u043e\u0434\u0435\u043d \u2014 \u0441\u043b\u0435\u0434\u0432\u0430\u0449\u0438\u044f\u0442 \u043f\u044a\u0442 \u043f\u0440\u043e\u0434\u044a\u043b\u0436\u0430\u0432\u0430 \u043e\u0442\u0442\u0430\u043c.</div>
+      ${
+        cursors.length
+          ? `<div class="table-wrap"><table>
+              <thead><tr><th>\u0414\u043e\u043c\u0435\u0439\u043d</th><th>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0432 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430</th><th>\u041e\u0431\u0438\u043a\u043e\u043b\u043a\u0438</th><th>\u0412\u0437\u0435\u043b \u043d\u0430\u0432\u0435\u0434\u043d\u044a\u0436</th><th>\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u043e</th></tr></thead>
+              <tbody>${cursors
+                .map(
+                  (c) => `<tr>
+                <td><strong>${esc(c.domain)}</strong></td>
+                <td>#${num(c.cursor_offset)}</td>
+                <td>${num(c.runs)}</td>
+                <td>${num(c.last_span)}</td>
+                <td>${c.updated_at ? ago(c.updated_at) : '\u2014'}</td>
+              </tr>`
+                )
+                .join('')}</tbody></table></div>`
+          : `<div class="hint">\u041e\u0449\u0435 \u043d\u044f\u043c\u0430 \u043e\u0431\u0445\u043e\u0434\u0435\u043d \u043c\u0430\u0433\u0430\u0437\u0438\u043d \u0441 \u043a\u0443\u0440\u0441\u043e\u0440. \u041f\u0443\u0441\u043d\u0438 \u043e\u0431\u0438\u043a\u043e\u043b\u043a\u0430 \u0438 \u0442\u0443\u043a \u0449\u0435 \u0432\u0438\u0434\u0438\u0448 \u0434\u043e\u043a\u044a\u0434\u0435 \u0435 \u0441\u0442\u0438\u0433\u043d\u0430\u043b\u0430.</div>`
+      }
+    </div>`;
+
+  const catCard = `
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">\ud83c\udff7\ufe0f \u041d\u0430\u0443\u0447\u0435\u043d\u0438 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438 <span class="pill pill-dim">${num(cats.length)}</span></div>
+      <div class="hint" style="margin:6px 0 10px">\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u0442\u0430 \u043d\u0430 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u0430 \u0441\u0435 \u0440\u0430\u0437\u043f\u043e\u0437\u043d\u0430\u0432\u0430 \u0432\u0435\u0434\u043d\u044a\u0436 \u0438 \u0441\u0435 \u043f\u043e\u043c\u043d\u0438. \u041c\u0430\u0445\u043d\u0435\u0448 \u043b\u0438 \u0440\u0435\u0434, \u0449\u0435 \u0441\u0435 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438 \u043d\u0430\u043d\u043e\u0432\u043e.</div>
+      ${
+        cats.length
+          ? `<div class="table-wrap"><table>
+              <thead><tr><th>\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f \u0432 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u0430</th><th>\u041d\u0430\u0448\u0430 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f</th><th>\u041f\u043e\u043b\u0437\u0432\u0430\u043d\u0430</th><th></th></tr></thead>
+              <tbody>${cats
+                .map(
+                  (c) => `<tr>
+                <td>${esc(c.source)}</td>
+                <td><strong>${esc(c.category)}</strong></td>
+                <td>${num(c.hits)}\u00d7</td>
+                <td class="actions"><button class="btn btn-sm btn-danger" data-sc-cat-del="${esc(c.source)}">\u2715 \u041c\u0430\u0445\u043d\u0438</button></td>
+              </tr>`
+                )
+                .join('')}</tbody></table></div>`
+          : `<div class="hint">\u041e\u0449\u0435 \u043d\u044f\u043c\u0430 \u043d\u0430\u0443\u0447\u0435\u043d\u0438 \u0441\u044a\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u044f.</div>`
+      }
+    </div>`;
+
+  return cursorCard + catCard;
+}
+
+/** \u0411\u0443\u0442\u043e\u043d\u0438\u0442\u0435 \u0432 \u0442\u0430\u0431 \u201e\u041d\u0430\u043f\u0440\u0435\u0434\u044a\u043a\u201c (\u043c\u0430\u0445\u043d\u0438 \u0441\u044a\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435). */
+function bindScraperProgress() {
+  document.querySelectorAll('[data-sc-cat-del]').forEach((b) => {
+    b.onclick = () => {
+      const source = b.dataset.scCatDel;
+      confirmAction({
+        title: '\u0414\u0430 \u043c\u0430\u0445\u043d\u0430 \u043b\u0438 \u0441\u044a\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435\u0442\u043e?',
+        message: `\u201e${source}\u201c \u0432\u0435\u0447\u0435 \u043d\u044f\u043c\u0430 \u0434\u0430 \u0441\u043e\u0447\u0438 \u043a\u044a\u043c \u0442\u0430\u0437\u0438 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f \u2014 \u043f\u0440\u0438 \u0441\u043b\u0435\u0434\u0432\u0430\u0449\u043e\u0442\u043e \u0441\u043a\u0430\u043d\u0438\u0440\u0430\u043d\u0435 \u0449\u0435 \u0441\u0435 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438 \u043d\u0430\u043d\u043e\u0432\u043e.`,
+        confirmLabel: '\u041c\u0430\u0445\u043d\u0438',
+        onConfirm: async () => {
+          try {
+            await api(`/scraper/categories/${encodeURIComponent(source)}`, { method: 'DELETE' });
+            const row = b.closest('tr');
+            if (row) row.remove();
+            toast('\u0421\u044a\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435\u0442\u043e \u0435 \u043c\u0430\u0445\u043d\u0430\u0442\u043e');
+          } catch (e) {
+            toast(e.message, 'warn');
+          }
+        },
+      });
+    };
+  });
 }
 
 function bindScraperSites() {
