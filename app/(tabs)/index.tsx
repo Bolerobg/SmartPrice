@@ -84,6 +84,8 @@ export default function FeedScreen() {
   // само на някого без собствени обяви; тренировката — на 48 часа. Тук само
   // питаме веднъж при отваряне на екрана.
   const [showListingNudge, setShowListingNudge] = useState(false);
+  // Ръчно отваряне на „Как работи?“ от картата за обяви
+  const [listingHelpManual, setListingHelpManual] = useState(false);
   const [showPuzzleNudge, setShowPuzzleNudge] = useState(false);
   const [nudgePrice, setNudgePrice] = useState(2);
   const [nudgeDays, setNudgeDays] = useState(60);
@@ -589,31 +591,41 @@ export default function FeedScreen() {
       {/* РАЗГЪВАЕМ BENTO ПАНЕЛ: Кошница, Шринкфлация, Аларми, Томбола, Бързо качване и AI Асистент */}
           {/* 🏷️ Продавам — входът е ВИНАГИ видим в лентата, не се крие в профила.
               Досега човек не намираше откъде да пусне обява. */}
-          <View style={styles.sellCard}>
+          <TouchableOpacity
+            style={styles.sellCard}
+            onPress={() => router.push('/listings/new' as never)}
+            activeOpacity={0.9}
+            accessibilityLabel="Пусни обява за продажба"
+          >
             <View style={styles.sellIcon}>
               <Ionicons name="pricetags" size={17} color={COLORS.black} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.sellTitle} numberOfLines={1}>
-                Продавам нещо? Пусни обява 🏷️
-              </Text>
+              <Text style={styles.sellTitle}>Продавам нещо?</Text>
               <Text style={styles.sellSub} numberOfLines={2}>
-                2 € за 60 дни · до 5 снимки · спираш я, когато я продадеш
+                Пусни обява за 2 € · 60 дни · до 5 снимки
               </Text>
-              <TouchableOpacity
-                onPress={() => router.push('/listings' as never)}
-                activeOpacity={0.8}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              >
-                <Text style={styles.sellMine}>Моите обяви →</Text>
-              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={styles.sellBtn}
-              onPress={() => router.push('/listings/new' as never)}
-              activeOpacity={0.9}
-            >
+            <View style={styles.sellBtn}>
               <Text style={styles.sellBtnText}>Пусни</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Връзките са ИЗВЪН картата — иначе се застъпват с натискането ѝ */}
+          <View style={styles.sellLinks}>
+            <TouchableOpacity
+              onPress={() => router.push('/listings' as never)}
+              activeOpacity={0.8}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            >
+              <Text style={styles.sellMine}>Моите обяви →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setListingHelpManual(true)}
+              activeOpacity={0.8}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            >
+              <Text style={styles.sellHow}>Как работи?</Text>
             </TouchableOpacity>
           </View>
 
@@ -791,12 +803,17 @@ export default function FeedScreen() {
 
       {/* 🎁 Красивият модел „и ти можеш да продаваш“ — показва се рядко. */}
       <ListingNudgeModal
-        visible={showListingNudge}
+        visible={showListingNudge || listingHelpManual}
+        manual={listingHelpManual}
         priceEur={nudgePrice}
         days={nudgeDays}
-        onClose={() => setShowListingNudge(false)}
+        onClose={() => {
+          setShowListingNudge(false);
+          setListingHelpManual(false);
+        }}
         onGoToNew={() => {
           setShowListingNudge(false);
+          setListingHelpManual(false);
           router.push('/listings/new' as never);
         }}
       />
@@ -1113,7 +1130,15 @@ const styles = StyleSheet.create({
   },
   sellTitle: { color: COLORS.textPrimary, fontSize: 14.5, fontWeight: '900' },
   sellSub: { color: COLORS.textSecondary, fontSize: 11.5, marginTop: 2, lineHeight: 15 },
-  sellMine: { color: COLORS.greenBright, fontSize: 11.5, fontWeight: '800', marginTop: 5 },
+  sellMine: { color: COLORS.greenBright, fontSize: 11.5, fontWeight: '800' },
+  sellLinks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 7,
+    paddingHorizontal: 3,
+  },
+  sellHow: { color: COLORS.accentCyan, fontSize: 11.5, fontWeight: '800' },
   sellBtn: {
     paddingHorizontal: 15,
     paddingVertical: 10,

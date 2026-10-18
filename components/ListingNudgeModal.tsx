@@ -17,15 +17,29 @@ interface Props {
   visible: boolean;
   priceEur: number;
   days: number;
+  /** Отворен ръчно от „Как работи?“ — тогава „По-късно“ само затваря,
+   *  без да отбелязва подканата като видяна (иначе човекът губи поканата). */
+  manual?: boolean;
   onClose: () => void;
   onGoToNew: () => void;
 }
 
-export const ListingNudgeModal: React.FC<Props> = ({ visible, priceEur, days, onClose, onGoToNew }) => {
+export const ListingNudgeModal: React.FC<Props> = ({
+  visible,
+  priceEur,
+  days,
+  manual = false,
+  onClose,
+  onGoToNew,
+}) => {
   const [busy, setBusy] = useState('');
   const [step, setStep] = useState(0);
 
   const later = async () => {
+    if (manual) {
+      onClose();
+      return;
+    }
     setBusy('later');
     await api.listingNudgeSeen().catch(() => undefined);
     setBusy('');
