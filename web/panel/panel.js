@@ -2362,6 +2362,8 @@ let scraperPoll = null;
 let scraperJobId = null;
 let bulkPrefill = '';
 let scraperLastForm = null;
+/** Кой таб е отворен в секция „Скрапер“ (пази се между презарежданията). */
+let scActiveTab = 'new';
 
 function scraperStopPoll() {
   if (scraperPoll) {
@@ -2388,7 +2390,19 @@ async function renderScraper(box) {
     ['queued', 'discovering', 'parsing', 'enriching', 'importing'].includes(j.status)
   );
 
+  // Намерените магазини (табът ги помни). Ако endpoint-ът още не е наличен,
+  // секцията пак работи — само списъкът е празен.
+  let candidates = { items: [], queue: {} };
+  try {
+    candidates = await api('/scraper/candidates?limit=40');
+  } catch {
+    /* оставяме празно */
+  }
+
   box.innerHTML = `
+    ${scraperTabsHtml(candidates.queue?.pending || 0)}
+
+    <div class="sc-pane active" id="sc-pane-new">
     <div class="grid grid-3" style="margin-bottom:14px">
       <div class="card kpi"><div class="kpi-label">Задачи общо</div><div class="kpi-value cyan">${num(info.jobs.total)}</div><div class="kpi-sub">${num(info.jobs.done)} завършени</div></div>
       <div class="card kpi"><div class="kpi-label">Научени сайтове</div><div class="kpi-value gold">${num(info.sites)}</div><div class="kpi-sub">стратегията се помни</div></div>
@@ -2492,20 +2506,20 @@ async function renderScraper(box) {
         <strong>▶ Пусни обиколката</strong> = еднократна обиколка за всеки сега ·
         <strong>📅 Разписание за всички</strong> = всеки ден само, разпръснато във времето.
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-running">🔄 Вървящи сега</button>
-        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-schedules">📅 Разписания и дневен лимит</button>
-        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-history">🕓 История</button>
-        <button class="btn btn-sm btn-ghost" data-scroll-to="sc-sites">🌐 Научени сайтове</button>
-      </div>
       <div id="sc-probe-out" style="margin-top:12px"></div>
     </div>
+    </div><!-- /sc-pane-new -->
 
-    <div id="sc-running" style="margin-top:14px">${scraperRunningHtml(runningList.items || [])}</div>
-    <div id="sc-job" style="margin-top:14px"></div>
-    <div id="sc-schedules" style="margin-top:14px">${scraperSchedulesHtml(schedules.items || [])}</div>
-    <div id="sc-history" style="margin-top:14px">${scraperHistoryHtml(jobs.items || [])}</div>
-    <div id="sc-sites" style="margin-top:14px">${scraperSitesHtml(info.sites || [])}</div>`;
+    <div class="sc-pane" id="sc-pane-discover">${scraperDiscoverHtml(candidates.items || [], candidates.queue || {})}</div>
+
+    <div class="sc-pane" id="sc-pane-live">
+      <div id="sc-running">${scraperRunningHtml(runningList.items || [])}</div>
+      <div id="sc-job" style="margin-top:14px"></div>
+    </div>
+
+    <div class="sc-pane" id="sc-pane-sched"><div id="sc-schedules">${scraperSchedulesHtml(schedules.items || [])}</div></div>
+    <div class="sc-pane" id="sc-pane-hist"><div id="sc-history">${scraperHistoryHtml(jobs.items || [])}</div></div>
+    <div class="sc-pane" id="sc-pane-sites"><div id="sc-sites">${scraperSitesHtml(info.sites || [])}</div></div>`;
 
   /* ------------------------------------------------------------ бутони */
 
@@ -2627,6 +2641,9 @@ async function renderScraper(box) {
     }
   };
 
+  bindScraperTabs();
+  bindScraperDiscovery();
+
   bindScraperHistory();
   bindScraperStop();
   bindScraperSites();
@@ -2636,6 +2653,307 @@ async function renderScraper(box) {
   else if (running) {
     $('#sc-job').innerHTML = `<div class="card"><div class="hint"><span class="spinner"></span> Има работеща задача — отвори я от историята.</div></div>`;
   }
+}
+
+
+/* ============================================ 🔎 таб „Търси магазини“ ======== */
+
+const SC_TABS = [
+  ['new', '🕸️ Нова обиколка'],
+  ['discover', '🔎 Търси магазини'],
+  ['live', '🔄 Вървящи'],
+  ['sched', '📅 Разписания'],
+  ['hist', '🕓 История'],
+  ['sites', '🌐 Сайтове'],
+];
+const SC_PANES = {
+  new: 'sc-pane-new',
+  discover: 'sc-pane-discover',
+  live: 'sc-pane-live',
+  sched: 'sc-pane-sched',
+  hist: 'sc-pane-hist',
+  sites: 'sc-pane-sites',
+};
+
+/** Табовете на секцията. Ако има чакащи заявки за домашния робот, се виждат. */
+function scraperTabsHtml(queuePending) {
+  return `<div class="sc-tabs">${SC_TABS.map(([id, label]) => {
+    const cnt =
+      id === 'discover' && queuePending ? ` <span class="sc-tab-badge">🖥️ ${num(queuePending)}</span>` : '';
+    return `<button type="button" class="sc-tab${scActiveTab === id ? ' active' : ''}" data-tab="${id}">${esc(label)}${cnt}</button>`;
+  }).join('')}</div>`;
+}
+
+/** Превключва таб (без да пипа адреса — рутерът не бива да се чупи). */
+function scSwitchTab(name) {
+  if (!SC_PANES[name]) name = 'new';
+  scActiveTab = name;
+  document.querySelectorAll('.sc-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.sc-pane').forEach((p) => p.classList.toggle('active', p.id === SC_PANES[name]));
+}
+
+function bindScraperTabs() {
+  document.querySelectorAll('.sc-tab').forEach((b) => {
+    b.onclick = () => scSwitchTab(b.dataset.tab);
+  });
+  scSwitchTab(scActiveTab);
+}
+
+const SHOP_STATUS = {
+  ok: ['Сканируем сега', 'pill-green'],
+  local: ['Иска домашен IP', 'pill-gold'],
+  manual: ['Трябват селектори', 'pill-dim'],
+  error: ['Не отговаря', 'pill-red'],
+  rejected: ['Отхвърлен', 'pill-dim'],
+};
+
+/** Един намерен магазин: домейн, присъда, доказателство (примерни продукти) и бутони. */
+function scraperCandidateRowHtml(c) {
+  const [label, cls] = SHOP_STATUS[c.status] || ['Нов', 'pill-dim'];
+  const samples = Array.isArray(c.sample) ? c.sample : [];
+  const d = esc(c.domain);
+
+  const thumbs = samples
+    .slice(0, 4)
+    .map(
+      (s) => `
+      <a href="${esc(s.url || '#')}" target="_blank" rel="noopener" title="${esc((s.title || '').slice(0, 90))}" class="shop-thumb">
+        ${
+          s.imageUrl
+            ? `<img src="${esc(s.imageUrl)}" loading="lazy" onerror="this.style.visibility='hidden'">`
+            : '<div class="shop-thumb-empty"></div>'
+        }
+        <span>${s.price ? money(s.price) : '—'}</span>
+      </a>`
+    )
+    .join('');
+
+  const btns = [];
+  if (c.status === 'ok') {
+    btns.push(`<button class="btn btn-sm btn-primary" data-act="scan" data-domain="${d}">▶ Сканирай сега</button>`);
+    btns.push(`<button class="btn btn-sm" data-act="sched" data-domain="${d}">📅 Разписание</button>`);
+  }
+  if (c.status === 'local') {
+    btns.push(`<button class="btn btn-sm btn-warn" data-act="queue" data-domain="${d}">🖥️ Обходи от моя компютър</button>`);
+  }
+  if (c.status === 'manual') {
+    btns.push(`<button class="btn btn-sm" data-act="probe" data-domain="${d}">🔍 Проба със селектори</button>`);
+  }
+  btns.push(`<button class="btn btn-sm btn-ghost" data-act="rescan" data-domain="${d}">⟳ Провери пак</button>`);
+  btns.push(`<button class="btn btn-sm btn-ghost" data-act="reject" data-domain="${d}">✕ Скрий</button>`);
+
+  return `
+    <div class="card shop-row">
+      <div class="shop-row-main">
+        <div class="shop-row-head">
+          <a href="${esc(c.url)}" target="_blank" rel="noopener" class="shop-domain">${d}</a>
+          <span class="pill ${cls}">${esc(label)}</span>
+          ${c.platform && c.platform !== 'other' ? `<span class="pill pill-dim">${esc(c.platform)}</span>` : ''}
+          ${c.strategy ? `<span class="pill pill-cyan">${esc(c.strategy)}</span>` : ''}
+          ${c.products_found ? `<span class="pill pill-dim">${num(c.products_found)} продукта</span>` : ''}
+        </div>
+        ${c.title && c.title !== c.domain && !/^[a-z0-9.-]+$/i.test(c.title) ? `<div class="hint" style="margin:4px 0 0">${esc(c.title)}</div>` : ''}
+        <div class="hint" style="margin:6px 0 0">${esc(c.reason || '')}</div>
+        <div class="shop-row-actions">${btns.join('')}</div>
+      </div>
+      ${thumbs ? `<div class="shop-row-thumbs">${thumbs}</div>` : ''}
+    </div>`;
+}
+
+/** Списъкът с намерени магазини — групиран по присъда, за да се вижда кои стават. */
+function scraperCandidatesHtml(items, queue) {
+  const list = items || [];
+  const q = queue || {};
+  const ok = list.filter((c) => c.status === 'ok');
+  const loc = list.filter((c) => c.status === 'local');
+  const rest = list.filter((c) => c.status !== 'ok' && c.status !== 'local');
+
+  const head = `<div class="hint" style="margin:0 0 10px">
+    ${
+      list.length
+        ? `Проверени <strong>${num(list.length)}</strong> · сканируеми сега <strong style="color:#86EFAC">${num(ok.length)}</strong>` +
+          (loc.length ? ` · за моя компютър <strong style="color:#FCD34D">${num(loc.length)}</strong>` : '')
+        : 'Още нищо не е търсено. Напиши ключова дума горе и натисни „Търси и провери“.'
+    }
+    ${q.pending ? ` · 🖥️ чакат моя компютър: <strong>${num(q.pending)}</strong>` : ''}
+  </div>`;
+
+  if (!list.length) return head;
+
+  const sec = (title, arr, pill) =>
+    arr.length
+      ? `<div style="margin-top:12px">
+           <div class="card-title" style="margin-bottom:8px">${esc(title)} <span class="pill ${pill}">${num(arr.length)}</span></div>
+           ${arr.map(scraperCandidateRowHtml).join('')}
+         </div>`
+      : '';
+
+  return (
+    head +
+    sec('✅ Стават веднага от сървъра', ok, 'pill-green') +
+    sec('🖥️ През моя компютър (сайтът не пуска сървъра)', loc, 'pill-gold') +
+    sec('🧩 Не станаха автоматично', rest, 'pill-dim')
+  );
+}
+
+/** Самият таб: търсене по ключова дума + проверка на дадени адреси. */
+function scraperDiscoverHtml(items, queue) {
+  return `
+    <div class="card" style="border-color:rgba(251,191,36,.45)">
+      <div class="card-title">🔎 Търси магазини, които стават за сканиране</div>
+      <div class="hint" style="margin:6px 0 12px">
+        Напиши <strong>ключова дума</strong> — системата намира магазините в мрежата и <strong>проверява всеки</strong>
+        (Shopify / WooCommerce каталог, sitemap, продуктови карти в листинга). Показваме само тези, които наистина могат да се
+        обходят, <strong>с примерни продукти като доказателство</strong>. Ако сайтът не пуска сървъра (Cloudflare / бот-защита),
+        отива при <strong>домашния робот</strong> — обхожда се от твоя компютър, а не от датацентъра.
+      </div>
+      <div class="form-grid">
+        <label class="field full"><span>Ключови думи</span>
+          <input id="sd-q" placeholder="био козметика, кафе на зърна, спортни стоки, храни за кучета…"></label>
+        <label class="field" style="max-width:180px"><span>Колко сайта да провери</span>
+          <input id="sd-limit" type="number" min="1" max="25" value="8"></label>
+        <label class="field" style="max-width:200px"><span>Колко продукта при обиколка</span>
+          <input id="sd-count" type="number" min="1" max="2000" value="20"></label>
+        <label class="field" style="max-width:280px"><span>Повторна проверка</span>
+          <select id="sd-force">
+            <option value="0">Не — ползвай проверените до 12 ч</option>
+            <option value="1">Да — провери всички наново</option>
+          </select></label>
+        <label class="field full"><span>…или дай адреси сам (по един на ред)</span>
+          <textarea id="sd-domains" rows="2" placeholder="magazin.bg&#10;drug-magazin.com"></textarea></label>
+      </div>
+      <div class="shop-row-actions" style="margin-top:10px">
+        <button class="btn btn-primary" id="sd-run">🔎 Търси и провери</button>
+        <button class="btn" id="sd-bulk" title="Задай разписание за всички намерени сканируеми магазини">📅 Разписание за всички сканируеми</button>
+        <span class="hint" style="margin:0">Проверката прави истински заявки към сайтовете — учтива е и помни резултата 12 часа.</span>
+      </div>
+      <div id="sd-out" style="margin-top:12px">${scraperCandidatesHtml(items, queue)}</div>
+    </div>`;
+}
+
+function bindScraperDiscovery() {
+  const out = $('#sd-out');
+  const runBtn = $('#sd-run');
+
+  if (runBtn) {
+    runBtn.onclick = async () => {
+      const q = ($('#sd-q').value || '').trim();
+      const domains = ($('#sd-domains').value || '')
+        .split(/[\s,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!q && !domains.length) return toast('Дай ключова дума или поне един адрес', 'warn');
+
+      runBtn.disabled = true;
+      const old = runBtn.textContent;
+      runBtn.textContent = 'Търся и проверявам…';
+      out.innerHTML = `<div class="hint"><span class="spinner"></span> Търся магазини и проверявам кой става за сканиране.
+        Това прави по няколко заявки към всеки сайт — може да отнеме до минута.</div>`;
+      try {
+        const body = { limit: Number($('#sd-limit').value) || 8, force: $('#sd-force').value === '1' };
+        if (domains.length) body.domains = domains;
+        else body.query = q;
+        const r = await api('/scraper/discover', { method: 'POST', body });
+        const okN = (r.items || []).filter((i) => i.status === 'ok').length;
+        const locN = (r.items || []).filter((i) => i.status === 'local').length;
+        toast(`Проверени ${r.checked} · сканируеми ${okN}${locN ? ` · за моя компютър ${locN}` : ''}`);
+        if (r.note) toast(r.note, 'warn');
+        out.innerHTML = scraperCandidatesHtml(r.items || [], r.queue || {});
+      } catch (e) {
+        out.innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
+      }
+      runBtn.disabled = false;
+      runBtn.textContent = old;
+    };
+  }
+
+  if (out) {
+    out.onclick = async (ev) => {
+      const btn = ev.target.closest('button[data-act]');
+      if (!btn) return;
+      const domain = btn.dataset.domain;
+      const act = btn.dataset.act;
+      const countEl = $('#sd-count');
+      const count = Number(countEl ? countEl.value : 20) || 20;
+      btn.disabled = true;
+      try {
+        if (act === 'scan') {
+          const r = await api(`/scraper/candidates/${encodeURIComponent(domain)}/scan`, {
+            method: 'POST',
+            body: { count },
+          });
+          toast(`Обиколката тръгна: ${r.domain}`);
+          scraperJobId = r.jobId;
+          await render('scraper', true);
+          scSwitchTab('live');
+          return;
+        }
+
+        if (act === 'sched') {
+          await openScraperSchedulesFor(`https://${domain}/`);
+          return;
+        }
+
+        if (act === 'queue') {
+          await api('/scraper/local-queue', { method: 'POST', body: { domain, count } });
+          toast(`Добавено в опашката за моя компютър: ${domain}`);
+          btn.textContent = '✅ В опашката';
+          return;
+        }
+
+        if (act === 'probe') {
+          scSwitchTab('new');
+          const u = $('#sc-url');
+          if (u) u.value = `https://${domain}/`;
+          const p = $('#sc-probe');
+          if (p) p.click();
+          return;
+        }
+
+        if (act === 'rescan') {
+          toast(`Проверявам пак ${domain}…`);
+          const r = await api(`/scraper/candidates/${encodeURIComponent(domain)}/rescan`, { method: 'POST' });
+          const fresh = await api('/scraper/candidates?limit=40');
+          out.innerHTML = scraperCandidatesHtml(fresh.items || [], fresh.queue || {});
+          const first = (r.items || [])[0];
+          toast(`Готово: ${first ? first.status : '—'}${first && first.reason ? ` — ${first.reason.slice(0, 60)}` : ''}`);
+          return;
+        }
+
+        if (act === 'reject') {
+          await api(`/scraper/candidates/${encodeURIComponent(domain)}/reject`, { method: 'POST' });
+          const row = btn.closest('.shop-row');
+          if (row) row.remove();
+          toast(`Скрит: ${domain}`);
+          return;
+        }
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
+  const bulk = $('#sd-bulk');
+  if (bulk) {
+    bulk.onclick = async () => {
+      const doms = Array.from(document.querySelectorAll('#sd-out button[data-act="scan"]')).map(
+        (b) => `https://${b.dataset.domain}/`
+      );
+      if (!doms.length) return toast('Няма сканируеми магазини в списъка', 'warn');
+      await openScraperSchedulesFor(doms.join('\n'));
+    };
+  }
+}
+
+/** Отваря таба с разписанията, предварително попълнен с тези адреси. */
+async function openScraperSchedulesFor(urls) {
+  bulkPrefill = urls;
+  scSwitchTab('sched');
+  const b = document.getElementById('sc-sched-bulk');
+  if (b) b.click();
+  else toast('Формата за разписания не е налична — презареди страницата', 'warn');
 }
 
 /** Едновременно вървящите задачи — може да има няколко, за различни сайтове. */

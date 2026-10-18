@@ -6,6 +6,17 @@ import { audit, requireAdminPanel } from '../lib/admin.js';
 import { importExternalProducts } from '../lib/externalImport.js';
 import { saveLocalShopPrices } from '../lib/shopPrice.js';
 import {
+  discoverShops,
+  finishLocalScan,
+  listCandidates,
+  localQueueStats,
+  pendingLocalScans,
+  queueLocalScan,
+  rejectCandidate,
+  rememberJob,
+  takeLocalScans,
+} from '../lib/shopDiscovery.js';
+import {
   alreadyImported,
   downloadImage,
   importProduct,
@@ -875,5 +886,162 @@ export default async function scraperRoutes(app: FastifyInstance) {
         order by created_at asc`
     );
     return { items };
+  });
+
+  /* ======================================= 🔎 търсене на сканируеми магазини */
+
+  /**
+   * Търси магазини по ключова дума и ПРОВЕРЯВА кой става за сканиране.
+   *
+   * Връща само тези, които наистина могат да се обходят (status 'ok'), плюс
+   * тези, които чакат домашен IP ('local'), защото и те вършат работа — през
+   * робота на домашната машина.
+   */
+  app.post('/api/admin/scraper/discover', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        query: z.string().trim().max(120).optional(),
+        domains: z.array(z.string().trim().max(200)).max(25).optional(),
+        limit: z.coerce.number().int().min(1).max(25).optional(),
+        force: z.coerce.boolean().optional(),
+      })
+      .parse(req.body ?? {});
+
+    const result = await discoverShops(input);
+    await audit({
+      admin,
+      action: 'scraper.discover',
+      targetType: 'shop_candidates',
+      targetLabel: result.query,
+      details: {
+        checked: result.checked,
+        ok: result.items.filter((i) => i.status === 'ok').length,
+        local: result.items.filter((i) => i.status === 'local').length,
+        ai: result.usedAi,
+      },
+      ip: req.ip,
+    });
+    return { ok: true, ...result, queue: await localQueueStats() };
+  });
+
+  /** Вече проверените магазини (за да не се проверяват пак). */
+  app.get('/api/admin/scraper/candidates', async (req) => {
+    await requireAdminPanel(req);
+    const q = z
+      .object({
+        status: z.string().trim().max(20).optional(),
+        q: z.string().trim().max(120).optional(),
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+      })
+      .parse(req.query ?? {});
+    const items = await listCandidates(q);
+    return { items, queue: await localQueueStats() };
+  });
+
+  app.post('/api/admin/scraper/candidates/:domain/reject', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { domain } = z.object({ domain: z.string().min(3).max(200) }).parse(req.params);
+    await rejectCandidate(domain);
+    await audit({ admin, action: 'scraper.candidate_reject', targetType: 'shop_candidate', targetLabel: domain, ip: req.ip });
+    return { ok: true };
+  });
+
+  /** Проверява пак един магазин (например след като е бил зад Cloudflare). */
+  app.post('/api/admin/scraper/candidates/:domain/rescan', async (req) => {
+    await requireAdminPanel(req);
+    const { domain } = z.object({ domain: z.string().min(3).max(200) }).parse(req.params);
+    const result = await discoverShops({ domains: [domain], limit: 1, force: true });
+    return { ok: true, ...result };
+  });
+
+  /**
+   * Пуска обиколка направо от намерения магазин.
+   * Едно действие: създава задачата и запомня връзката към кандидата.
+   */
+  app.post('/api/admin/scraper/candidates/:domain/scan', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { domain } = z.object({ domain: z.string().min(3).max(200) }).parse(req.params);
+    const input = z
+      .object({
+        count: z.coerce.number().int().min(1).max(2000).default(20),
+        options: optionsSchema.optional(),
+      })
+      .parse(req.body ?? {});
+
+    const u = normalizeStartUrl(`https://${domain}/`);
+    const clean = u.hostname.replace(/^www\./, '');
+    const options = await optionsForSite(clean, { ...(input.options ?? {}), count: input.count });
+    const job = await one<{ id: string }>(
+      `insert into scrape_jobs (created_by, url, domain, mode, options, target_count, status)
+       values ($1,$2,$3,$4,$5::jsonb,$6,'queued') returning id::text`,
+      [admin.id, u.toString(), clean, options.mode, JSON.stringify(options), Math.min(input.count, options.count)]
+    );
+    await rememberJob(clean, job!.id);
+    await audit({
+      admin,
+      action: 'scraper.candidate_scan',
+      targetType: 'scrape_job',
+      targetId: job!.id,
+      targetLabel: clean,
+      ip: req.ip,
+    });
+    void runJob(job!.id).catch(() => undefined);
+    return { ok: true, jobId: job!.id, domain: clean, mode: options.mode };
+  });
+
+  /* ------------------------------ опашка за домашния робот (Cloudflare) --- */
+
+  /** Заявка сайтът да бъде обходен от домашната машина. */
+  app.post('/api/admin/scraper/local-queue', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        domain: z.string().trim().min(3).max(200),
+        count: z.coerce.number().int().min(1).max(500).optional(),
+        note: z.string().trim().max(200).optional(),
+      })
+      .parse(req.body ?? {});
+    const row = await queueLocalScan({ ...input, userId: admin.id });
+    await audit({
+      admin,
+      action: 'scraper.local_queue_add',
+      targetType: 'local_scan_queue',
+      targetId: row.id,
+      targetLabel: row.domain,
+      ip: req.ip,
+    });
+    return { ok: true, item: row };
+  });
+
+  app.get('/api/admin/scraper/local-queue', async (req) => {
+    await requireAdminPanel(req);
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(req.query ?? {});
+    return { items: await pendingLocalScans(q.limit), stats: await localQueueStats() };
+  });
+
+  /** Роботът маркира, че е поел заявките (за да не се обхождат два пъти). */
+  app.post('/api/admin/scraper/local-queue/take', async (req) => {
+    await requireAdminPanel(req);
+    const { domains } = z
+      .object({ domains: z.array(z.string().trim().min(3).max(200)).min(1).max(20) })
+      .parse(req.body ?? {});
+    const taken = await takeLocalScans(domains);
+    return { ok: true, taken };
+  });
+
+  /** Роботът отчита какво е свършил. */
+  app.post('/api/admin/scraper/local-queue/finish', async (req) => {
+    await requireAdminPanel(req);
+    const input = z
+      .object({
+        domain: z.string().trim().min(3).max(200),
+        ok: z.coerce.boolean(),
+        imported: z.coerce.number().int().min(0).max(10000).optional(),
+        note: z.string().trim().max(300).optional(),
+      })
+      .parse(req.body ?? {});
+    await finishLocalScan(input);
+    return { ok: true };
   });
 }

@@ -571,3 +571,44 @@ input[type="file"]::file-selector-button {
   margin-right: 10px;
 }
 input[type="file"]::file-selector-button:hover { border-color: var(--line-2); background: #1B2540; }
+
+/* ==================== Табове в секция „Скрапер“ (Търси магазини) ========== */
+.sc-tabs {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.sc-tab {
+  appearance: none; background: transparent; border: 1px solid var(--line);
+  color: var(--muted); padding: 8px 13px; border-radius: 11px;
+  font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.sc-tab:hover { background: #1D2740; color: #E5E7EB; }
+.sc-tab.active {
+  background: rgba(6, 182, 212, 0.14); border-color: rgba(6, 182, 212, 0.5); color: #67E8F9;
+}
+.sc-tab-badge {
+  background: rgba(251, 191, 36, 0.16); color: #FCD34D; border-radius: 999px;
+  padding: 1px 7px; font-size: 11.5px; font-weight: 800;
+}
+
+.sc-pane { display: none; }
+.sc-pane.active { display: block; }
+
+/* Един намерен магазин */
+.shop-row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; padding: 12px; margin-bottom: 8px; }
+.shop-row-main { flex: 1; min-width: 260px; }
+.shop-row-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.shop-domain { font-weight: 800; font-size: 14.5px; color: #E5E7EB; text-decoration: none; }
+.shop-domain:hover { color: #67E8F9; text-decoration: underline; }
+.shop-row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+.shop-row-thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.shop-thumb { width: 64px; display: block; text-decoration: none; color: var(--muted); }
+.shop-thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 9px; border: 1px solid var(--line); background: #111827; display: block; }
+.shop-thumb-empty { width: 64px; height: 64px; border-radius: 9px; border: 1px dashed var(--line); }
+.shop-thumb span { font-size: 11px; text-align: center; display: block; margin-top: 2px; }
+
+@media (max-width: 780px) {
+  .shop-row-thumbs { order: 2; }
+  .shop-thumb, .shop-thumb img, .shop-thumb-empty { width: 52px; height: 52px; }
+}

@@ -474,6 +474,119 @@ def send(api, token, domain, items):
         return {"raw": out[:300]}
 
 
+def admin_call(api, token, path, body=None, timeout=120):
+    """Заявка към админ API-то (GET или POST). Връща разчетен JSON или {}."""
+    cmd = ["curl", "-s", "-X", ("POST" if body is not None else "GET"),
+           api.rstrip("/") + path,
+           "-H", "Accept: application/json",
+           "-H", "Authorization: Bearer " + (token or "")]
+    kwargs = {}
+    if body is not None:
+        cmd += ["-H", "Content-Type: application/json", "--data-binary", "@-"]
+        kwargs["input"] = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    proc = subprocess.run(cmd, capture_output=True, timeout=timeout, **kwargs)
+    try:
+        return json.loads(proc.stdout.decode("utf-8", "replace") or "{}")
+    except Exception:
+        return {}
+
+
+def scan_site(base, count, mode, verbose=False):
+    """Обхожда един сайт: Magento GraphQL, иначе sitemap → продуктови страници.
+
+    Това е същата логика, която се ползва и при ръчно пускане — извадена е във
+    функция, за да може опашката (--queue) да я ползва за всеки сайт поотделно.
+    """
+    items = []
+
+    # 1) Magento GraphQL — ако сайтът го поддържа, това е най-надеждният път.
+    if mode in ("auto", "magento"):
+        mag = try_magento(base, count, verbose)
+        if mag:
+            items = mag[:count]
+            for item in items:
+                print(f"  \u2713 {item['price']} {item['currency']} — {item['title'][:60]}")
+
+    # 2) Иначе: sitemap → продуктови страници.
+    if not items and mode in ("auto", "sitemap"):
+        # събираме 4× повече адреси — част от тях се оказват категории без цена
+        urls = collect_product_urls(base, count * 4, verbose)
+        print(f"  намерени продуктови адреса: {len(urls)}")
+        for url in urls:
+            if len(items) >= count:
+                break
+            status, html, final = fetch(url, verbose)
+            if status != "200":
+                log(f"  пропускам ({status}): {url}", verbose)
+                continue
+            item = extract_product(html, final.split("#")[0])
+            if not item["title"] or not item["price"]:
+                log(f"  без цена/заглавие: {url}", verbose)
+                continue
+            print(f"  \u2713 {item['price']} {item['currency']} — {item['title'][:60]}")
+            items.append(item)
+            time.sleep(1.0)
+
+    return items
+
+
+def run_queue(api, token, count, mode, verbose=False, dry_run=False):
+    """Работи по опашката от таб \u201eТърси магазини\u201c — сайтовете, които сървърът не може.
+
+    Това е смисълът на целия механизъм: сървърът вижда Cloudflare и слага сайта в
+    опашката, а тази машина (домашен IP) го обхожда и внася продуктите.
+    """
+    waiting = admin_call(api, token, "/api/admin/scraper/local-queue?limit=20").get("items") or []
+    if not waiting:
+        print("Опашката е празна — няма сайтове за обхождане от тази машина.")
+        return 0
+
+    print("Чакат от моя компютър: %d сайта" % len(waiting))
+    for row in waiting:
+        print("  \u2022 %s (до %d продукта)" % (row.get("domain"), int(row.get("count") or count)))
+
+    domains = [r.get("domain") for r in waiting if r.get("domain")]
+    admin_call(api, token, "/api/admin/scraper/local-queue/take", {"domains": domains})
+
+    total = {"imported": 0, "skipped": 0}
+    for row in waiting:
+        domain = row.get("domain")
+        if not domain:
+            continue
+        per = min(int(row.get("count") or count), 500)
+        base = "https://" + domain + "/"
+        print(f"\n=== {domain} (до {per} продукта)")
+        try:
+            items = scan_site(base, per, mode, verbose)
+        except Exception as err:  # noqa: BLE001 — трябва да отчетем неуспеха, не да спрем
+            print("  грешка: %s" % err)
+            admin_call(api, token, "/api/admin/scraper/local-queue/finish",
+                       {"domain": domain, "ok": False, "note": str(err)[:250]})
+            continue
+
+        if not items:
+            print("  нищо за внасяне")
+            admin_call(api, token, "/api/admin/scraper/local-queue/finish",
+                       {"domain": domain, "ok": False, "note": "не намерих продукти от този IP"})
+            continue
+        if dry_run:
+            print(f"  (проба) щеше да внесе {len(items)} продукта")
+            continue
+
+        result = send(api, token, domain, items)
+        imported = int(result.get("imported") or 0)
+        skipped = int(result.get("skipped") or 0)
+        print(f"  внесени: {imported} | прескочени: {skipped}")
+        total["imported"] += imported
+        total["skipped"] += skipped
+        admin_call(api, token, "/api/admin/scraper/local-queue/finish",
+                   {"domain": domain, "ok": imported > 0, "imported": imported,
+                    "note": ("внесени %d" % imported) if imported else "нищо ново"})
+
+    print(f"\nОбщо от опашката: внесени {total['imported']}, прескочени {total['skipped']}")
+    return 0
+
+
 def read_password(args):
     if args.password:
         return args.password
@@ -501,6 +614,11 @@ def main():
     ap.add_argument("--api", default=os.environ.get("SMARTPRICE_API", "https://smartprice.bg"))
     ap.add_argument("--email", default=os.environ.get("SMARTPRICE_ADMIN_EMAIL", "kolyo.hristov@gmail.com"))
     ap.add_argument("--password", default=None)
+    ap.add_argument(
+        "--queue",
+        action="store_true",
+        help="работи по опашката от таб „Търси магазини“ (сайтовете, които сървърът не може да обходи)",
+    )
     ap.add_argument("--dry-run", action="store_true", help="само показва намереното, не внася")
     ap.add_argument(
         "--refresh",
@@ -523,6 +641,9 @@ def main():
             print("Не успях да вляза като админ — провери имейла/паролата.")
             return 2
 
+    if args.queue:
+        return run_queue(args.api, token, args.count, args.mode, args.verbose, args.dry_run)
+
     if args.refresh:
         print("Проверявам цените на внесените оферти от тази машина…")
         saved, failed = refresh_prices(args.api, token, args.limit or 200, args.verbose)
@@ -533,35 +654,7 @@ def main():
     for base in sites:
         domain = re.sub(r"^www\.", "", base.split("//")[-1].split("/")[0])
         print(f"\n=== {domain}")
-        items = []
-
-        # 1) Magento GraphQL — ако сайтът го поддържа, това е най-надеждният път.
-        if args.mode in ("auto", "magento"):
-            mag = try_magento(base, args.count, args.verbose)
-            if mag:
-                items = mag[: args.count]
-                for item in items:
-                    print(f"  ✓ {item['price']} {item['currency']} — {item['title'][:60]}")
-
-        # 2) Иначе: sitemap → продуктови страници.
-        if not items and args.mode in ("auto", "sitemap"):
-            # събираме 4× повече адреси — част от тях се оказват категории без цена
-            urls = collect_product_urls(base, args.count * 4, args.verbose)
-            print(f"  намерени продуктови адреса: {len(urls)}")
-            for url in urls:
-                if len(items) >= args.count:
-                    break
-                status, html, final = fetch(url, args.verbose)
-                if status != "200":
-                    log(f"  пропускам ({status}): {url}", args.verbose)
-                    continue
-                item = extract_product(html, final.split("#")[0])
-                if not item["title"] or not item["price"]:
-                    log(f"  без цена/заглавие: {url}", args.verbose)
-                    continue
-                print(f"  ✓ {item['price']} {item['currency']} — {item['title'][:60]}")
-                items.append(item)
-                time.sleep(1.0)
+        items = scan_site(base, args.count, args.mode, args.verbose)
 
         if not items:
             print("  нищо за внасяне")
