@@ -42,6 +42,12 @@ export async function pendingObjects(limit = 10): Promise<EnrichTarget[]> {
         and o.place_name is not null
         and length(o.place_name) > 2
         and e.slug is null
+        -- Не питаме за „обекти“, които са само име на град/област — това е шум
+        -- от геокодирането („Пловдив, Пловдив“, „София-град, София“). Google
+        -- връща празно, а ние плащаме заявката.
+        and lower(o.place_name) <> lower(o.city)
+        and o.place_name not ilike o.city || ',%'
+        and o.place_name not ilike '%, ' || o.city
       order by o.signals_count desc
       limit $1`,
     [Math.max(1, Math.min(50, limit))]
@@ -187,6 +193,16 @@ export async function enrichObjects(limit = 10): Promise<EnrichResult> {
         String((r as Record<string, unknown>).searchString).toLowerCase().includes(t.place_name.toLowerCase())) ??
       rows[i];
     if (!row || !row.title) continue;
+    // Празен резултат не се записва — иначе обектът изглежда „обогатен“, а в
+    // страницата му няма нищо. Остава в опашката за следващия път.
+    const useful =
+      typeof row.totalScore === 'number' ||
+      typeof row.reviewsCount === 'number' ||
+      Boolean(row.phone) ||
+      Boolean(row.website) ||
+      (Array.isArray(row.openingHours) && row.openingHours.length > 0) ||
+      typeof row.location?.lat === 'number';
+    if (!useful) continue;
     const hours = Array.isArray(row.openingHours)
       ? row.openingHours
           .filter((h) => h && h.day && h.hours)
