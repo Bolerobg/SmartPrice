@@ -24,6 +24,8 @@ import {
   apifyReady,
   apifyRenderHtml,
 } from './apifyBrowser.js';
+// Превключвателите от панела: всеки двигател може да се изключи (вкл./изкл.).
+import { engineOn } from './engines.js';
 import { browserAvailable, renderHtml } from './render.js';
 import {
   collectFromOpencart,
@@ -142,7 +144,7 @@ export async function searchShops(keyword: string, limit = 12): Promise<FoundSho
     // Reddit, mastodon). Плаща се на резултат, затова само за първия вариант.
     // Резултатите минават през СЪЩИЯ филтър за домейни, за да не вкараме
     // Facebook/OLX/форуми като „магазин“.
-    if (variant === variants[0]) {
+    if (variant === variants[0] && (await engineOn('discovery_google'))) {
       const google = await googleSearch(variant, 12).catch(() => []);
       if (google.length) {
         const titles = new Map<string, string>();
@@ -444,6 +446,8 @@ export async function checkShop(
     // Cloudflare проба добавя 60–130 сек и цялата заявка от панела се реже
     // (проверено на живо: 6 сайта → заявката умираше без отговор).
     if (left() < 30_000) return null;
+    // Изключен ли е двигателят от панела? Тогава не харчим.
+    if (!(await engineOn('apify_browser'))) return null;
     if (!(await apifyReady())) return null;
     if (!(await apifyBudgetAllows(0.15)).allowed) return null;
     const apTimeout = Math.max(15_000, Math.min(45_000, left() - 8_000));
@@ -482,7 +486,23 @@ export async function checkShop(
   const viaCrawler = async (): Promise<ShopCheck | null> => {
     // Обходът отнема 40–120 сек — не влизаме, ако заявката няма време.
     if (left() < 45_000) return null;
-    const r = await apifyCrawl([base.url], { maxPages: 3, resident: true }).catch(() => null);
+    if (!(await engineOn('apify_crawler'))) return null;
+
+    // Ако е включено в панела: тръгваме от КАТЕГОРИЙНА страница, не от
+    // началната. Точно това липсваше при IKEA — началната е маркетингова и
+    // няма нито един продукт с цена, а категорията има.
+    let urls = [base.url];
+    if (await engineOn('crawler_from_category')) {
+      try {
+        const cats = home ? extractCategoryLinks(home, base.url).slice(0, 2) : [];
+        if (cats.length) urls = [...cats, base.url];
+      } catch {
+        /* не можахме да извадим категории — обхождаме отначало */
+      }
+    }
+    const r = await apifyCrawl(urls, { maxPages: urls.length > 1 ? 5 : 4, resident: true }).catch(
+      () => null
+    );
     if (!r?.ok) return null;
     for (const page of r.pages) {
       // Капча или грешка от сайта (emag.bg дава 511) — не е успех, не лъжем.
@@ -516,11 +536,16 @@ export async function checkShop(
 
   const wall = wallReason(homeStatus, home);
   if (wall) {
-    base.status = 'local';
+    // Изключен ли е домашният робот от панела? Тогава НЕ записваме сайта за
+    // обхождане от компютъра — оставяме го като „ръчно“, за да не се трупа опашка.
+    base.status = (await engineOn('home_robot_fallback')) ? 'local' : 'manual';
     base.reason = wall;
     // Доказателство, че сайтът изобщо съществува (иначе не пускаме заявка към робота).
     if (homeStatus >= 200 && homeStatus < 500) {
-      base.reason += ' Ще го обходи домашният робот (scripts/scrape_local.py).';
+      base.reason +=
+        base.status === 'local'
+          ? ' Ще го обходи домашният робот (scripts/scrape_local.py).'
+          : ' Домашният робот е ИЗКЛЮЧЕН от панела (🔧 Двигатели), затова остава ръчно.';
     }
     // Първо пробваме с Apify + residential — това е начинът да минем Cloudflare
     // без да зависим от това дали домашният компютър е включен.

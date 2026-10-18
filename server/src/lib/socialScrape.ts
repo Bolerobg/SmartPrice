@@ -314,6 +314,8 @@ export interface SocialScanInput {
   /** Думите/адресите, по един на ред (или масив). */
   targets: string[] | string;
   options?: Record<string, string | number | boolean>;
+  /** Откъде е пуснато — показва се в „История“ (напр. „Автоматично (седмично)“). */
+  trigger?: string;
 }
 
 const RUN_KEY = 'social_scrape_last';
@@ -515,7 +517,7 @@ export async function startSocialScan(input: SocialScanInput): Promise<{ started
       mode,
       JSON.stringify(targets),
       JSON.stringify({ ...options, __actorInput: actorInputJson }),
-      `Пуснато от панела: ${meta.label} · ${mode}`,
+      `${input.trigger ?? 'Пуснато от панела'}: ${meta.label} · ${mode}`,
     ]
   );
   const runId = row?.id;

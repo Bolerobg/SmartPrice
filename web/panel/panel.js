@@ -2386,6 +2386,13 @@ async function renderScraper(box) {
 
   const jobs = await api('/scraper/jobs?limit=15');
   const schedules = await api('/scraper/schedules');
+  // 🔧 Превключвателите на двигателите — за да се вижда и спира от панела.
+  let engines = [];
+  try {
+    engines = (await api('/scraper/engines')).engines || [];
+  } catch {
+    /* endpoint-ът още не е наличен — секцията просто не се показва */
+  }
   const runningList = await api('/scraper/running');
   const running = (jobs.items || []).find((j) =>
     ['queued', 'discovering', 'parsing', 'enriching', 'importing'].includes(j.status)
@@ -2553,7 +2560,9 @@ async function renderScraper(box) {
     <div class="sc-pane" id="sc-pane-progress">${scraperProgressHtml(cursors.items || [], catmap.items || [])}</div>
     <div class="sc-pane" id="sc-pane-ads">${scraperAdsHtml(classifieds)}</div>
     <div class="sc-pane" id="sc-pane-places">${scraperPlacesHtml(places)}</div>
-    <div class="sc-pane" id="sc-pane-sites"><div id="sc-sites">${scraperSitesHtml(info.sites || [])}</div></div>`;
+    <div class="sc-pane" id="sc-pane-sites"><div id="sc-sites">${scraperSitesHtml(info.sites || [])}</div></div>
+
+    <div class="sc-pane" id="sc-pane-engines">${scraperEnginesHtml(engines)}</div>`;
 
   /* ------------------------------------------------------------ бутони */
 
@@ -2677,6 +2686,7 @@ async function renderScraper(box) {
 
   bindScraperTabs();
   bindScraperDiscovery();
+  bindScraperEngines(box);
 
   bindScraperHistory();
   bindScraperStop();
@@ -2705,6 +2715,7 @@ const SC_TABS = [
   ['ads', '🏷️ Обяви'],
   ['places', '🏪 Обекти'],
   ['sites', '🌐 Сайтове'],
+  ['engines', '🔧 Двигатели'],
 ];
 const SC_PANES = {
   new: 'sc-pane-new',
@@ -2716,6 +2727,7 @@ const SC_PANES = {
   ads: 'sc-pane-ads',
   places: 'sc-pane-places',
   sites: 'sc-pane-sites',
+  engines: 'sc-pane-engines',
 };
 
 /** Табовете на секцията. Ако има чакащи заявки за домашния робот, се виждат. */
@@ -6524,6 +6536,7 @@ const SOC_TABS = [
   ['ideas', '💡 Идеи за скриптове'],
   ['hist', '📜 История'],
   ['setup', '⚙️ Настройки'],
+  ['auto', '🤖 Автоматизация'],
 ];
 const SOC_PANES = {
   new: 'soc-pane-new',
@@ -6531,6 +6544,7 @@ const SOC_PANES = {
   ideas: 'soc-pane-ideas',
   hist: 'soc-pane-hist',
   setup: 'soc-pane-setup',
+  auto: 'soc-pane-auto',
 };
 
 let socTab = 'new';
@@ -7021,7 +7035,8 @@ async function renderSocial(box) {
     <div class="sc-pane" id="soc-pane-items" style="display:none"></div>
     <div class="sc-pane" id="soc-pane-ideas" style="display:none"></div>
     <div class="sc-pane" id="soc-pane-hist" style="display:none"></div>
-    <div class="sc-pane" id="soc-pane-setup" style="display:none"></div>`;
+    <div class="sc-pane" id="soc-pane-setup" style="display:none"></div>
+    <div class="sc-pane" id="soc-pane-auto" style="display:none"></div>`;
 
   document.querySelectorAll('[data-soc-tab]').forEach((b) => {
     b.onclick = () => {
@@ -7030,6 +7045,7 @@ async function renderSocial(box) {
       if (b.dataset.socTab === 'ideas') socLoadIdeas();
       if (b.dataset.socTab === 'hist') socLoadHist();
       if (b.dataset.socTab === 'setup') socLoadSetup();
+      if (b.dataset.socTab === 'auto') socLoadAuto(box);
     };
   });
 
@@ -7123,4 +7139,183 @@ async function renderSocial(box) {
   socRenderSheet();
   socUpdateStats();
   if (socInfo.running) socPollRun(box);
+}
+
+
+/* ------------------------------------------------ 🔧 двигатели (Скрапер) */
+
+/**
+ * Всяка стъпка от обиколката като ключ вкл./изкл. — за да е прозрачно какво
+ * работи, кое харчи пари и какво се случва, ако се изключи.
+ */
+function scraperEnginesHtml(engines) {
+  if (!engines || !engines.length) {
+    return '<div class="card"><div class="hint">Превключвателите не се заредиха. Презареди страницата.</div></div>';
+  }
+  const groups = {};
+  engines.forEach((e) => {
+    const g = e.group || 'други';
+    (groups[g] = groups[g] || []).push(e);
+  });
+  const onCount = engines.filter((e) => e.on).length;
+  return `<div class="card">
+    <div class="card-title">🔧 Двигатели на обиколката <span class="muted">— включени ${num(onCount)} от ${num(engines.length)}</span></div>
+    <div class="hint">
+      Тук се вижда точно с какво се чете един сайт. Всяко копче може да се изключи — тогава тази стъпка се
+      пропуска и се минава към следващата. Така спираш нещо, преди да е похарчило пари, и разбираш защо
+      даден сайт излиза „ръчно“.
+    </div>
+  </div>
+  ${Object.entries(groups)
+    .map(
+      ([g, list]) => `<div class="card">
+    <div class="card-title">${esc(g)}</div>
+    ${list
+      .map(
+        (e) => `<label class="soc-opt-check" style="margin-bottom:10px;align-items:flex-start">
+      <input type="checkbox" data-eng="${esc(e.key)}" ${e.on ? 'checked' : ''} style="margin-top:3px" />
+      <span style="flex:1">
+        <b>${esc(e.label)}</b>
+        ${e.paid ? '<span class="pill pill-gold">харчи пари</span>' : '<span class="pill pill-green">безплатно</span>'}
+        <div class="hint" style="margin-top:4px">${esc(e.help)}</div>
+        ${e.offEffect ? `<div class="hint" style="margin-top:2px;color:#FCD34D">Ако се изключи: ${esc(e.offEffect)}</div>` : ''}
+      </span>
+    </label>`
+      )
+      .join('')}
+  </div>`
+    )
+    .join('')}`;
+}
+
+function bindScraperEngines(box) {
+  document.querySelectorAll('[data-eng]').forEach((el) => {
+    el.onchange = async () => {
+      const key = el.dataset.eng;
+      el.disabled = true;
+      try {
+        const r = await api('/scraper/engines', { method: 'POST', body: { key, on: el.checked } });
+        toast(`${el.checked ? 'Включен' : 'Изключен'}: ${key}`);
+        const fresh = (r && r.engines) || [];
+        const pane = document.getElementById('sc-pane-engines');
+        if (pane) {
+          pane.innerHTML = scraperEnginesHtml(fresh);
+          bindScraperEngines(box);
+        }
+      } catch (e) {
+        toast(e.message, 'err');
+        el.checked = !el.checked;
+      }
+      el.disabled = false;
+    };
+  });
+}
+
+/* --------------------------------------------- 🤖 автоматизация (Социални) */
+
+const SOC_WEEKDAYS = ['неделя', 'понеделник', 'вторник', 'сряда', 'четвъртък', 'петък', 'събота'];
+
+async function socLoadAuto(box) {
+  const pane = document.getElementById('soc-pane-auto');
+  if (!pane) return;
+  const st = await api('/social/auto');
+  const s = st.settings || {};
+  pane.innerHTML = `
+    <div class="card">
+      <div class="card-title">🤖 Автоматично седмично проучване <span class="muted">— по подразбиране ИЗКЛЮЧЕНО</span></div>
+      <div class="hint">
+        Когато е включено, сървърът сам пуска проучването в избрания ден и час и резултатите влизат в
+        „📊 Резултати“ с бележка „Автоматично“. Нищо не се пуска, докато ключът по-долу е изключен.
+      </div>
+      <label class="soc-opt-check" style="margin-top:12px">
+        <input type="checkbox" id="sa-enabled" ${s.enabled ? 'checked' : ''} />
+        <span><b>Включи автоматичното проучване</b>
+          <div class="hint">Изключено = нищо не се случва само. Включва се и се изключва с това копче.</div></span>
+      </label>
+      <div class="hint" style="margin:10px 0">
+        Състояние: ${st.nextRunAt
+          ? `<span class="pill pill-green">включено</span> · следващо: <b>${esc(dt(st.nextRunAt))}</b> (${esc(st.weekdayLabel)})`
+          : '<span class="pill pill-red">изключено</span>'}
+        ${st.last ? `<br>Последно автоматично: ${esc(dt(st.last.at))} · ${num(st.last.found)} пускания · ${esc(st.last.note || '')}` : ''}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Кога и какво</div>
+      <div class="grid grid-4">
+        <label class="field"><span>Ден</span><select id="sa-wd">
+          ${SOC_WEEKDAYS.map((d, i) => `<option value="${i}" ${Number(s.weekday) === i ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+        </select></label>
+        <label class="field"><span>Час (българско време)</span><input type="number" id="sa-hour" value="${num(s.hour)}" min="0" max="23" /></label>
+        <label class="field"><span>Минута</span><input type="number" id="sa-min" value="${num(s.minute)}" min="0" max="59" /></label>
+        <label class="field"><span>Как търсим</span><select id="sa-mode">
+          <option value="search" ${s.mode === 'search' ? 'selected' : ''}>По търсене (думи)</option>
+          <option value="hashtag" ${s.mode === 'hashtag' ? 'selected' : ''}>По хаштаг</option>
+        </select></label>
+      </div>
+      <div class="grid grid-4">
+        <label class="field"><span>Колко резултата на платформа</span><input type="number" id="sa-max" value="${num(s.maxResults)}" min="5" max="200" /></label>
+        <label class="field"><span>Минимум гледания</span><input type="number" id="sa-views" value="${num(s.minViews)}" min="0" /></label>
+      </div>
+      <label class="field"><span>Темите (по една на ред)</span>
+        <textarea id="sa-topics" rows="4">${esc(s.topics || '')}</textarea>
+        <div class="hint">Препоръка: „По търсене“ с български фрази дава по-точни резултати от хаштагове.</div>
+      </label>
+      <div class="grid grid-3">
+        <label class="soc-opt-check"><input type="checkbox" id="sa-tiktok" ${s.tiktok ? 'checked' : ''} /><span><b>TikTok</b><div class="hint">Работи без вход.</div></span></label>
+        <label class="soc-opt-check"><input type="checkbox" id="sa-ig" ${s.instagram ? 'checked' : ''} /><span><b>Instagram</b><div class="hint">Иска sessionid (⚙️ Настройки).</div></span></label>
+        <label class="soc-opt-check"><input type="checkbox" id="sa-ads" ${s.excludeAds ? 'checked' : ''} /><span><b>Без реклами</b><div class="hint">Изключено = рекламите остават (виждаш какво правят конкурентите).</div></span></label>
+      </div>
+      <label class="soc-opt-check" style="margin-top:10px">
+        <input type="checkbox" id="sa-onstart" ${s.runOnStart ? 'checked' : ''} />
+        <span><b>Пробно пускане при рестарт на сървъра</b>
+          <div class="hint">За да се види, че работи, без да се чака до уговорения ден.</div></span>
+      </label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <button type="button" class="btn btn-primary" data-soc="save-auto">💾 Запази</button>
+        <button type="button" class="btn btn-warn" data-soc="run-auto">▶️ Пусни веднага (пробно)</button>
+      </div>
+      <div id="sa-run"></div>
+    </div>`;
+
+  const read = () => ({
+    enabled: document.getElementById('sa-enabled').checked,
+    weekday: Number(document.getElementById('sa-wd').value),
+    hour: Number(document.getElementById('sa-hour').value),
+    minute: Number(document.getElementById('sa-min').value),
+    mode: document.getElementById('sa-mode').value,
+    maxResults: Number(document.getElementById('sa-max').value) || 30,
+    minViews: Number(document.getElementById('sa-views').value) || 0,
+    topics: document.getElementById('sa-topics').value,
+    tiktok: document.getElementById('sa-tiktok').checked,
+    instagram: document.getElementById('sa-ig').checked,
+    excludeAds: document.getElementById('sa-ads').checked,
+    runOnStart: document.getElementById('sa-onstart').checked,
+  });
+
+  const save = pane.querySelector('[data-soc="save-auto"]');
+  if (save)
+    save.onclick = async () => {
+      await api('/social/auto', { method: 'POST', body: read() });
+      toast('Автоматизацията е запазена');
+      socLoadAuto(box);
+    };
+  const runNow = pane.querySelector('[data-soc="run-auto"]');
+  if (runNow)
+    runNow.onclick = async () => {
+      runNow.disabled = true;
+      const el = document.getElementById('sa-run');
+      el.innerHTML = '<div class="hint"><span class="spinner"></span> Пускам… (TikTok отнема 20–60 сек)</div>';
+      try {
+        await api('/social/auto', { method: 'POST', body: read() });
+        const r = await api('/social/auto/run', { method: 'POST' });
+        el.innerHTML = `<div class="hint">${esc((r.results || []).join(' · ') || 'нищо не тръгна')}</div>`;
+        toast('Пуснато — виж „📊 Резултати“');
+        socLoadHist();
+      } catch (e) {
+        el.innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
+      }
+      runNow.disabled = false;
+    };
+  enhanceSelects();
 }

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { many, one, query } from '../db.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { audit, requireAdminPanel, requireFullAdmin } from '../lib/admin.js';
+import { ENGINE_SWITCHES, engineStatus, setEngineSwitch } from '../lib/engines.js';
 import { importExternalProducts } from '../lib/externalImport.js';
 import { saveLocalShopPrices } from '../lib/shopPrice.js';
 import {
@@ -120,6 +121,35 @@ export default async function scraperRoutes(app: FastifyInstance) {
   }
 
   /* --------------------------------------------------------------- инфо */
+
+  /**
+   * 🔧 Двигатели на обиколката — какво работи в момента.
+   * Всяко копче в панела идва оттук, заедно с обяснението какво прави, харчи ли
+   * пари и какво се случва, ако се изключи (прозрачност, не „магия“).
+   */
+  app.get('/api/admin/scraper/engines', async (req) => {
+    await requireAdminPanel(req);
+    return { engines: await engineStatus() };
+  });
+
+  app.post('/api/admin/scraper/engines', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const input = z
+      .object({ key: z.string().trim().min(2).max(40), on: z.coerce.boolean() })
+      .parse(req.body ?? {});
+    const known = ENGINE_SWITCHES.some((s) => s.key === input.key);
+    if (!known) throw badRequest('Няма такъв двигател.');
+    const all = await setEngineSwitch(input.key, input.on);
+    await audit({
+      admin,
+      action: 'scraper.engine_switch',
+      targetType: 'engine',
+      targetId: input.key,
+      targetLabel: `${input.key}=${input.on ? 'вкл' : 'изкл'}`,
+      ip: req.ip,
+    }).catch(() => undefined);
+    return { ok: true, on: all[input.key] !== false, engines: await engineStatus() };
+  });
 
   app.get('/api/admin/scraper/info', async (req) => {
     await requireAdminPanel(req);

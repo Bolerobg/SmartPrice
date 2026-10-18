@@ -16,6 +16,7 @@ import { one, query } from '../db.js';
 // Верига за проверка на цената: суров HTML → ИСТИНСКИ браузър → Apify (residential).
 // Досега имаше само суровият HTML, затова на JS магазините бутонът казваше „няма цена“.
 import { browserAvailable, renderHtml } from './render.js';
+import { engineOn } from './engines.js';
 import { apifyReady, apifyBudgetAllows, apifyRenderHtml } from './apifyBrowser.js';
 
 export interface ShopPriceResult {
@@ -221,7 +222,7 @@ export async function checkShopPrice(
     //    сайтовете, които ги показват само след JavaScript (jysk, praktis,
     //    technomarket…). Точно този път липсваше — затова бутонът казваше
     //    „не открих цена“ на много магазини.
-    if (!hasUsablePrice(parsed) && browserAvailable()) {
+    if (!hasUsablePrice(parsed) && browserAvailable() && (await engineOn('price_check_server_browser'))) {
       // 15 сек стигат за domcontentloaded + кратка пауза за заявките с цената.
       // (Преди бяха 20 сек + 6 сек „мрежата утихна“ + 2.5 сек пауза = ~25 сек,
       // а приложението прекъсваше на 20 сек → бутонът изглеждаше счупен.)
@@ -241,7 +242,12 @@ export async function checkShopPrice(
 
     // 2) Apify с residential прокси — САМО ако сайтът наистина блокира и има
     //    дневен бюджет (едно отваряне ≈ $0.0026). Последна инстанция.
-    if (!hasUsablePrice(parsed) && blocked && (await apifyReady().catch(() => false))) {
+    if (
+      !hasUsablePrice(parsed) &&
+      blocked &&
+      (await engineOn('price_check_apify')) &&
+      (await apifyReady().catch(() => false))
+    ) {
       const budget = await apifyBudgetAllows(0.02).catch(() => ({ allowed: false, today: 0, limit: 0 }));
       if (budget.allowed) {
         const a = await apifyRenderHtml([key], { resident: true, timeoutMs: 30_000 }).catch(() => null);

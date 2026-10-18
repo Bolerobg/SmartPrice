@@ -19,6 +19,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit, requireAdminPanel, requireFullAdmin } from '../lib/admin.js';
+import { runSocialAuto, socialAutoStatus, setSocialAuto } from '../lib/socialScheduler.js';
 import {
   deleteIdea,
   getSocialDefaults,
@@ -182,6 +183,56 @@ export default async function socialRoutes(app: FastifyInstance): Promise<void> 
       ip: req.ip,
     }).catch(() => undefined);
     return { ok: true, hasCookie: Boolean(cookie.trim()) };
+  });
+
+  /* ------------------------------------------------ 🤖 автоматично проучване */
+
+  app.get('/api/admin/social/auto', async (req) => {
+    await requireAdminPanel(req);
+    return socialAutoStatus();
+  });
+
+  app.post('/api/admin/social/auto', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const patchInput = z
+      .object({
+        enabled: z.boolean().optional(),
+        weekday: z.coerce.number().int().min(0).max(6).optional(),
+        hour: z.coerce.number().int().min(0).max(23).optional(),
+        minute: z.coerce.number().int().min(0).max(59).optional(),
+        tiktok: z.boolean().optional(),
+        instagram: z.boolean().optional(),
+        mode: z.enum(['search', 'hashtag']).optional(),
+        topics: z.string().max(3000).optional(),
+        minViews: z.coerce.number().int().min(0).optional(),
+        maxResults: z.coerce.number().int().min(5).max(200).optional(),
+        excludeAds: z.boolean().optional(),
+        runOnStart: z.boolean().optional(),
+      })
+      .parse(req.body ?? {});
+    await setSocialAuto(patchInput);
+    await audit({
+      admin,
+      action: 'social.auto_settings',
+      targetType: 'setting',
+      details: patchInput,
+      ip: req.ip,
+    }).catch(() => undefined);
+    return { ok: true, ...(await socialAutoStatus()) };
+  });
+
+  /** Пусни веднага — за да се види, че работи, без да чакаме неделя. */
+  app.post('/api/admin/social/auto/run', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const res = await runSocialAuto('manual');
+    await audit({
+      admin,
+      action: 'social.auto_run',
+      targetType: 'social_run',
+      details: res,
+      ip: req.ip,
+    }).catch(() => undefined);
+    return { ok: true, ...res };
   });
 
   /** Текущите настройки (без бисквитката — само дали я има). */
