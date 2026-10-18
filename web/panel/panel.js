@@ -6565,7 +6565,13 @@ function socSwitchTab(name) {
   socTab = name;
   SOC_TABS.forEach(([id]) => {
     const pane = document.getElementById(SOC_PANES[id]);
-    if (pane) pane.style.display = id === name ? '' : 'none';
+    if (!pane) return;
+    // ВАЖНО: `display = ''` НЕ стига — CSS-ът на .sc-pane е display:none, затова
+    // панелът пак оставаше скрит и изглеждаше „нищо не работи“. Затова слагаме
+    // и класа active, и явен display.
+    const on = id === name;
+    pane.style.display = on ? 'block' : 'none';
+    pane.classList.toggle('active', on);
   });
   document.querySelectorAll('[data-soc-tab]').forEach((b) => {
     b.classList.toggle('active', b.dataset.socTab === name);
@@ -7032,7 +7038,7 @@ async function renderSocial(box) {
       <div id="soc-stats" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"></div>
     </div>
     ${socTabsHtml()}
-    <div class="sc-pane" id="soc-pane-new"></div>
+    <div class="sc-pane active" id="soc-pane-new" style="display:block"></div>
     <div class="sc-pane" id="soc-pane-items" style="display:none"></div>
     <div class="sc-pane" id="soc-pane-ideas" style="display:none"></div>
     <div class="sc-pane" id="soc-pane-hist" style="display:none"></div>
