@@ -747,9 +747,9 @@ export async function listSocialItems(params: {
 export async function socialInfo() {
   const [runs, totals, byPlatform, ideas, cookie, defaults] = await Promise.all([
     one<{ n: string }>(`select count(*)::text as n from social_scrape_runs`),
-    one<{ n: string; usd: string }>(
-      `select count(*)::text as n, coalesce(sum(usd),0)::text as usd from social_scrape_items`
-    ),
+    // ВАЖНО: `usd` е в social_scrape_runs (едно пускане), НЕ в items.
+    // Точно тук се счупи първата версия — колоната не съществуваше.
+    one<{ n: string }>(`select count(*)::text as n from social_scrape_items`),
     many<{ platform: string; n: string; top_views: string | null }>(
       `select platform, count(*)::text as n, max(views)::text as top_views
          from social_scrape_items group by platform order by 2 desc`
