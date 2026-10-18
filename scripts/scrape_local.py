@@ -24,6 +24,7 @@ import html as html_mod
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,59 @@ def looks_like_product(url):
     if PRODUCT_PATH.search(url):
         return True
     return bool(PRODUCT_SLUG.match(url.rstrip("/").rsplit("/", 1)[-1]))
+
+
+CHROME_CANDIDATES = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+]
+
+
+def chrome_path():
+    """Къде е Chrome/Edge на тази машина (ако има)."""
+    for candidate in CHROME_CANDIDATES:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def fetch_rendered(url, wait_ms=9000, verbose=False):
+    """Чете страницата с ИСТИНСКИ браузър (headless Chrome/Edge).
+
+    Защо: част от сайтовете (bauhaus.bg, jysk.bg, ikea.bg, mr-bricolage.bg…)
+    връщат HTML без цени — те идват чак след като JavaScript-ът се изпълни.
+    `--virtual-time-budget` дава на страницата време да си свърши работата.
+    """
+    exe = chrome_path()
+    if not exe:
+        log("  (няма Chrome/Edge за рендиране)", verbose)
+        return None
+    fd, profile = tempfile.mkstemp(prefix="sp-chrome-")
+    os.close(fd)
+    try:
+        proc = subprocess.run(
+            [
+                exe, "--headless=new", "--disable-gpu", "--no-sandbox",
+                "--disable-dev-shm-usage", "--no-first-run", "--mute-audio",
+                "--blink-settings=imagesEnabled=false",
+                "--user-data-dir=" + profile,
+                "--virtual-time-budget=%d" % wait_ms,
+                "--dump-dom", url,
+            ],
+            capture_output=True, text=True, errors="replace", timeout=120,
+        )
+        html = proc.stdout or ""
+        if len(html) > 2000 and not CHALLENGE.search(html[:4000]):
+            return html
+        log("  рендирането върна празна/защитена страница (%d знака)" % len(html), verbose)
+    except Exception as err:  # noqa: BLE001 — важно е да продължим, не да спрем
+        log("  браузърът не успя: %s" % str(err)[:120], verbose)
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+    return None
 
 
 def log(msg, verbose=True):
@@ -520,6 +574,15 @@ def scan_site(base, count, mode, verbose=False):
                 log(f"  пропускам ({status}): {url}", verbose)
                 continue
             item = extract_product(html, final.split("#")[0])
+            if not item["title"] or not item["price"]:
+                # Цените може да идват с JavaScript (bauhaus.bg, jysk.bg, ikea.bg…) —
+                # отваряме страницата с истински браузър и четем пак.
+                rendered = fetch_rendered(final, verbose=verbose)
+                if rendered:
+                    deeper = extract_product(rendered, final)
+                    if deeper["title"] and deeper["price"]:
+                        item = deeper
+                        print("  (цената я има само след рендиране)")
             if not item["title"] or not item["price"]:
                 log(f"  без цена/заглавие: {url}", verbose)
                 continue

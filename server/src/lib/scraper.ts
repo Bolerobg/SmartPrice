@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { many, one, query, tx } from '../db.js';
 import { env, features } from '../env.js';
 import { addApifySpend, apifyBudgetAllows, apifyReady, apifyRenderHtml } from './apifyBrowser.js';
-import { advanceCursor } from './scrapeCursor.js';
+import { advanceCursor, lookupCategory, rememberCategory } from './scrapeCursor.js';
 import { browserAvailable, renderHtml } from './render.js';
 import { putImage, publicUrl } from './storage.js';
 
@@ -3266,12 +3266,23 @@ export async function runJob(jobId: string): Promise<void> {
       }
 
       const blob = `${title} ${p.breadcrumb ?? ''} ${p.description ?? ''}`;
+      // 🏷️ Категорията на магазина (последната част от пътя: „Дом › Кухня ›
+      // Микровълнови фурни“ → „Микровълнови фурни“).
+      const catSource = (p.breadcrumb ?? '').split('›').pop()?.trim() || '';
+      // Първо питаме какво вече знаем за тази чужда категория — от ТОЗИ или от
+      // ДРУГ магазин. Така „Микровълнова фурна“ от втория сайт влиза в същата
+      // наша категория, вместо да се създава нова (против „1000 категории“).
+      const mappedCat = catSource ? await lookupCategory(catSource).catch(() => null) : null;
       const cat =
         o.categoryMode === 'fixed' && o.fixedCategory && (SCRAPE_CATEGORIES as readonly string[]).includes(o.fixedCategory)
           ? o.fixedCategory
-          : o.categoryMode === 'ai' && ai?.category && (SCRAPE_CATEGORIES as readonly string[]).includes(ai.category)
-            ? ai.category
-            : guessCategory(blob);
+          : mappedCat
+            ? (mappedCat.category as (typeof SCRAPE_CATEGORIES)[number])
+            : o.categoryMode === 'ai' && ai?.category && (SCRAPE_CATEGORIES as readonly string[]).includes(ai.category)
+              ? ai.category
+              : guessCategory(blob);
+      // Запомняме съответствието, за да е автоматично следващия път.
+      if (catSource && cat) await rememberCategory(catSource, cat).catch(() => undefined);
 
       const { priceEur } = normalizeCurrency(p.price, p.currency, `${title} ${p.breadcrumb ?? ''}`);
 
