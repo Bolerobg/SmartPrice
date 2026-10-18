@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { ProductPairPuzzle } from '@/components/ProductPairPuzzle';
 import { api, type PuzzleTile } from '@/src/api/client';
@@ -123,7 +124,7 @@ export default function PuzzleDemoScreen() {
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.back}>
+          <TouchableOpacity onPress={() => goBack(router)} style={styles.back}>
             <Ionicons name="chevron-back" size={22} color={COLORS.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Тренировка · пъзелът</Text>

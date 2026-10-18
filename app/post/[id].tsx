@@ -16,6 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { ReceiptModalCard } from '@/components/ReceiptModalCard';
 import { PublicPostPreview } from '@/components/PublicPostPreview';
 import { PriceHistoryCard } from '@/components/PriceHistoryCard';
@@ -83,7 +84,7 @@ export default function PostDetailScreen() {
           <Text style={styles.notFoundText}>Публикацията не е намерена.</Text>
           <TouchableOpacity
             style={styles.backBtnSimple}
-            onPress={() => router.back()}
+            onPress={() => goBack(router)}
           >
             <Text style={styles.backBtnSimpleText}>Назад</Text>
           </TouchableOpacity>
@@ -164,7 +165,7 @@ export default function PostDetailScreen() {
       >
         {/* Горен навигационен бар */}
         <View style={styles.navBar}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.navIconBtn}>
+          <TouchableOpacity onPress={() => goBack(router)} style={styles.navIconBtn}>
             <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
           </TouchableOpacity>
 

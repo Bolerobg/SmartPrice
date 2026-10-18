@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { api, ApiError, uploadImage, type RaffleItem } from '@/src/api/client';
 
@@ -182,7 +183,7 @@ export default function AdminRafflesScreen() {
         <Text style={styles.deniedText}>
           Този екран е само за администратор. Влез с админ профила (kolyo.hristov@gmail.com).
         </Text>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => goBack(router)}>
           <Text style={styles.linkText}>Назад</Text>
         </TouchableOpacity>
       </View>
@@ -192,7 +193,7 @@ export default function AdminRafflesScreen() {
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity onPress={() => goBack(router)} hitSlop={12}>
           <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Админ · Томболи</Text>

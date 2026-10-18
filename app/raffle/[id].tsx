@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { ProductPairPuzzle } from '@/components/ProductPairPuzzle';
 import { api, ApiError, type PuzzleTile, type RaffleItem, type RaffleResults, type RaffleStanding } from '@/src/api/client';
@@ -283,7 +284,7 @@ export default function RaffleDetailScreen() {
       <SafeAreaView style={styles.root}>
         <View style={styles.center}>
           <Text style={styles.errorText}>{note ?? 'Томболата не е намерена.'}</Text>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity onPress={() => goBack(router)}>
             <Text style={styles.linkText}>Назад</Text>
           </TouchableOpacity>
         </View>
@@ -326,7 +327,7 @@ export default function RaffleDetailScreen() {
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity onPress={() => goBack(router)} hitSlop={12}>
             <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Томбола</Text>

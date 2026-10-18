@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { formatMoney, formatRelativeTime, formatNumber, unitLabel } from '@/src/lib/format';
 import { loadObject, type ObjectDetail, type ObjectSignal } from '@/src/api/client';
@@ -122,7 +123,7 @@ export default function ObjectScreen() {
       <SafeAreaView style={styles.center}>
         <Ionicons name="alert-circle-outline" size={40} color={COLORS.textMuted} />
         <Text style={styles.muted}>{error || 'Няма такъв обект.'}</Text>
-        <TouchableOpacity style={styles.ghostBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.ghostBtn} onPress={() => goBack(router)}>
           <Text style={styles.ghostBtnText}>Назад</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -145,7 +146,7 @@ export default function ObjectScreen() {
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.back}>
+          <TouchableOpacity onPress={() => goBack(router)} style={styles.back}>
             <Ionicons name="chevron-back" size={22} color={COLORS.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Обект</Text>

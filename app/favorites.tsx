@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { api, ApiError } from '@/src/api/client';
 import type { PostItem } from '@/types';
@@ -134,7 +135,7 @@ export default function FavoritesScreen() {
         }
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity onPress={() => goBack(router)} hitSlop={12}>
             <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.title}>Любими</Text>

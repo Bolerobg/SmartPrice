@@ -17,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { COLORS } from '@/constants/theme';
@@ -473,7 +474,7 @@ export default function AssistantScreen() {
         <TouchableOpacity style={styles.headerBtn} onPress={clearChat} accessibilityLabel="Нов разговор">
           <Ionicons name="refresh" size={17} color={COLORS.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} accessibilityLabel="Затвори">
+        <TouchableOpacity style={styles.headerBtn} onPress={() => goBack(router)} accessibilityLabel="Затвори">
           <Ionicons name="close" size={20} color={COLORS.textSecondary} />
         </TouchableOpacity>
       </View>

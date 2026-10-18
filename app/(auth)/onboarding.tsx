@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/theme';
@@ -846,7 +847,7 @@ export default function OnboardingScreen() {
       return;
     }
     if (isReview) {
-      router.back();
+      goBack(router);
       return;
     }
     await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, '1');
@@ -855,7 +856,7 @@ export default function OnboardingScreen() {
 
   const skip = useCallback(async () => {
     if (isReview) {
-      router.back();
+      goBack(router);
       return;
     }
     // „Пропусни“ води НАПРАВО в приложението. Потокът се чете и без профил,
@@ -939,7 +940,7 @@ export default function OnboardingScreen() {
       {isReview && (
         <TouchableOpacity
           style={[styles.reviewClose, { top: insets.top + 12 }]}
-          onPress={() => router.back()}
+          onPress={() => goBack(router)}
           activeOpacity={0.8}
           accessibilityRole="button"
           accessibilityLabel="Затвори прегледа"

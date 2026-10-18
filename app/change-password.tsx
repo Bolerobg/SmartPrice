@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { api, ApiError } from '@/src/api/client';
 
@@ -96,7 +97,7 @@ export default function ChangePasswordScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <TouchableOpacity style={styles.back} onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity style={styles.back} onPress={() => goBack(router)} hitSlop={12}>
             <Ionicons name="arrow-back" size={20} color={COLORS.textPrimary} />
             <Text style={styles.backText}>Назад</Text>
           </TouchableOpacity>
@@ -119,7 +120,7 @@ export default function ChangePasswordScreen() {
           {done ? (
             <TouchableOpacity
               style={styles.primaryBtn}
-              onPress={() => router.back()}
+              onPress={() => goBack(router)}
               activeOpacity={0.88}
             >
               <Ionicons name="checkmark" size={18} color={COLORS.black} />
