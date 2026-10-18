@@ -432,6 +432,13 @@ export default async function authRoutes(app: FastifyInstance) {
 
     // Еднакво съобщение за грешен имейл и грешна парола (без изтичане на информация)
     if (!row || !passwordOk) {
+      // 👥 Статистика: неуспешен опит (за да се виждат опити за влизане в чужд профил).
+      await recordAuthEvent({
+        email,
+        kind: 'failed',
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] as string | undefined,
+      });
       throw unauthorized('Грешен имейл или парола.');
     }
 
