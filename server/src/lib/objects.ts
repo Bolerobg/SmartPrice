@@ -8,6 +8,23 @@
  */
 import { many, one } from '../db.js';
 
+/** Обогатени данни от Google Maps (рейтинг, отзиви, работно време, телефон). */
+export interface ObjectPlace {
+  rating: number | null;
+  reviews_count: number | null;
+  place_category: string | null;
+  place_address: string | null;
+  neighborhood: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  phone: string | null;
+  website: string | null;
+  /** [{ day: 'понеделник', hours: '8:00ч. to 18:00ч.' }, …] — както ги дава Google. */
+  hours: Array<{ day: string; hours: string }> | null;
+  maps_url: string | null;
+  updated_at: string;
+}
+
 export interface ObjectRow {
   slug: string;
   place_name: string;
@@ -119,6 +136,8 @@ export async function loadObject(slug: string): Promise<{
   signals: ObjectSignal[];
   history: Array<{ id: string; price: number; title: string; created_at: string; polarity: string; image_url: string }>;
   months: ObjectMonth[];
+  /** Google Maps: рейтинг, отзиви, работно време. null, ако още не е обогатен. */
+  place: ObjectPlace | null;
 } | null> {
   const key = String(slug ?? '').trim().slice(0, 64);
   if (!/^[0-9a-f]{32}$/.test(key)) return null;
@@ -166,7 +185,17 @@ export async function loadObject(slug: string): Promise<{
     ),
   ]);
 
-  return { object, signals, history, months };
+  // Обогатените данни от Google Maps са по СЪЩИЯ слуг (md5(място|град)) — едно
+  // обръщение, без външен ключ. Липсват → place: null (страницата пак работи).
+  const place = await one<ObjectPlace>(
+    `select rating::float as rating, reviews_count, category as place_category,
+            address as place_address, neighborhood, latitude, longitude,
+            phone, website, hours, maps_url, updated_at::text as updated_at
+       from place_enrichment where slug = $1`,
+    [key]
+  );
+
+  return { object, signals, history, months, place: place ?? null };
 }
 
 /** Слугът на обекта, към който принадлежи даден пост (за бутона в офертата). */

@@ -7,6 +7,7 @@ import fastifyStatic from '@fastify/static';
 import { mkdir } from 'node:fs/promises';
 
 import { env, features, isProd } from './env.js';
+import { prewarmBrowser } from './lib/render.js';
 import { closePool, one } from './db.js';
 import { runMigrations } from './migrate.js';
 import { startCenkoTrainer } from './lib/cenkoScheduler.js';
@@ -267,6 +268,13 @@ async function main() {
       features.payments ? 'да' : 'НЕ'
     }`
   );
+
+  // Браузърът, с който четем цените на JS магазините, се вдига ОЩЕ СЕГА (във
+  // фона). Иначе първият човек, натиснал „Провери цената в магазина“, чака
+  // 5–8 сек само за студеното стартиране на Chromium.
+  void prewarmBrowser().then((ok) => {
+    app.log.info(ok ? 'Браузърът за проверка на цени е вдигнат предварително' : 'Браузър за проверка на цени: няма');
+  });
 
   // Следене за ненормална активност — проверява на всеки 5 минути и праща
   // имейл на ALERT_EMAIL, ако намери нещо (напр. подбиране на пароли).

@@ -42,7 +42,10 @@ let launching: Promise<AnyBrowser | null> | null = null;
 let idleTimer: NodeJS.Timeout | null = null;
 let busy = false;
 
-const IDLE_MS = 120_000;
+// Колко дълго пазим браузъра топъл след последното ползване. Студеното
+// вдигане на Chromium струва ~5 сек — на потребител, който натиска „Провери
+// цената“, това е половината от изчакването. Затова 10 минути.
+const IDLE_MS = 600_000;
 
 /** Има ли с какво да рендираме. */
 export function browserAvailable(): boolean {
@@ -123,6 +126,22 @@ const UA_POOL = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
 ];
 
+/**
+ * Вдига браузъра още при старта на сървъра, за да не плаща първият човек, който
+ * натисне „Провери цената в магазина“, студеното стартиране на Chromium.
+ * Грешката не е фатална — просто няма да има предварително вдигане.
+ */
+export async function prewarmBrowser(): Promise<boolean> {
+  if (!browserAvailable()) return false;
+  try {
+    const b = await getBrowser();
+    scheduleIdleClose();
+    return Boolean(b);
+  } catch {
+    return false;
+  }
+}
+
 export interface RenderResult {
   html: string;
   url: string;
@@ -138,7 +157,7 @@ export interface RenderResult {
  */
 export async function renderHtml(
   url: string,
-  opts: { timeoutMs?: number; waitMs?: number } = {}
+  opts: { timeoutMs?: number; waitMs?: number; idleMs?: number } = {}
 ): Promise<RenderResult | null> {
   if (!browserAvailable()) return null;
   if (busy) return null; // една страница наведнъж — сървърът има малко памет
@@ -169,7 +188,7 @@ export async function renderHtml(
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
     // Даваме шанс на заявките за данни да пристигнат, без да чакаме вечно.
     await page
-      .waitForLoadState('networkidle', { timeout: 6000 })
+      .waitForLoadState('networkidle', { timeout: opts.idleMs ?? 6000 })
       .catch(() => undefined);
     await page.waitForTimeout(opts.waitMs ?? 1200);
     const html = await page.content();

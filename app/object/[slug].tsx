@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -28,6 +29,52 @@ const CATEGORY_LABELS: Record<string, string> = {
   other: 'Други',
 };
 
+// Google връща дните на кирилица и започва от неделя — НЕ по индекса на деня.
+const DAYS_BG = ['неделя', 'понеделник', 'вторник', 'сряда', 'четвъртък', 'петък', 'събота'];
+
+/** Днешният ден на български, както го пише Google. */
+function todayNameBg(): string {
+  return DAYS_BG[new Date().getDay()] ?? '';
+}
+
+/** „8:00ч. to 19:00ч.“ → „8:00 – 19:00“ (Google оставя „to“ на английски). */
+function cleanHours(raw: string): string {
+  return String(raw ?? '')
+    .replace(/\s*ч\./g, '')
+    .replace(/\s+to\s+/gi, ' – ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Работното време за днес, ако Google го знае. */
+function hoursForToday(hours?: Array<{ day: string; hours: string }> | null): string | undefined {
+  if (!Array.isArray(hours) || hours.length === 0) return undefined;
+  const today = todayNameBg();
+  const hit = hours.find((h) => String(h?.day ?? '').toLowerCase().startsWith(today.slice(0, 5)));
+  if (!hit?.hours) return undefined;
+  const clean = cleanHours(hit.hours);
+  return clean && !/^(затворено|closed)$/i.test(clean) ? clean : 'затворено';
+}
+
+/**
+ * Отворено ли е в момента — четем първите два часа от днешното работно време.
+ * Ако не можем да ги разчетем, връщаме undefined (не твърдим нищо).
+ */
+function openNowFromToday(today?: string): boolean | undefined {
+  if (!today || today === 'затворено') return today ? false : undefined;
+  const times = today.match(/(\d{1,2})[:.](\d{2})/g);
+  if (!times || times.length < 2) return undefined;
+  const toMin = (t: string) => {
+    const [h, m] = t.replace('.', ':').split(':').map((x) => Number(x));
+    return h * 60 + (m || 0);
+  };
+  const open = toMin(times[0]);
+  const close = toMin(times[1]);
+  const now = new Date().getHours() * 60 + new Date().getMinutes();
+  // Магазин, който затваря след полунощ (напр. 8:00 – 02:00).
+  return close <= open ? now >= open || now <= close : now >= open && now <= close;
+}
+
 /**
  * 🏪 Страница на обект (#11).
  * Показва колко пъти хората са сигнализирали, как се е движила цената във времето,
@@ -39,6 +86,8 @@ export default function ObjectScreen() {
   const [data, setData] = useState<ObjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  /** Показваме работното време за всички дни, а не само за днес. */
+  const [showWeek, setShowWeek] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -86,6 +135,11 @@ export default function ObjectScreen() {
   const minPrice = prices.length ? Math.min(...prices) : 0;
   const unit = unitLabel(o.unit_type || undefined);
   const spread = prices.length > 1 ? prices[prices.length - 1] - prices[0] : 0;
+
+  // Обогатяване от Google Maps (#043): рейтинг, отзиви, работно време.
+  const place = data.place ?? null;
+  const todayH = hoursForToday(place?.hours);
+  const openNow = openNowFromToday(todayH);
 
   return (
     <SafeAreaView style={styles.root}>
@@ -164,6 +218,121 @@ export default function ObjectScreen() {
               {o.receipts_verified
                 ? o.receipts_verified + ' проверени от AI касови бележки'
                 : 'Няма проверена от AI касова бележка за този обект'}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* 🏪 Google Maps: рейтинг, отзиви и работно време. Показваме само
+            това, което наистина го има — иначе картата не се появява. */}
+        {place && (place.rating != null || todayH || place.phone || place.website) ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>🏪 Рейтинг и работно време</Text>
+
+            {place.rating != null ? (
+              <View style={styles.rateRow}>
+                <Ionicons name="star" size={17} color={COLORS.goldPrimary} />
+                <Text style={styles.rateNum}>{place.rating.toFixed(2)}</Text>
+                {place.reviews_count ? (
+                  <Text style={styles.rateCount}>
+                    · {formatNumber(place.reviews_count)} отзива в Google
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+            {place.place_category ? (
+              <Text style={styles.hint}>Категория в Google: {place.place_category}</Text>
+            ) : null}
+
+            {todayH ? (
+              <View style={styles.hourRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hourDay}>Днес · {todayNameBg()}</Text>
+                  <Text style={styles.hourVal}>{todayH}</Text>
+                </View>
+                {openNow !== undefined ? (
+                  <View
+                    style={[
+                      styles.openBadge,
+                      {
+                        backgroundColor: openNow ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                        borderColor: openNow ? COLORS.greenBorder : COLORS.redBorder,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.openBadgeText,
+                        { color: openNow ? COLORS.greenBright : COLORS.redBright },
+                      ]}
+                    >
+                      {openNow ? 'Отворено сега' : 'Затворено'}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {showWeek && Array.isArray(place.hours) && place.hours.length > 0 ? (
+              <View style={styles.weekTable}>
+                {place.hours.map((h, i) => (
+                  <View key={`${h.day}-${i}`} style={styles.weekRow}>
+                    <Text style={styles.weekDay}>{h.day}</Text>
+                    <Text style={styles.weekVal}>{cleanHours(h.hours) || '—'}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {Array.isArray(place.hours) && place.hours.length > 0 ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setShowWeek((v) => !v)}
+                style={styles.ghostBtnSmall}
+              >
+                <Text style={styles.ghostBtnSmallText}>
+                  {showWeek ? 'Скрий седмицата' : 'Виж цялата седмица'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {place.phone || place.website || place.maps_url ? (
+              <View style={styles.linkRow}>
+                {place.phone ? (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => void Linking.openURL('tel:' + place.phone!.replace(/[^+\d]/g, ''))}
+                    style={styles.linkChip}
+                  >
+                    <Ionicons name="call" size={13} color={COLORS.accentCyan} />
+                    <Text style={styles.linkChipText}>{place.phone}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {place.website ? (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => void Linking.openURL(place.website!)}
+                    style={styles.linkChip}
+                  >
+                    <Ionicons name="globe-outline" size={13} color={COLORS.accentCyan} />
+                    <Text style={styles.linkChipText}>Сайт</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {place.maps_url ? (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => void Linking.openURL(place.maps_url!)}
+                    style={styles.linkChip}
+                  >
+                    <Ionicons name="location-outline" size={13} color={COLORS.accentCyan} />
+                    <Text style={styles.linkChipText}>Google Maps</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
+
+            <Text style={styles.hint}>
+              Данните са от Google Maps
+              {place.updated_at ? ' · обновени ' + formatRelativeTime(place.updated_at) : ''}
             </Text>
           </View>
         ) : null}
@@ -362,4 +531,47 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderStrong,
   },
   ghostBtnText: { color: COLORS.textPrimary, fontWeight: '700' },
+
+  // 🏪 Google Maps: рейтинг, отзиви, работно време
+  rateRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  rateNum: { color: COLORS.textPrimary, fontSize: 19, fontWeight: '900' },
+  rateCount: { color: COLORS.textSecondary, fontSize: 12.5, flexShrink: 1 },
+  hourRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  hourDay: { color: COLORS.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  hourVal: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800', marginTop: 2 },
+  openBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  openBadgeText: { fontSize: 11.5, fontWeight: '800' },
+  weekTable: { marginTop: 10, gap: 5 },
+  weekRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  weekDay: { color: COLORS.textSecondary, fontSize: 12.5, fontWeight: '700', width: 96 },
+  weekVal: { color: COLORS.textPrimary, fontSize: 12.5, flex: 1, textAlign: 'right' },
+  ghostBtnSmall: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
+    backgroundColor: COLORS.bgCardElevated,
+  },
+  ghostBtnSmallText: { color: COLORS.textPrimary, fontSize: 12, fontWeight: '700' },
+  linkRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 11 },
+  linkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(34,211,238,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.30)',
+  },
+  linkChipText: { color: COLORS.accentCyan, fontSize: 12, fontWeight: '700' },
 });

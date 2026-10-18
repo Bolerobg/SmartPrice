@@ -222,7 +222,12 @@ export async function checkShopPrice(
     //    technomarket…). Точно този път липсваше — затова бутонът казваше
     //    „не открих цена“ на много магазини.
     if (!hasUsablePrice(parsed) && browserAvailable()) {
-      const r = await renderHtml(key, { timeoutMs: 20_000, waitMs: 2_500 }).catch(() => null);
+      // 15 сек стигат за domcontentloaded + кратка пауза за заявките с цената.
+      // (Преди бяха 20 сек + 6 сек „мрежата утихна“ + 2.5 сек пауза = ~25 сек,
+      // а приложението прекъсваше на 20 сек → бутонът изглеждаше счупен.)
+      const r = await renderHtml(key, { timeoutMs: 15_000, waitMs: 1_200, idleMs: 3_500 }).catch(
+        () => null
+      );
       if (r && r.html) {
         const p2 = parseProductPage(r.html, r.url || key);
         if (hasUsablePrice(p2)) {
@@ -239,7 +244,7 @@ export async function checkShopPrice(
     if (!hasUsablePrice(parsed) && blocked && (await apifyReady().catch(() => false))) {
       const budget = await apifyBudgetAllows(0.02).catch(() => ({ allowed: false, today: 0, limit: 0 }));
       if (budget.allowed) {
-        const a = await apifyRenderHtml([key], { resident: true, timeoutMs: 60_000 }).catch(() => null);
+        const a = await apifyRenderHtml([key], { resident: true, timeoutMs: 30_000 }).catch(() => null);
         const page = a && a.ok ? a.pages.find((x) => x.html) : undefined;
         if (page && page.html) {
           const p3 = parseProductPage(page.html, key);

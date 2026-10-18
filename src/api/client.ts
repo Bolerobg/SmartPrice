@@ -764,9 +764,15 @@ export const api = {
   /**
    * Цената в онлайн магазина „сега“ — за сверяване с нашата цена.
    * Публичен е (работи и за гост). `refresh` = 1 заобикаля 10-минутния кеш.
+   *
+   * Проверката отваря страницата на магазина в истински браузър на сървъра и
+   * трае 8–20 секунди. Затова тук таймаутът е 60 сек, а не общите 20: иначе
+   * приложението прекъсваше заявката и бутонът изглеждаше „счупен“.
    */
   shopPrice: (id: string, refresh = false) =>
-    rawRequest<ShopPriceCheck>(`/api/posts/${id}/shop-price${refresh ? '?refresh=1' : ''}`),
+    rawRequest<ShopPriceCheck>(`/api/posts/${id}/shop-price${refresh ? '?refresh=1' : ''}`, {
+      timeoutMs: 60_000,
+    }),
 
   /** Търсене по ID на офертата (числов код, напр. 48219357). Работи и без вход. */
   postByCode: (code: string) =>
@@ -1138,8 +1144,27 @@ export interface ObjectSignal {
   merchant_tax_id: string | null;
 }
 
+/** Обогатени данни от Google Maps за обекта (рейтинг, отзиви, работно време). */
+export interface ObjectPlace {
+  rating: number | null;
+  reviews_count: number | null;
+  place_category: string | null;
+  place_address: string | null;
+  neighborhood: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  phone: string | null;
+  website: string | null;
+  /** Работно време по дни, както го дава Google: [{ day: 'понеделник', hours: '8:00ч. to 18:00ч.' }] */
+  hours: Array<{ day: string; hours: string }> | null;
+  maps_url: string | null;
+  updated_at: string;
+}
+
 export interface ObjectDetail {
   object: ObjectSummary;
+  /** Google Maps: рейтинг, отзиви, работно време. Може да липсва. */
+  place?: ObjectPlace | null;
   signals: ObjectSignal[];
   history: Array<{ id: string; price: number; title: string; created_at: string; polarity: string; image_url: string }>;
   months: Array<{ month: string; avg_price: number; min_price: number; max_price: number; posts: number }>;
