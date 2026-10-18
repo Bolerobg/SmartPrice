@@ -42,7 +42,7 @@ export interface OptionDef {
 }
 
 export interface SocialMode {
-  id: 'hashtag' | 'search' | 'profile' | 'url';
+  id: 'hashtag' | 'hashtagSearch' | 'search' | 'profile' | 'url';
   label: string;
   /** Какво пише човекът — по един на ред. */
   targetLabel: string;
@@ -181,23 +181,30 @@ export const SOCIAL_PLATFORMS: PlatformMeta[] = [
     id: 'instagram',
     label: 'Instagram',
     icon: '📸',
-    actor: 'apify~instagram-scraper',
+    actor: 'automation-lab~instagram-scraper',
     note:
-      'Иска вход: без бисквитка връща празно (проверено). Сложи sessionid в ⚙️ Настройки.',
-    needsLogin: true,
+      'Профилите и търсенето на хаштагове работят и без вход. Публикациите ПО хаштаг искат sessionid (⚙️ Настройки).',
+    needsLogin: false,
     modes: [
       {
+        id: 'hashtagSearch',
+        label: 'Търси хаштагове',
+        targetLabel: 'Думи за търсене на хаштагове',
+        hint: 'НАЙ-ЛЕСНОТО: работи БЕЗ вход. Намира хаштаговете по дума („цени“ → #цени_на_живота).',
+        example: 'цени\nспестяване',
+      },
+      {
         id: 'hashtag',
-        label: 'По хаштаг',
+        label: 'Публикации по хаштаг',
         targetLabel: 'Хаштагове (без #)',
-        hint: 'Търси в explore по хаштаг.',
+        hint: '⚠️ Иска sessionid в ⚙️ Настройки — иначе Instagram не дава публикациите.',
         example: 'цени\nпазаруване',
       },
       {
         id: 'profile',
         label: 'По профил',
         targetLabel: 'Профили (@име или име)',
-        hint: 'Последните публикации на профил.',
+        hint: 'Публикациите на конкретен профил. Работи и без вход (публичните пътища се пробват първи).',
         example: 'mirelka.bg',
       },
       {
@@ -220,15 +227,21 @@ export const SOCIAL_PLATFORMS: PlatformMeta[] = [
         help: 'Плаща се на резултат.',
       },
       {
-        key: 'resultsType',
-        label: 'Какво да върне',
-        kind: 'select',
-        def: 'posts',
+        key: 'includeProfile',
+        label: 'Добавяй и данните на профила',
+        kind: 'checkbox',
+        def: true,
         actor: true,
-        options: [
-          { value: 'posts', label: 'Публикации' },
-          { value: 'details', label: 'Подробно за адрес' },
-        ],
+        help: 'Заедно с публикациите връща и последователи, био, брой публикации.',
+      },
+      {
+        key: 'useCookie',
+        label: 'Ползвай бисквитката и за профили',
+        kind: 'checkbox',
+        def: false,
+        actor: true,
+        advanced: true,
+        help: 'Ако публичните пътища на Instagram не минат за даден профил — тогава пробва с твоята бисквитка.',
       },
       {
         key: 'onlyPostsNewerThan',
@@ -343,7 +356,13 @@ function toList(targets: string[] | string): string[] {
 }
 
 /** Превръща нашите опции във вход за актьора. */
-function actorInput(meta: PlatformMeta, mode: string, targets: string[], o: Record<string, unknown>) {
+function actorInput(
+  meta: PlatformMeta,
+  mode: string,
+  targets: string[],
+  o: Record<string, unknown>,
+  cookie = ''
+) {
   if (meta.id === 'tiktok') {
     const base: Record<string, unknown> = {
       resultsPerPage: Number(o.resultsPerPage ?? 30) || 30,
@@ -360,19 +379,36 @@ function actorInput(meta: PlatformMeta, mode: string, targets: string[], o: Reco
     return base;
   }
 
-  // Instagram: адресите се строят от това какво е дал човекът.
-  const urls = targets.map((t) => {
-    if (/^https?:/i.test(t)) return t;
-    if (mode === 'hashtag') return `https://www.instagram.com/explore/tags/${encodeURIComponent(t)}/`;
-    return `https://www.instagram.com/${encodeURIComponent(t.replace(/^@/, ''))}/`;
-  });
+  // Instagram (automation-lab/instagram-scraper). Режимите са различни:
+  //   • searchHashtags — само НАМИРА хаштагове по дума, работи БЕЗ вход;
+  //   • hashtagPosts    — публикации по хаштаг, ИСКА бисквитка;
+  //   • profile/posts   — по профил, публичните пътища се пробват първи;
+  //   • postUrls        — конкретни адреси.
+  const clean = targets.map((t) => t.replace(/^@/, '').replace(/^#/, '').trim()).filter(Boolean);
   const base: Record<string, unknown> = {
-    directUrls: urls,
-    resultsType: String(o.resultsType ?? 'posts'),
-    resultsLimit: Number(o.resultsLimit ?? 30) || 30,
+    maxPosts: Number(o.resultsLimit ?? 30) || 30,
+    includeProfile: o.includeProfile !== false,
     proxyConfiguration: { useApifyProxy: true },
   };
   if (o.onlyPostsNewerThan) base.onlyPostsNewerThan = String(o.onlyPostsNewerThan);
+
+  if (mode === 'hashtagSearch') {
+    base.mode = 'searchHashtags';
+    base.searchTerms = clean;
+  } else if (mode === 'hashtag') {
+    base.mode = 'hashtagPosts';
+    base.hashtags = clean;
+  } else if (mode === 'url') {
+    base.mode = 'postUrls';
+    base.postUrls = targets.filter((t) => /^https?:/i.test(t));
+  } else {
+    base.mode = 'profile';
+    base.usernames = clean;
+  }
+
+  // Бисквитката се слага само ако има смисъл — иначе не я пращаме напразно.
+  // За режимите, които не искат вход, работим и без нея.
+  if (cookie && (mode === 'hashtag' || o.useCookie === true)) base.sessionCookie = cookie;
   return base;
 }
 
@@ -550,16 +586,18 @@ async function runSocialScan(
   options: Record<string, unknown>
 ): Promise<void> {
   const token = (await apifyToken().catch(() => '')) || '';
-  const input = actorInput(meta, mode, targets, options);
+  const igCookie = meta.id === 'instagram' ? await getInstagramCookie().catch(() => '') : '';
+  const input = actorInput(meta, mode, targets, options, igCookie);
 
-  // Instagram без бисквитка връща празно — казваме го веднага, не хабим пари.
-  if (meta.needsLogin && !(await getInstagramCookie())) {
+  // Режимът „публикации по хаштаг“ в Instagram иска вход — казваме го веднага,
+  // вместо да харчим пари за празен резултат. Другите режими работят и без вход.
+  if (meta.id === 'instagram' && mode === 'hashtag' && !igCookie) {
     await finishRun(
       runId,
       'failed',
       0,
       0,
-      'Instagram иска вход. Сложи sessionid в ⚙️ Настройки (иначе актьорът връща празно).'
+      'Този режим (публикации по хаштаг) иска Instagram sessionid — сложи го в ⚙️ Настройки. Или ползвай „Търси хаштагове“, което работи и без вход.'
     );
     return;
   }
