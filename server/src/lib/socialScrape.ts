@@ -316,7 +316,16 @@ export async function getInstagramCookie(): Promise<string> {
 }
 
 export async function setInstagramCookie(value: string): Promise<void> {
-  await setSetting(IG_COOKIE_KEY, String(value ?? '').trim().slice(0, 4000));
+  // Хората копират по два начина: само стойността ИЛИ „sessionid=стойност“.
+  // Приемаме и двата — махаме името, кавичките и празното, за да не се провали
+  // заради един забравен префикс.
+  const raw = String(value ?? '').trim();
+  const cleaned = raw
+    .replace(/^sessionid\s*=\s*/i, '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/[\s;]+$/g, '')
+    .trim();
+  await setSetting(IG_COOKIE_KEY, cleaned.slice(0, 4000));
 }
 
 /* ============================================================ пускане */
