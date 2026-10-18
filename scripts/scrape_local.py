@@ -87,6 +87,11 @@ def fetch_rendered(url, wait_ms=9000, verbose=False):
     html = fetch_rendered_playwright(url, wait_ms, verbose)
     if html:
         return html
+    # ВАЖНО (поука от живия пуск, 18.10.2026): ако Playwright е наличен, НЕ
+    # продължаваме с `--dump-dom` — той е премахнат в Chrome 132+ и само губи
+    # ~15 сек на страница (три режима × 5 сек). Затова: или Playwright, или нищо.
+    if playwright_ready():
+        return None
     exe = chrome_path()
     if not exe:
         log("  (няма Chrome/Edge за рендиране)", verbose)
@@ -111,16 +116,40 @@ def fetch_rendered(url, wait_ms=9000, verbose=False):
     return None
 
 
+_PW_READY = None
+# Домейни, които вече са отказали на браузъра в ТОЗИ пуск — не ги мъчим пак.
+_RENDER_BLOCKED = set()
+_PW_MISSING_LOGGED = set()
+
+
+def playwright_ready():
+    """Има ли Playwright в това Python (проверяваме веднъж)."""
+    global _PW_READY
+    if _PW_READY is None:
+        try:
+            import playwright  # noqa: F401,PLC0415
+
+            _PW_READY = True
+        except Exception:
+            _PW_READY = False
+    return _PW_READY
+
+
 def fetch_rendered_playwright(url, wait_ms=9000, verbose=False):
     """Отваря адреса с Playwright (истински Chrome). Връща None, ако не стане.
 
     Playwright работи и на Chrome 132+ (за разлика от `--dump-dom`) и може да
     чака колкото трябва. Снимките се спират, за да е по-бързо.
     """
+    host = re.sub(r"^https?://([^/]+).*$", r"\1", url or "")
+    if host in _RENDER_BLOCKED:
+        return None  # този сайт вече ни отказа в този пуск
     try:
         from playwright.sync_api import sync_playwright  # noqa: PLC0415
     except Exception:
-        log("  (Playwright не е инсталиран — ползвам --dump-dom)", verbose)
+        if host not in _PW_MISSING_LOGGED:
+            _PW_MISSING_LOGGED.add(host)
+            log("  (Playwright не е инсталиран — ползвам --dump-dom)", verbose)
         return None
     try:
         with sync_playwright() as pw:
@@ -144,7 +173,9 @@ def fetch_rendered_playwright(url, wait_ms=9000, verbose=False):
             browser.close()
         if html and len(html) > 2000 and not CHALLENGE.search(html[:4000]):
             return html
-        log("  Playwright върна %d знака" % len(html or ""), verbose)
+        # Празна/мъничка страница = сайтът ни е отказал. Помним го и не пробваме пак.
+        _RENDER_BLOCKED.add(host)
+        log("  Playwright върна %d знака — отказвам се за %s в този пуск" % (len(html or ""), host), verbose)
     except Exception as err:  # noqa: BLE001 — важно е да продължим
         log("  Playwright не успя: %s" % str(err)[:120], verbose)
     return None
