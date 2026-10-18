@@ -449,6 +449,31 @@ function mapItem(platform: SocialPlatform, it: RawItem) {
     };
   }
 
+  // ВАЖНО: режимът „търси хаштагове“ връща САМИТЕ ХАЩТАГОВЕ, не публикации
+  // (име + колко публикации имат), затова полетата са други. Без това
+  // преобразуване записите излизат празни — точно това се случи на живо.
+  const looksLikeTag =
+    !it.ownerUsername && !it.caption && (it.name || it.hashtag || it.tag) && !it.shortCode;
+  if (looksLikeTag) {
+    const name = String(it.name ?? it.hashtag ?? it.tag ?? '').replace(/^#/, '');
+    const count = Number(it.postsCount ?? it.mediaCount ?? it.postCount ?? 0) || 0;
+    return {
+      external_id: name,
+      url: `https://www.instagram.com/explore/tags/${encodeURIComponent(name)}/`,
+      author: '',
+      caption: `#${name}${count ? ` — ${count} публикации` : ''}`,
+      views: count || null,
+      likes: null,
+      comments: null,
+      shares: null,
+      duration: null,
+      hashtags: [name],
+      posted_at: null,
+      is_ad: false,
+      has_shop: false,
+    };
+  }
+
   return {
     external_id: String(it.id ?? it.shortCode ?? ''),
     url: String(it.url ?? it.inputUrl ?? ''),
