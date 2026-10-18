@@ -332,7 +332,7 @@ export default function PostDetailScreen() {
                     : post.imageUri,
               }}
               style={styles.heroImage}
-              resizeMode="cover"
+              resizeMode="contain"
             />
             {post.comparisonImageUri && (
               <TouchableOpacity
@@ -596,7 +596,7 @@ export default function PostDetailScreen() {
                         <Image
                           source={{ uri: c.imageUri }}
                           style={styles.commentPhoto}
-                          resizeMode="cover"
+                          resizeMode="contain"
                         />
                         {c.reportedPrice !== undefined && (
                           <View style={styles.commentPriceTag}>

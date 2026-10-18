@@ -415,7 +415,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
                   : post.imageUri,
             }}
             style={styles.postImage}
-            resizeMode="cover"
+            resizeMode="contain"
           />
 
           {/* Бадж за верифицирана касова бележка */}

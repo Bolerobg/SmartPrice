@@ -245,7 +245,7 @@ def log(msg, verbose=True):
         print(msg, flush=True)
 
 
-def fetch(url, verbose=False, max_bytes=1_500_000, tries=2):
+def fetch(url, verbose=False, max_bytes=8_000_000, tries=2):
     """Чете адрес с браузърни заглавки.
 
     ВАЖНО: тялото минава през временен файл (`-o`), не през тръба — на Windows
@@ -325,7 +325,7 @@ def collect_product_urls(base, limit, verbose=False):
             pool.append(u)
 
     # Колко адреса да съберем, за да има от какво да избираме.
-    cap = max(limit * 20, 400)
+    cap = max(limit * 20, 1200)
     for sm in sitemap_urls(base):
         if len(pool) >= cap:
             break
@@ -823,7 +823,7 @@ def read_password(args):
 def main():
     ap = argparse.ArgumentParser(description="Локален скрапер за сайтове зад Cloudflare")
     ap.add_argument("--site", action="append", help="адрес на магазин (може няколко пъти)")
-    ap.add_argument("--count", type=int, default=10, help="колко продукта на сайт (по подразбиране 10)")
+    ap.add_argument("--count", type=int, default=60, help="колко продукта на сайт (по подразбиране 10)")
     ap.add_argument("--limit", type=int, default=200, help="колко оферти да обходи при --refresh (по подразбиране 200)")
     ap.add_argument(
         "--mode",
