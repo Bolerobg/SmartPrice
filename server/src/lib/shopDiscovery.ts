@@ -111,6 +111,8 @@ function hostsFromHtml(html: string): string[] {
   return out;
 }
 
+import { googleSearch } from './webSearch.js';
+
 const ENGINES: Array<{ name: string; url: (q: string) => string }> = [
   // Mojeek е най-приятелски към автомати (няма Cloudflare пред себе си).
   { name: 'mojeek', url: (q) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}` },
@@ -130,6 +132,42 @@ export async function searchShops(keyword: string, limit = 12): Promise<FoundSho
   const hits = new Map<string, FoundShop>();
 
   for (const variant of variants) {
+    // Google през Apify — единственият източник, който не връща шум (форуми,
+    // Reddit, mastodon). Плаща се на резултат, затова само за първия вариант.
+    // Резултатите минават през СЪЩИЯ филтър за домейни, за да не вкараме
+    // Facebook/OLX/форуми като „магазин“.
+    if (variant === variants[0]) {
+      const google = await googleSearch(variant, 12).catch(() => []);
+      if (google.length) {
+        const titles = new Map<string, string>();
+        const pseudo = google
+          .map((h) => {
+            try {
+              const host = new URL(h.url).hostname.replace(/^www\./i, '').toLowerCase();
+              if (h.title) titles.set(host, h.title.slice(0, 80));
+            } catch {
+              /* невалиден адрес — пропускаме */
+            }
+            return `<a href="${h.url}">${h.title}</a>`;
+          })
+          .join(' ');
+        for (const host of hostsFromHtml(pseudo)) {
+          const found = hits.get(host) ?? {
+            domain: host,
+            url: `https://${host}/`,
+            foundVia: 'search' as const,
+            seenBy: [] as string[],
+          };
+          if (!found.seenBy!.includes('google')) found.seenBy!.push('google');
+          // Името от Google е по-човешко от „example.bg“.
+          const nice = titles.get(host);
+          if (nice) found.title = nice;
+          else found.title = found.title ?? host;
+          hits.set(host, found);
+        }
+      }
+    }
+
     for (const engine of ENGINES) {
       const html = await httpText(engine.url(variant));
       if (!html) continue;
