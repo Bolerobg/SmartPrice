@@ -28,7 +28,7 @@ import {
 import { apifyToken, apifyReady, apifyBudgetAllows, addApifySpend } from './apifyBrowser.js';
 import { env, features } from '../env.js';
 
-export type ClassifiedSource = 'olx' | 'imot' | 'alo';
+export type ClassifiedSource = 'olx' | 'imot' | 'alo' | 'facebook';
 
 export interface ClassifiedListing {
   /** ID в сайта — пази се в source_url, за да не влиза два пъти. */
@@ -47,8 +47,11 @@ export interface ClassifiedListing {
 interface SourceMeta {
   actor: string;
   label: string;
-  /** Какво чака актьорът: търсене по дума или адрес на категория. */
-  input: 'query' | 'url';
+  /**
+   * Какво чака актьорът: търсене по дума, адрес на категория или
+   * Marketplace търсене (построяваме адреса ние).
+   */
+  input: 'query' | 'url' | 'marketplace';
   note?: string;
   /** Изключен източник — не се показва в панела и не се пуска. */
   disabled?: boolean;
@@ -82,7 +85,19 @@ export const CLASSIFIED_SOURCES: Record<ClassifiedSource, SourceMeta> = {
     note: 'Коли: пише се адресът на категорията в alo.bg (напр. /obiavi/avtomobili/).',
     disabled: true,
   },
+  // Facebook Marketplace — обяви с цени от ЧАСТНИ продавачи. Проверено на живо
+  // (18.10.2026): 24 обяви за една дума, $0.12, БЕЗ вход с профил.
+  // Внимание: цените идват в ЛЕВА („BGN100“) — превръщаме ги в евро.
+  facebook: {
+    actor: 'apify~facebook-marketplace-scraper',
+    label: 'Facebook Marketplace',
+    input: 'marketplace',
+    note: 'Обяви с цени от частни продавачи. Цените са в лева — приложението ги смята в евро.',
+  },
 };
+
+/** Фиксиран курс: 1 € = 1.95583 лв. (цените на Marketplace са в лева). */
+const BGN_PER_EUR = 1.95583;
 
 /* ------------------------------------------------------------------ помощни */
 
@@ -190,6 +205,43 @@ export function mapListing(source: ClassifiedSource, raw: Record<string, unknown
     };
   }
 
+  if (source === 'facebook') {
+    // Продадените/скритите обяви не ни трябват — офертата вече не е валидна.
+    if (raw.is_sold === true || raw.is_hidden === true || raw.is_pending === true) return null;
+
+    const priceObj = (raw.listing_price ?? {}) as Record<string, unknown>;
+    const amount = num(priceObj.amount ?? raw.price);
+    // „formatted_amount“ е „BGN100“ — оттам вадим валутата, ако я няма отделно.
+    const formatted = String(priceObj.formatted_amount ?? '');
+    const currency = String(priceObj.currency ?? (formatted.match(/^[A-Z]{3}/)?.[0] ?? 'BGN')).toUpperCase();
+    // Еврото остава, левчетата се делят по фиксирания курс.
+    const priceEur = currency === 'EUR' ? amount : amount / BGN_PER_EUR;
+
+    const photo = (raw.primary_listing_photo ?? {}) as Record<string, unknown>;
+    const geo = ((raw.location as Record<string, unknown>)?.reverse_geocode ?? {}) as Record<string, unknown>;
+    const title =
+      String(raw.custom_title || raw.marketplace_listing_title || raw.title || '').trim() ||
+      String(raw.redacted_description || '').trim().slice(0, 70);
+
+    return {
+      url,
+      title: title.slice(0, 200),
+      description: String(raw.redacted_description || '').slice(0, 1200),
+      priceEur: priceEur > 0 ? Number(priceEur.toFixed(2)) : 0,
+      city: cleanCity(String(geo.city || '')),
+      region: cleanCity(String(geo.state || '')),
+      imageUrl: String(photo.photo_image_url || '').trim(),
+      // Marketplace е предимно частни хора.
+      sellerType: 'private',
+      attrs: {
+        ...(currency !== 'EUR' && amount > 0 ? { 'обявена цена': `${amount.toFixed(2)} лв.` } : {}),
+        ...(Array.isArray(raw.delivery_types) && (raw.delivery_types as string[]).length
+          ? { доставка: (raw.delivery_types as string[]).join(', ') }
+          : {}),
+      },
+    };
+  }
+
   if (source === 'imot') {
     const images = Array.isArray(raw.imageUrls) ? (raw.imageUrls as string[]) : [];
     // imot дава слабо заглавие („Продава 2-СТАЕН“). Правим истинско описание от
@@ -294,7 +346,15 @@ export async function runClassifiedsActor(
 
   // Всяка стойност се подава под няколко възможни имена — актьорите не
   // публикуват схемата си, а излишните полета се игнорират.
-  const input: Record<string, unknown> = meta.input === 'url'
+  // Marketplace чака АДРЕС на търсене. Ако човекът е дал адрес — ползваме него,
+  // иначе строим търсене за София (там има най-много обяви).
+  const marketplaceUrl = /^https?:/i.test(q)
+    ? q
+    : `https://www.facebook.com/marketplace/sofia/search?query=${encodeURIComponent(q)}`;
+
+  const input: Record<string, unknown> = meta.input === 'marketplace'
+    ? { startUrls: [{ url: marketplaceUrl }], maxItems: limit, maxListings: limit, limit }
+    : meta.input === 'url'
     ? { startUrls: [{ url: q }], categoryUrls: [q], urls: [q], maxItems: limit, maxListings: limit }
     : {
         searchQuery: q,
