@@ -447,3 +447,114 @@ export async function scanClassifieds(
     ok: true,
   };
 }
+
+/* ------------------------------------------------ състояние на последния пуск */
+
+export interface ClassifiedRunState {
+  at: string;
+  source: ClassifiedSource | '';
+  label: string;
+  query: string;
+  found: number;
+  imported: number;
+  skipped: number;
+  skippedReasons: string[];
+  usd: number;
+  note: string;
+  ok: boolean;
+  running: boolean;
+}
+
+const RUN_KEY = 'classifieds_last_run';
+
+/** Какво стана с последната обиколка (панелът пита това, докато чака). */
+export async function lastClassifiedsRun(): Promise<ClassifiedRunState | null> {
+  const row = await one<{ value: string }>(`select value from app_settings where key = $1`, [RUN_KEY]);
+  if (!row?.value) return null;
+  try {
+    return JSON.parse(row.value) as ClassifiedRunState;
+  } catch {
+    return null;
+  }
+}
+
+async function saveRunState(st: ClassifiedRunState): Promise<void> {
+  await query(
+    `insert into app_settings (key, value, updated_at) values ($1, $2, now())
+     on conflict (key) do update set value = excluded.value, updated_at = now()`,
+    [RUN_KEY, JSON.stringify(st)]
+  );
+}
+
+/**
+ * Пуска обиколката ФОНОВО и връща веднага.
+ *
+ * Защо фон: nginx/Cloudflare режат заявката на ~100 сек, а imot.bg отнема ~113 сек
+ * (видяно на живо: синхронната заявка даваше 504 и НИЩО не се внасяше).
+ * Панелът пита `/classifieds/last`, докато `running` стане false.
+ */
+export async function startClassifiedsScan(
+  source: ClassifiedSource,
+  query: string,
+  maxItems: number
+): Promise<{ started: boolean; reason?: string }> {
+  const meta = CLASSIFIED_SOURCES[source];
+  if (!meta) return { started: false, reason: 'Непознат източник.' };
+  const q = (query || '').trim();
+  if (q.length < 2) return { started: false, reason: 'Липсва дума за търсене (или адрес на категория).' };
+
+  const current = await lastClassifiedsRun().catch(() => null);
+  if (current?.running) return { started: false, reason: 'Вече върви друга обиколка — изчакай да свърши.' };
+
+  const limit = Math.max(1, Math.min(200, Math.floor(maxItems) || 20));
+  await saveRunState({
+    at: new Date().toISOString(),
+    source,
+    label: meta.label,
+    query: q,
+    found: 0,
+    imported: 0,
+    skipped: 0,
+    skippedReasons: [],
+    usd: 0,
+    note: `Върви… питам ${meta.label}. Отнема 30–150 секунди.`,
+    ok: false,
+    running: true,
+  });
+
+  void scanClassifieds(source, q, limit)
+    .then((r) =>
+      saveRunState({
+        at: new Date().toISOString(),
+        source,
+        label: r.label,
+        query: q,
+        found: r.found,
+        imported: r.imported,
+        skipped: r.skipped,
+        skippedReasons: r.skippedReasons,
+        usd: r.usd,
+        note: r.note,
+        ok: r.ok,
+        running: false,
+      })
+    )
+    .catch((err) =>
+      saveRunState({
+        at: new Date().toISOString(),
+        source,
+        label: meta.label,
+        query: q,
+        found: 0,
+        imported: 0,
+        skipped: 0,
+        skippedReasons: [],
+        usd: 0,
+        note: (err as Error).message.slice(0, 200),
+        ok: false,
+        running: false,
+      })
+    );
+
+  return { started: true };
+}

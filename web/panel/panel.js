@@ -3639,15 +3639,56 @@ function bindScraperAds() {
       const label = b.textContent;
       b.disabled = true;
       b.textContent = '⏳ Работя…';
+      const post = (res) => {
+        out.innerHTML = `
+          <div class="card" style="border-color:${res.ok ? 'rgba(34,197,94,.45)' : 'rgba(245,158,11,.45)'}">
+            <div class="card-title">${res.running ? '⏳' : res.ok ? '✅' : '⚠️'} ${esc(res.label || key)}
+              ${res.query ? `<span class="pill pill-dim">${esc(res.query)}</span>` : ''}</div>
+            <div class="hint" style="margin-top:4px">${esc(res.note || '')}</div>
+            <div style="margin-top:10px">Намерени: <strong>${num(res.found)}</strong> ·
+              внесени: <strong>${num(res.imported)}</strong> · прескочени: ${num(res.skipped)}</div>
+            ${
+              (res.skippedReasons || []).length
+                ? `<div class="hint" style="margin-top:8px">${res.skippedReasons
+                    .map((x) => esc(x))
+                    .join('<br>')}</div>`
+                : ''
+            }
+            <div class="hint" style="margin-top:8px">Похарчени за това: ${Number(res.usd || 0).toFixed(3)} $</div>
+          </div>`;
+      };
       out.innerHTML = `<div class="hint"><span class="spinner"></span> Питам ${esc(
         key.toUpperCase()
-      )}… това отнема 30–120 секунди, не затваряй панела.</div>`;
+      )}… отнема 30–150 секунди, не затваряй панела.</div>`;
       try {
         const r = await api('/classifieds/scan', {
           method: 'POST',
           body: { source: key, query: q, maxItems: Math.max(1, Math.min(200, n || 20)) },
         });
-        const res = r.result || {};
+        if (!r.started) {
+          out.innerHTML = `<div class="hint warn">${esc(r.reason || 'Не успях да пусна обиколката.')}</div>`;
+          return;
+        }
+        // Обиколката върви ФОНОВО (Cloudflare реже дългите заявки) — питаме докато свърши.
+        let last = null;
+        for (let i = 0; i < 45; i += 1) {
+          await new Promise((done) => setTimeout(done, 4000));
+          try {
+            const s = await api('/classifieds/last');
+            last = s.run || null;
+          } catch {
+            /* още не е готово — питаме пак */
+          }
+          if (last) {
+            post(last);
+            if (!last.running) break;
+          }
+        }
+        const res = last || {};
+        if (!last) {
+          out.innerHTML = `<div class="hint warn">Обиколката върви по-дълго от очакваното — отвори панела пак след минута.</div>`;
+          return;
+        }
         out.innerHTML = `
           <div class="card" style="border-color:${res.ok ? 'rgba(34,197,94,.45)' : 'rgba(245,158,11,.45)'}">
             <div class="card-title">${res.ok ? '✅' : '⚠️'} ${esc(res.label || key)}</div>

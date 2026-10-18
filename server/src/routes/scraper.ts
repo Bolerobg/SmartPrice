@@ -12,7 +12,11 @@ import {
   apifySpent,
   setApifyDailyLimit,
 } from '../lib/apifyBrowser.js';
-import { CLASSIFIED_SOURCES, scanClassifieds } from '../lib/classifieds.js';
+import {
+  CLASSIFIED_SOURCES,
+  lastClassifiedsRun,
+  startClassifiedsScan,
+} from '../lib/classifieds.js';
 import { currentCursor, deleteCategoryMap, listCategoryMap, listCursors } from '../lib/scrapeCursor.js';
 import {
   discoverShops,
@@ -966,23 +970,25 @@ export default async function scraperRoutes(app: FastifyInstance) {
       })
       .parse(req.body ?? {});
 
-    const result = await scanClassifieds(input.source, input.query, input.maxItems);
+    // ФОНОВО: nginx/Cloudflare режат заявката на ~100 сек, а imot.bg отнема ~113 сек.
+    // Панелът пита `/classifieds/last`, докато обиколката свърши.
+    const started = await startClassifiedsScan(input.source, input.query, input.maxItems);
 
     await audit({
       admin,
       action: 'classifieds.scan',
-      targetLabel: `${result.label}: ${input.query}`.slice(0, 200),
-      details: {
-        source: input.source,
-        found: result.found,
-        imported: result.imported,
-        skipped: result.skipped,
-        usd: result.usd,
-      },
+      targetLabel: `${input.source}: ${input.query}`.slice(0, 200),
+      details: { started: started.started, maxItems: input.maxItems, reason: started.reason ?? null },
       ip: req.ip,
     });
 
-    return { ok: result.ok, result };
+    return { ok: started.started, started: started.started, reason: started.reason ?? null };
+  });
+
+  /** Какво стана с последната обиколка за обяви (панелът пита това, докато чака). */
+  app.get('/api/admin/classifieds/last', async (req) => {
+    await requireAdminPanel(req);
+    return { run: await lastClassifiedsRun() };
   });
 
   /* -------------------------------------------------- едновременно вървящи */
