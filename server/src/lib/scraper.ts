@@ -832,17 +832,22 @@ export function extractProductLinks(html: string, baseUrl: string, listSelector?
 export function strictCardPrice(html: string): { price?: number; currency?: string } {
   const text = htmlToText(html).slice(0, 6000);
   const patterns: Array<[RegExp, string]> = [
-    [/(\d[\d\s.,]*)\s?(?:€|EUR)(?![A-Za-z])/i, 'EUR'],
-    [/(\d[\d\s.,]*)\s?(?:лв\.?|BGN)(?![A-Za-zа-яА-Я])/i, 'BGN'],
-    [/(?:€|EUR)\s?(\d[\d\s.,]*)/i, 'EUR'],
-    [/(?:лв\.?|BGN)\s?(\d[\d\s.,]*)/i, 'BGN'],
+    [/(\d[\d\s.,]*)\s?(?:€|EUR)(?![A-Za-z])/gi, 'EUR'],
+    [/(\d[\d\s.,]*)\s?(?:лв\.?|BGN)(?![A-Za-zа-яА-Я])/gi, 'BGN'],
+    [/(?:€|EUR)\s?(\d[\d\s.,]*)/gi, 'EUR'],
+    [/(?:лв\.?|BGN)\s?(\d[\d\s.,]*)/gi, 'BGN'],
   ];
   for (const [re, currency] of patterns) {
-    const m = re.exec(text);
-    if (!m) continue;
-    const price = parsePrice(m[1]!);
-    // Таван 200 000 € — по-скъпо от това не е „находка“, а грешка в четенето.
-    if (price && price > 0 && price <= 200_000) return { price, currency };
+    for (const m of text.matchAll(re)) {
+      const price = parsePrice(m[1]!);
+      if (!price || price <= 0 || price > 200_000) continue;
+      // ВАЖНО: в картите първата цена често е ЛИЗИНГ/вноска („30 €/мес“) или
+      // „от 12,50 €“ — това не е цената на продукта. Точно това даваше
+      // „SAMSUNG 55\" телевизор за 30 €“ на technomarket.bg.
+      const around = text.slice(Math.max(0, (m.index ?? 0) - 14), (m.index ?? 0) + (m[0]?.length ?? 0) + 16);
+      if (/(?:\/|\s)(?:мес|месец|mo|month)|leasing|лизинг|вноск|на\s+изплащане|^\s*от\b/i.test(around)) continue;
+      return { price, currency };
+    }
   }
   return {};
 }
@@ -886,13 +891,29 @@ export function extractListingProducts(html: string, pageUrl: string): RawProduc
   // за приложението това е един и същ продукт и не бива да влиза два пъти.
   const seenUrl = new Set<string>();
   const seenName = new Set<string>();
-  return out.filter((p) => {
+  const deduped = out.filter((p) => {
     const nameKey = `${(p.title ?? '').toLowerCase().replace(/\s+/g, ' ').trim()}|${p.price}`;
     if (seenUrl.has(p.sourceUrl) || seenName.has(nameKey)) return false;
     seenUrl.add(p.sourceUrl);
     seenName.add(nameKey);
     return true;
   });
+
+  // Проверка „тези карти наистина ли са продукти?“.
+  //
+  // Реален случай (bauhaus.bg, 18.10.2026): три РАЗЛИЧНИ продукта — калорифер,
+  // стълба и лепило — излизаха с една и съща цена 14,83 €. Причината: в широката
+  // карта на този шаблон попада общ елемент (цена на доставка/промо банер) и се
+  // чете вместо цената на продукта. Затова: ако ≥3 продукта имат една и съща
+  // цена, картите не са надеждни → връщаме празно, за да мине скраперът към
+  // sitemap/рендиране, където цените са точни.
+  if (deduped.length >= 3) {
+    const byPrice = new Map<number, number>();
+    for (const p of deduped) byPrice.set(p.price!, (byPrice.get(p.price!) ?? 0) + 1);
+    const top = Math.max(...byPrice.values());
+    if (top >= 3 && top / deduped.length >= 0.6) return [];
+  }
+  return deduped;
 }
 
 /** Безплатен, но често най-точен начин: продуктовият адрес по sitemap. */
@@ -1943,6 +1964,11 @@ export function looksLikeJunkProduct(p: { title?: string; price?: number; imageU
   if (letters < 4) return true; // „A++“, „1111111“
   if (/^[\d\s.,+-]+$/.test(t)) return true; // само числа
   if (/^(категория|всички|всички продукти|category|каталог|catalog|разгледай|виж всички)\b/i.test(t)) return true;
+  // Надписи от интерфейса, които изглеждат като заглавие (technomarket.bg даваше
+  // „add to compare“ като продукт за 799 €).
+  if (/^(add to|quick view|in stock|out of stock|купи|купи сега|сравни|сравнение|виж повече|виж още|добави|наличност|в наличност|преглед)\b/i.test(t)) {
+    return true;
+  }
   const price = p.price ?? 0;
   if (!price || price <= 0 || price > 200_000) return true;
   // Снимка от CMS/банер/икона/категория не е продуктова снимка.
