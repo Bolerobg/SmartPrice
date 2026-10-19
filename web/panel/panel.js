@@ -3086,7 +3086,7 @@ function scraperCandidateRowHtml(c) {
   if (c.status !== 'error' && c.status !== 'rejected') {
     if (c.in_autopilot) {
       const [alabel] = AU_ACTION[c.autopilot_action] || ['🚀 В Автопилота'];
-      btns.push(`<span class="pill pill-green" title="Вече е в Автопилота — виж таб 🚀 Автопилот">🚀 ${esc(String(alabel).replace(/^\S+\s/, ''))}</span>`);
+      btns.push(`<span class="pill pill-green" title="Вече е в Автопилота: ${esc(String(alabel))} — виж таб 🚀 Автопилот">🚀 В автопилота</span>`);
     } else if (c.scheduled) {
       btns.push(`<span class="pill pill-green" title="Има включено разписание — виж таб 📅 Разписания">📅 има разписание</span>`);
     } else {
