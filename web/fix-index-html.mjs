@@ -146,16 +146,28 @@ const VERSION_JS = `<script id="smartprice-version">
     el.textContent = '\uD83D\uDD04 Нова версия е готова — натисни, за да се обнови';
     el.onclick = function(){
       el.textContent = 'Обновявам…';
+      function go(){
+        // ВАЖНО (проверено 19.10.2026): обикновеното location.reload() на iPhone
+        // връща СЪЩИЯ стар документ от кеша на приложението и човекът остава на
+        // старата версия, дори след като е натиснал „обнови“. Затова презареждаме
+        // на нов адрес (?_v=<време>) — така телефонът е длъжен да вземе новата
+        // страница от сървъра, а тя сочи новия JS пакет.
+        try {
+          var u = location.href.replace(/([?&])_v=\d+/g, '').replace(/[?&]$/, '');
+          u += (u.indexOf('?') === -1 ? '?' : '&') + '_v=' + Date.now();
+          location.replace(u);
+        } catch (e) { location.reload(); }
+      }
       try {
         if (window.caches && caches.keys) {
           caches.keys()
             .then(function(keys){ return Promise.all(keys.map(function(k){ return caches.delete(k); })); })
-            .then(function(){ location.reload(); })['catch'](function(){ location.reload(); });
-          setTimeout(function(){ location.reload(); }, 900);
+            .then(go)['catch'](go);
+          setTimeout(go, 900);
           return;
         }
       } catch (e) {}
-      location.reload();
+      go();
     };
     (document.body || document.documentElement).appendChild(el);
     return el;
