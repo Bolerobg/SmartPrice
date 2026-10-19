@@ -158,6 +158,9 @@ export default function FeedScreen() {
     } catch {
       /* не пречи на разглеждането */
     }
+    // Скриваме бутона веднага: програмното скролване не винаги ражда onScroll
+    // събитие (в web), затова иначе той остава видим и горе.
+    setShowToTop(false);
   }, []);
 
   const [isToolsExpanded, setIsToolsExpanded] = useState(false);
