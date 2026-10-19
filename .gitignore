@@ -56,3 +56,6 @@ scripts/.local-scrape.env
 scripts/__pycache__/
 *.pyc
 scripts/.venv/
+
+# Докъде е стигнал домашният робот (състояние, не код)
+scripts/.robot_cursors.json

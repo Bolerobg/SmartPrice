@@ -616,19 +616,21 @@ def strip_html(text):
 
 
 MAGENTO_QUERY = (
-    '{products(search:"%s",pageSize:%d,sort:{relevance:DESC}){total_count items{name url_key '
+    '{products(search:"%s",pageSize:%d,currentPage:%d,sort:{relevance:DESC}){total_count items{name url_key '
     "price_range{minimum_price{final_price{value currency} regular_price{value}}} "
     "image{url} short_description{html} description{html}}}}"
 )
 
 
-def try_magento(base, limit, verbose=False):
+def try_magento(base, limit, verbose=False, page=1):
     """Пробва Magento GraphQL — най-чистият начин (име, цена, снимка, описание).
 
     Връща None, ако сайтът не е Magento или GraphQL е изключен (тогава се
     минава по sitemap-а).
     """
-    payload = json.dumps({"query": MAGENTO_QUERY % ("", limit)}, ensure_ascii=False)
+    payload = json.dumps(
+        {"query": MAGENTO_QUERY % ("", limit, max(1, int(page)))}, ensure_ascii=False
+    )
     proc = subprocess.run(
         [
             "curl", "-s", "-X", "POST", base.rstrip("/") + "/graphql",
@@ -845,6 +847,45 @@ def admin_call(api, token, path, body=None, timeout=120):
         return {}
 
 
+# --- РЕД НА КАТАЛОГА (за да не внася всеки пуск едни и същи продукти) --------
+# Защо: картата на sopharmacy.bg дава 18 186 адреса, а роботът взимаше първите N
+# всеки път — тоест вечно едни и същи продукти, а останалите никога не се
+# виждаха (10 от тях излизаха като „вече е в приложението“). Затова помним
+# докъде сме стигнали и всеки пуск започва оттам; като свърши каталогът,
+# започва отначало. Работи и за Magento (номер на партида), и за картите (отместване).
+CURSOR_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".robot_cursors.json")
+
+
+def _cursors():
+    try:
+        with open(CURSOR_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def cursor_get(domain, key, default):
+    """Докъде сме стигнали за този сайт (ако няма запис — default)."""
+    try:
+        return int((_cursors().get(domain) or {}).get(key) or default)
+    except Exception:
+        return default
+
+
+def cursor_set(domain, key, value):
+    """Запомняме докъде сме стигнали (за следващия пуск)."""
+    data = _cursors()
+    row = data.get(domain) or {}
+    row[key] = int(value)
+    data[domain] = row
+    try:
+        with open(CURSOR_FILE, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
 def scan_site(base, count, mode, verbose=False):
     """Обхожда един сайт: Magento GraphQL, иначе sitemap → продуктови страници.
 
@@ -853,28 +894,48 @@ def scan_site(base, count, mode, verbose=False):
     """
     items = []
 
+    domain = re.sub(r"^www\.", "", base.split("//")[-1].split("/")[0])
+
     # 1) Magento GraphQL — ако сайтът го поддържа, това е най-надеждният път.
     if mode in ("auto", "magento"):
-        mag = try_magento(base, count, verbose)
+        page = cursor_get(domain, "page", 1)
+        mag = try_magento(base, count, verbose, page=page)
+        if not mag and page > 1:
+            # партидата свърши (обиколили сме каталога) — започваме отначало
+            page = 1
+            mag = try_magento(base, count, verbose, page=1)
         if mag:
+            cursor_set(domain, "page", page + 1)
+            print(f"  (партида {page} от каталога; следващият пуск продължава от {page + 1})")
             items = mag[:count]
             for item in items:
                 print(f"  \u2713 {item['price']} {item['currency']} — {item['title'][:60]}")
 
     # 2) Иначе: sitemap → продуктови страници.
     if not items and mode in ("auto", "sitemap"):
-        # събираме 4× повече адреси — част от тях се оказват категории без цена
-        urls = collect_product_urls(base, count * 4, verbose)
-        use_browser = len(urls) < 2
+        # Събираме МНОГО по-голям избор, отколкото ще внесем — този пуск взима
+        # само една партида от него (вж. „ред на каталога“ по-долу).
+        want = max(count * 80, 20000)
+        pool = collect_product_urls(base, want, verbose)
+        use_browser = len(pool) < 2
         if use_browser:
-            # Сайтовете зад Cloudflare (remedium.bg, emag.bg, sopharmacy.bg…)
+            # Сайтовете зад Cloudflare (remedium.bg, sopharmacy.bg…)
             # дават 403 на картите — затова откриваме продуктите с истински браузър.
             log("  картите не се четат (защита) — откривам продуктите с истински браузър", verbose)
-            urls = collect_product_urls_browser(base, count * 4, verbose)
-        print(f"  намерени продуктови адреса: {len(urls)}")
-        for url in urls:
+            pool = collect_product_urls_browser(base, want, verbose)
+        # РЕД НА КАТАЛОГА: започваме оттам, докъдето е стигнал миналият пуск.
+        offset = cursor_get(domain, "offset", 0)
+        if offset >= len(pool):
+            offset = 0
+        urls = pool[offset:offset + count * 2]
+        if len(urls) < count and pool:      # край на каталога — продължаваме отначало
+            urls += pool[:count * 2 - len(urls)]
+        print(f"  адреса за този пуск: {len(urls)} от общо {len(pool)} (започвам от №{offset + 1})")
+        last_idx = 0
+        for idx, url in enumerate(urls):
             if len(items) >= count:
                 break
+            last_idx = idx
             if use_browser:
                 html = render_page(url, verbose=verbose)
                 final = url
@@ -901,6 +962,7 @@ def scan_site(base, count, mode, verbose=False):
             print(f"  \u2713 {item['price']} {item['currency']} — {item['title'][:60]}")
             items.append(item)
             time.sleep(1.0)
+        cursor_set(domain, "offset", min(offset + last_idx + 1, len(pool)))
 
     browser_close()
     return items
