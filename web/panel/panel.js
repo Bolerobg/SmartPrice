@@ -2445,7 +2445,7 @@ async function renderScraper(box) {
     <div class="sc-pane active" id="sc-pane-new">
     <div class="grid grid-3" style="margin-bottom:14px">
       <div class="card kpi"><div class="kpi-label">Задачи общо</div><div class="kpi-value cyan">${num(info.jobs.total)}</div><div class="kpi-sub">${num(info.jobs.done)} завършени</div></div>
-      <div class="card kpi"><div class="kpi-label">Научени сайтове</div><div class="kpi-value gold">${num(info.sites)}</div><div class="kpi-sub">стратегията се помни</div></div>
+      <div class="card kpi"><div class="kpi-label">Научени сайтове</div><div class="kpi-value gold">${num((info.sites || []).length)}</div><div class="kpi-sub">стратегията се помни</div></div>
       <div class="card kpi"><div class="kpi-label">AI обработка</div><div class="kpi-value">${info.aiAvailable ? 'включена' : 'изключена'}</div><div class="kpi-sub">${esc(info.model)}</div></div>
     </div>
 
