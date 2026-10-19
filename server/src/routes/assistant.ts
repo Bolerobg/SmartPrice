@@ -357,7 +357,10 @@ function knowledgeMapBlock(index: IndexedKnowledge[]): string {
     ...index
       .slice()
       .sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title))
-      .map((r) => `- ${r.title}${r.keywords.length ? ` (${r.keywords.slice(0, 6).join(', ')})` : ''}`),
+      .slice(0, 80)
+      // Само заглавия: ключовите думи вдигаха промпта с ~1500 токена и бавеха
+      // отговора, без да добавят знание — заглавието стига, за да се ориентира.
+      .map((r) => `- ${r.title}`),
   ].join('\n');
 }
 
