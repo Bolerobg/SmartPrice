@@ -3295,9 +3295,25 @@ export async function runJob(jobId: string): Promise<void> {
       jobId,
       `Прочетох ${products.length} продукта (стратегия: ${strategy || products[0]?.via}). Обходени страници: ${visitedCount(jobId)}.`
     );
-    // 🧭 Отместваме курсора: следващата обиколка на този магазин продължава
-    // напред, вместо да започва отначало и да внася същите продукти.
-    await advanceCursor(job.domain, products.length, products.length).catch(() => undefined);
+    /*
+     * 🧭 Отместваме курсора: следващата обиколка продължава НАПРЕД в каталога.
+     *
+     * БЪГ (хванат 19.10.2026): тук се подаваше `products.length` и като стъпка, и
+     * като размер на кръга. Формулата е `(offset + step) % size` — при step = size
+     * това ВИНАГИ дава 0, тоест курсорът никога не мърдаше и всяка обиколка четеше
+     * едни и същи първи продукти (затова вторите обиколки даваха „вече го има“).
+     *
+     * Сега размерът на кръга е РЕАЛНИЯТ размер на каталога (измерен от автопилота),
+     * а стъпката е колко продукта прочетохме. Така 300/ден минават подред през
+     * каталога, вместо да стоят на първите 15 адреса на сайта.
+     */
+    const catalogSize = Number((o as unknown as { catalogSize?: number }).catalogSize ?? 0) || 0;
+    const disc = await one<{ n: number }>(
+      `select discovered from scrape_jobs where id = $1`,
+      [jobId]
+    ).catch(() => null);
+    const circle = Math.max(products.length, catalogSize || Number(disc?.n ?? 0) || products.length);
+    await advanceCursor(job.domain, products.length, circle).catch(() => undefined);
 
     /* --------------------------------------------------- 2) AI обогатяване */
     let enriched: EnrichedItem[] = [];
