@@ -281,13 +281,24 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     // проверката стоеше само в клона за гости — затова „никъде не излизаше“.
     // Споделен линк (post, raffle) и прегледът (/tour) НЕ се превземат —
     // човекът е поискал точно тях. Пропуска се с „Пропусни“ с едно натискане.
+    /*
+     * ВАЖНО (19.10.2026): тук липсваше `!isPublicAssistant`.
+     *
+     * Затова, когато човек отвори Ценко от чисто устройство/нов webview (напр.
+     * линк от Telegram, или Safari изчистил паметта си), чатът се отваряше, той
+     * пишеше въпроса си — и в този момент портата го хвърляше в обяснението.
+     * Екранът се размонтираше: „въпросът се скри и не ми отговори“.
+     * Ценко е публичен екран като /tour и /post — гостът трябва да може да го
+     * ползва, без да го изхвърляме.
+     */
     if (
       !onboardingSeen &&
       !introShownRef.current &&
       !inAuthGroup &&
       !isPublicTour &&
       !isPublicPost &&
-      !isPublicRaffle
+      !isPublicRaffle &&
+      !isPublicAssistant
     ) {
       introShownRef.current = true;
       router.replace('/(auth)/onboarding');
