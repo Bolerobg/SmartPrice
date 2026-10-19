@@ -250,6 +250,8 @@ export default function AssistantScreen() {
   const [topics, setTopics] = useState<AssistantTopic[]>([]);
 
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  /** Въпроси, натиснати докато Ценко още мисли — пускат се веднага щом отговори. */
+  const queueRef = useRef<string[]>([]);
 
   /* ---------------------------- темите за стартовите бутони (от базата) */
   useEffect(() => {
@@ -441,7 +443,25 @@ export default function AssistantScreen() {
   const send = useCallback(
     (text?: string) => {
       const value = (text ?? input).trim();
-      if (!value || busy) return;
+      if (!value) return;
+
+      /*
+       * ВАЖНО (19.10.2026) — „сега изобщо не може да се изпрати въпроса“.
+       *
+       * Досега тук пишеше `if (!value || busy) return;` и полето се заключваше
+       * (`editable={!busy}`, бутонът `disabled`), докато Ценко мисли. При по-бавен
+       * отговор човекът не можеше нито да напише, нито да изпрати нищо и чатът
+       * изглеждаше напълно блокиран. Сега: пишеш винаги, а въпрос, натиснат по
+       * време на отговор, се ЗАПАЗВА и тръгва сам веднага щом Ценко отговори.
+       */
+      if (busy) {
+        setMessages((prev) => [...prev, { id: uid(), role: 'user', text: value, at: Date.now() }]);
+        setInput('');
+        queueRef.current.push(value);
+        scrollToEnd();
+        return;
+      }
+
       setMessages((prev) => [...prev, { id: uid(), role: 'user', text: value, at: Date.now() }]);
       setInput('');
       scrollToEnd();
@@ -459,6 +479,22 @@ export default function AssistantScreen() {
     },
     [ask, busy, input, scrollToEnd]
   );
+
+  /**
+   * Пуска чакащите въпроси, щом Ценко спре да мисли (вж. бележката в `send`).
+   * `resend: true`, защото въпросът вече е добавен в разговора — не искаме да
+   * влезе в историята два пъти.
+   */
+  useEffect(() => {
+    if (busy) return;
+    const next = queueRef.current.shift();
+    if (!next) return;
+    void (async () => {
+      const ok = await ask(next, { resend: true });
+      if (!ok) await ask(next, { resend: true });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy]);
 
   /* --------------------------------------------- какво прави бутонът */
   /**
@@ -690,12 +726,11 @@ export default function AssistantScreen() {
             }}
             multiline
             maxLength={1000}
-            editable={!busy}
           />
           <TouchableOpacity
-            style={[styles.sendBtn, (!input.trim() || busy) && styles.sendBtnDisabled]}
+            style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
             onPress={() => send()}
-            disabled={!input.trim() || busy}
+            disabled={!input.trim()}
             activeOpacity={0.85}
           >
             {busy ? (
