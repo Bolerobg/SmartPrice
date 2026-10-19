@@ -3305,6 +3305,29 @@ export async function runJob(jobId: string): Promise<void> {
     }
 
     if (!products.length) {
+      /*
+       * 🧭 Лош вход заради ротацията.
+       *
+       * Влизаме от случайно място в каталога, за да не сме предвидими. Понякога
+       * това място е страница, която не се чете (или сайтът е отвърнал веднъж) и
+       * тогава работещ сайт изглежда „счупен“ — видяно на jysk.bg, 19.10.2026.
+       * Затова: влезли сме с отместване → пробваме ОЩЕ ВЕДНЪЖ от начало, преди да
+       * го пращаме на домашния робот.
+       */
+      const offNow = Number(o.startOffset ?? 0);
+      const alreadyRetried = Boolean((o as unknown as { retryFromStart?: boolean }).retryFromStart);
+      if (offNow > 0 && !alreadyRetried) {
+        await query(
+          `update scrape_jobs
+              set status = 'queued',
+                  options = coalesce(options, '{}'::jsonb) || '{"startOffset":0,"retryFromStart":true}'::jsonb,
+                  started_at = null, error = null
+            where id = $1`,
+          [jobId]
+        );
+        await logLine(jobId, `Влязох от лошо място (адрес ${offNow}) — пробвам пак от началото.`);
+        return;
+      }
       // 🖥️ ПОСЛЕДНА ИНСТАНЦИЯ — „всеки сайт намира начин“.
       // Сървърът не се справи (Cloudflare, цена само след JavaScript, непозната
       // платформа). Слагаме сайта в опашката за ДОМАШНИЯ робот: той излиза от
