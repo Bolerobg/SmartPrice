@@ -220,6 +220,153 @@ def fetch_rendered_playwright(url, wait_ms=9000, verbose=False):
     return None
 
 
+# --- ЕДНА ОТВОРЕНА БРАУЗЪРНА СЕСИЯ ------------------------------------------
+# Защо: сайтовете зад Cloudflare (remedium.bg, emag.bg, sopharmacy.bg…) дават 403
+# на обикновена заявка (дори на robots.txt и картите), но ИСТИНСКИЯТ Chrome минава
+# (проверено на живо 19.10.2026: remedium.bg през браузър = 3 MB, 6974 цени).
+# Стартирането на браузър за всяка страница струва ~5 сек — затова го държим
+# отворен, докато обхождаме сайта.
+_SESS = {"pw": None, "browser": None, "ctx": None}
+
+
+def browser_open(verbose=False):
+    """Стартира браузъра веднъж (ако вече работи — не прави нищо)."""
+    if _SESS["browser"]:
+        return True
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(
+            channel="chrome",
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--blink-settings=imagesEnabled=false",
+            ],
+        )
+        ctx = browser.new_context(locale="bg-BG", viewport={"width": 1366, "height": 900})
+        ctx.route(
+            "**/*",
+            lambda route: route.abort()
+            if route.request.resource_type in ("image", "media", "font")
+            else route.continue_(),
+        )
+        _SESS.update(pw=pw, browser=browser, ctx=ctx)
+        return True
+    except Exception as err:  # noqa: BLE001
+        log("  браузърът не стартира: %s" % str(err)[:120], verbose)
+        return False
+
+
+def browser_close():
+    """Затваря браузъра (винаги накрая, за да не остане процес)."""
+    for key in ("ctx", "browser", "pw"):
+        try:
+            obj = _SESS.get(key)
+            if obj:
+                obj.stop() if key == "pw" else obj.close()
+        except Exception:
+            pass
+        _SESS[key] = None
+
+
+def render_page(url, wait_ms=4000, verbose=False):
+    """Чете един адрес с отворения браузър. Връща HTML или ""."""
+    if not browser_open(verbose):
+        return ""
+    host = re.sub(r"^https?://([^/]+).*$", r"\1", url or "")
+    if host in _RENDER_BLOCKED:
+        return ""
+    try:
+        page = _SESS["ctx"].new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(int(wait_ms))
+            html = page.content()
+        finally:
+            page.close()
+    except Exception as err:  # noqa: BLE001
+        log("  страницата не се отвори (%s): %s" % (url[:60], str(err)[:100]), verbose)
+        return ""
+    if html and len(html) > 2000 and not CHALLENGE.search(html[:4000]):
+        return html
+    _RENDER_BLOCKED.add(host)
+    log("  защитата не пусна %s (%d знака)" % (host, len(html or "")), verbose)
+    return ""
+
+
+def page_links(url, verbose=False):
+    """Връща всички линкове от страницата, СЛЕД като JavaScript се изпълни."""
+    if not browser_open(verbose):
+        return []
+    try:
+        page = _SESS["ctx"].new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(3500)
+            links = page.eval_on_selector_all("a", "els => els.map(e => e.href)")
+        finally:
+            page.close()
+    except Exception as err:  # noqa: BLE001
+        log("  линковете не се прочетоха: %s" % str(err)[:100], verbose)
+        return []
+    return [l for l in links if isinstance(l, str)]
+
+
+def collect_product_urls_browser(base, limit, verbose=False):
+    """Открива продукти с истински браузър — за сайтове зад Cloudflare.
+
+    Ред: начална страница → ако продуктите не са на нея, слиза в категориите
+    (до 12 вътрешни адреса) и събира продуктовите линкове оттам.
+    """
+    from urllib.parse import urljoin, urlparse  # noqa: PLC0415
+
+    root = base.rstrip("/")
+    host = re.sub(r"^https?://([^/]+).*$", r"\1", root)
+    pool, seen = [], set()
+
+    def add(links):
+        for u in links:
+            u = urljoin(root + "/", u).split("#")[0]
+            if re.sub(r"^https?://([^/]+).*$", r"\1", u) != host:
+                continue
+            if not looks_like_product(u) or u in seen:
+                continue
+            seen.add(u)
+            pool.append(u)
+
+    home = page_links(root + "/", verbose)
+    add(home)
+    log("  от началната: %d продуктови адреса" % len(pool), verbose)
+
+    if len(pool) < limit:
+        cats, cseen = [], set()
+        for link in home:
+            link = link.split("#")[0]
+            if not link.startswith(root) or link in cseen or looks_like_product(link):
+                continue
+            if SKIP_URL.search(link) or STORE_PATH.search(link):
+                continue
+            path = urlparse(link).path.strip("/")
+            if not path or path.count("/") > 2:
+                continue
+            cseen.add(link)
+            cats.append(link)
+        for cat in cats[:12]:
+            if len(pool) >= limit:
+                break
+            add(page_links(cat, verbose))
+            log("  %s \u2192 общо %d" % (cat[:70], len(pool)), verbose)
+
+    pool.sort(key=lambda u: 0 if PRODUCT_PATH.search(u) else 1)
+    return pool[:limit]
+
+
 def _run_chrome(exe, profile, url, wait_ms, mode):
     try:
         proc = subprocess.run(
@@ -718,11 +865,22 @@ def scan_site(base, count, mode, verbose=False):
     if not items and mode in ("auto", "sitemap"):
         # събираме 4× повече адреси — част от тях се оказват категории без цена
         urls = collect_product_urls(base, count * 4, verbose)
+        use_browser = len(urls) < 2
+        if use_browser:
+            # Сайтовете зад Cloudflare (remedium.bg, emag.bg, sopharmacy.bg…)
+            # дават 403 на картите — затова откриваме продуктите с истински браузър.
+            log("  картите не се четат (защита) — откривам продуктите с истински браузър", verbose)
+            urls = collect_product_urls_browser(base, count * 4, verbose)
         print(f"  намерени продуктови адреса: {len(urls)}")
         for url in urls:
             if len(items) >= count:
                 break
-            status, html, final = fetch(url, verbose)
+            if use_browser:
+                html = render_page(url, verbose=verbose)
+                final = url
+                status = "200" if html else "защита"
+            else:
+                status, html, final = fetch(url, verbose)
             if status != "200":
                 log(f"  пропускам ({status}): {url}", verbose)
                 continue
@@ -730,7 +888,8 @@ def scan_site(base, count, mode, verbose=False):
             if not item["title"] or not item["price"]:
                 # Цените може да идват с JavaScript (bauhaus.bg, jysk.bg, ikea.bg…) —
                 # отваряме страницата с истински браузър и четем пак.
-                rendered = fetch_rendered(final, verbose=verbose)
+                # (ако вече четем с браузъра, второ отваряне не е нужно)
+                rendered = "" if use_browser else fetch_rendered(final, verbose=verbose)
                 if rendered:
                     deeper = extract_product(rendered, final)
                     if deeper["title"] and deeper["price"]:
@@ -743,6 +902,7 @@ def scan_site(base, count, mode, verbose=False):
             items.append(item)
             time.sleep(1.0)
 
+    browser_close()
     return items
 
 
