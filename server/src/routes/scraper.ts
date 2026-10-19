@@ -21,6 +21,12 @@ import {
 import { enrichObjects, lastPlacesRun, placesInfo, recentEnriched, startPlacesEnrich } from '../lib/placesEnrich.js';
 import { currentCursor, deleteCategoryMap, listCategoryMap, listCursors } from '../lib/scrapeCursor.js';
 import {
+  autopilotStatus,
+  cleanDomains,
+  forgetAutopilotSite,
+  runAutopilot,
+} from '../lib/scraperAuto.js';
+import {
   discoverShops,
   finishLocalScan,
   listCandidates,
@@ -1080,6 +1086,66 @@ export default async function scraperRoutes(app: FastifyInstance) {
         order by created_at asc`
     );
     return { items };
+  });
+
+  /* ============================================ 🚀 АВТОПИЛОТ (само домейни) */
+
+  /**
+   * Даваш само имената на сайтовете (по един на ред) — системата проверява,
+   * решава, разписва и пуска проучване. Нищо ръчно.
+   */
+  app.post('/api/admin/scraper/autopilot', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        sites: z.union([z.string().max(20_000), z.array(z.string().max(200)).max(500)]),
+        mode: z.enum(['import', 'preview']).default('import'),
+        respectRobots: z.coerce.boolean().default(true),
+        dailyQuota: z.coerce.number().int().min(0).max(2000).default(0),
+        limit: z.coerce.number().int().min(1).max(25).default(25),
+      })
+      .parse(req.body ?? {});
+
+    const result = await runAutopilot({
+      adminId: admin.id,
+      sites: input.sites,
+      mode: input.mode,
+      respectRobots: input.respectRobots,
+      dailyQuota: input.dailyQuota > 0 ? input.dailyQuota : null,
+      limit: input.limit,
+    });
+
+    await audit({
+      admin,
+      action: 'scraper.autopilot',
+      targetType: 'scrape_autopilot',
+      targetLabel: `${result.checked} сайта`,
+      details: {
+        checked: result.checked,
+        schedules: result.createdSchedules,
+        robot: result.robotQueued,
+        skippedRobots: result.skippedRobots,
+        remaining: result.remaining,
+        mode: input.mode,
+      },
+      ip: req.ip,
+    });
+    return { ok: true, ...result };
+  });
+
+  /** Състояние на автопилота: какво е решено за всеки сайт и как върви. */
+  app.get('/api/admin/scraper/autopilot', async (req) => {
+    await requireAdminPanel(req);
+    return autopilotStatus();
+  });
+
+  /** Маха сайт от списъка на автопилота (разписанието му остава). */
+  app.post('/api/admin/scraper/autopilot/forget', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { domain } = z.object({ domain: z.string().trim().min(3).max(200) }).parse(req.body ?? {});
+    await forgetAutopilotSite(domain);
+    await audit({ admin, action: 'scraper.autopilot_forget', targetType: 'scrape_autopilot', targetLabel: domain, ip: req.ip });
+    return { ok: true };
   });
 
   /* ======================================= 🔎 търсене на сканируеми магазини */

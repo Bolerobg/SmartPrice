@@ -2366,7 +2366,7 @@ let scraperJobId = null;
 let bulkPrefill = '';
 let scraperLastForm = null;
 /** Кой таб е отворен в секция „Скрапер“ (пази се между презарежданията). */
-let scActiveTab = 'new';
+let scActiveTab = 'auto';
 
 function scraperStopPoll() {
   if (scraperPoll) {
@@ -2409,6 +2409,14 @@ async function renderScraper(box) {
     /* оставяме празно */
   }
 
+  // 🚀 Автопилот: какво е решено за всеки добавен сайт.
+  let autopilot = null;
+  try {
+    autopilot = await api('/scraper/autopilot');
+  } catch {
+    /* endpoint-ът още не е наличен — табът пак се показва */
+  }
+
   // 📈 Напредък: докъде сме стигнали във всеки магазин + какви категории е научил.
   let cursors = { items: [] };
   let catmap = { items: [] };
@@ -2442,7 +2450,9 @@ async function renderScraper(box) {
   box.innerHTML = `
     ${scraperTabsHtml(candidates.queue?.pending || 0)}
 
-    <div class="sc-pane active" id="sc-pane-new">
+    <div class="sc-pane active" id="sc-pane-auto">${scraperAutoHtml(autopilot)}</div>
+
+    <div class="sc-pane" id="sc-pane-new">
     <div class="grid grid-3" style="margin-bottom:14px">
       <div class="card kpi"><div class="kpi-label">Задачи общо</div><div class="kpi-value cyan">${num(info.jobs.total)}</div><div class="kpi-sub">${num(info.jobs.done)} завършени</div></div>
       <div class="card kpi"><div class="kpi-label">Научени сайтове</div><div class="kpi-value gold">${num((info.sites || []).length)}</div><div class="kpi-sub">стратегията се помни</div></div>
@@ -2687,6 +2697,7 @@ async function renderScraper(box) {
   };
 
   bindScraperTabs();
+  bindScraperAuto();
   bindScraperDiscovery();
   bindScraperEngines(box);
 
@@ -2708,6 +2719,7 @@ async function renderScraper(box) {
 /* ============================================ 🔎 таб „Търси магазини“ ======== */
 
 const SC_TABS = [
+  ['auto', '🚀 Автопилот'],
   ['new', '🕸️ Нова обиколка'],
   ['discover', '🔎 Търси магазини'],
   ['live', '🔄 Вървящи'],
@@ -2720,6 +2732,7 @@ const SC_TABS = [
   ['engines', '🔧 Двигатели'],
 ];
 const SC_PANES = {
+  auto: 'sc-pane-auto',
   new: 'sc-pane-new',
   discover: 'sc-pane-discover',
   live: 'sc-pane-live',
@@ -2733,6 +2746,182 @@ const SC_PANES = {
 };
 
 /** Табовете на секцията. Ако има чакащи заявки за домашния робот, се виждат. */
+/* ============================================ 🚀 таб „Автопилот“ ============ */
+
+const AU_ACTION = {
+  schedule: ['✅ Разписано', 'pill-green'],
+  already: ['✅ Вече беше разписано', 'pill-dim'],
+  robot: ['🖥️ Домашен робот', 'pill-gold'],
+  skipped: ['⛔ robots.txt', 'pill-dim'],
+  failed: ['❌ Не става', 'pill-red'],
+};
+
+/**
+ * Автопилотът: даваш САМО имената на сайтовете — системата проверява, решава,
+ * разписва и проучва сама. Нищо ръчно.
+ */
+function scraperAutoHtml(a) {
+  const st = (a && a.stats) || {};
+  const d = (a && a.defaults) || {};
+  const items = (a && a.items) || [];
+  const pending = (a && a.pending) || 0;
+
+  return `
+    <div class="card" style="border-color:rgba(34,211,238,.55)">
+      <div class="card-title">🚀 Автопилот <span class="muted">— дай само имената на сайтовете, другото е наше</span></div>
+
+      <div class="hint" style="margin:6px 0 12px;line-height:1.7">
+        Напиши домейните (по един на ред, колкото искаш). Системата сама:
+        <br>1️⃣ проверява дали сайтът може да се чете (сървър / Cloudflare / забрана в robots.txt);
+        <br>2️⃣ уважава <b>robots.txt</b> — ако сайтът забранява на ботове, НЕ го пипаме (това пази и нас, и сайта);
+        <br>3️⃣ прави <b>учтиво разписание</b>: по малко на ден, на случайни моменти, 25-мин паузи, различен вход всеки път;
+        <br>4️⃣ пуска <b>една проучвателна обиколка</b> (само чете — нищо не внася), за да разбере колко продукта има сайтът;
+        <br>5️⃣ смята квотата така, че <b>целият сайт да се обходи за ~${num(d.days || 14)} дни</b>, и слага таван — после спира сам;
+        <br>6️⃣ ако сайтът не пуска сървъра → отива автоматично при <b>домашния робот</b>.
+      </div>
+
+      <label class="field full"><span>Адреси на сайтове — по един на ред</span>
+        <textarea id="au-sites" rows="5" placeholder="magazin.bg&#10;drug-magazin.com&#10;https://treti.bg/kategoriya"></textarea></label>
+
+      <div class="form-grid" style="margin-top:10px">
+        <label class="field"><span>Какво да прави</span>
+          <select id="au-mode">
+            <option value="import" selected>Внасяй веднага (сам, без въпроси)</option>
+            <option value="preview">Първо ми покажи (само събира, не внася)</option>
+          </select></label>
+        <label class="field" style="max-width:230px"><span>Колко продукта на ден (0 = сам да реши)</span>
+          <input id="au-quota" type="number" min="0" max="2000" value="0"></label>
+        <label class="field" style="max-width:280px"><span>Учтивост</span>
+          <select id="au-robots">
+            <option value="1" selected>Спазвай robots.txt (правилното)</option>
+            <option value="0">Пренебрегни robots.txt (само ако имаш разрешение)</option>
+          </select></label>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center">
+        <button class="btn btn-primary" id="au-run">🚀 Пусни автопилота</button>
+        ${pending ? `<button class="btn" id="au-continue">▶ Продължи с оставащите (${num(pending)})</button>` : ''}
+        <span class="hint" style="margin:0">Проверява до ${num(d.batch || 25)} сайта наведнъж — останалите чакат ред и се помнят.</span>
+      </div>
+      <div id="au-out" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📊 Сайтове в автопилота <span class="muted">— какво е решено и как върви</span></div>
+      <div class="grid grid-4" style="margin-bottom:10px">
+        <div class="card kpi" style="margin:0"><div class="kpi-label">Сайтове общо</div><div class="kpi-value cyan">${num(st.total)}</div><div class="kpi-sub">в автопилота</div></div>
+        <div class="card kpi" style="margin:0"><div class="kpi-label">Разписани</div><div class="kpi-value gold">${num(st.scheduled)}</div><div class="kpi-sub">внасят сами</div></div>
+        <div class="card kpi" style="margin:0"><div class="kpi-label">Домашен робот</div><div class="kpi-value">${num(st.robot)}</div><div class="kpi-sub">чакат 10:15 / 20:15</div></div>
+        <div class="card kpi" style="margin:0"><div class="kpi-label">Прескочени / не стават</div><div class="kpi-value">${num(st.skipped)} / ${num(st.failed)}</div><div class="kpi-sub">с причина по-долу</div></div>
+      </div>
+      ${
+        items.length
+          ? `<div class="table-wrap"><table>
+        <thead><tr><th>Сайт</th><th>Какво реши</th><th>Размер на сайта</th><th>Квота/ден</th><th>Днес</th><th>Внесени</th><th>Следващо</th><th>Състояние</th><th></th></tr></thead>
+        <tbody>
+          ${items
+            .map((r) => {
+              const [label, cls] = AU_ACTION[r.action] || ['—', 'pill-dim'];
+              const size = r.catalog_size == null ? '<span class="muted">проучва…</span>' : `${num(r.catalog_size)} продукта`;
+              const next = r.next_run_at ? whenShort(r.next_run_at) : '—';
+              const state = r.auto_stopped_at
+                ? '<span class="hint">спря се сам (изчерпан)</span>'
+                : r.enabled === false
+                  ? '<span class="hint">изключено</span>'
+                  : r.last_status
+                    ? esc(String(r.last_status))
+                    : '<span class="hint">чака</span>';
+              return `<tr>
+              <td><b>${esc(r.domain)}</b><div class="hint" style="margin:0">${esc(r.strategy || r.platform || '')}</div></td>
+              <td><span class="pill ${cls}">${esc(label)}</span></td>
+              <td>${size}</td>
+              <td>${r.quota == null ? '—' : num(r.quota)}</td>
+              <td>${r.used_today == null ? '—' : num(r.used_today)}</td>
+              <td><b>${num(r.total_imported)}</b><div class="hint" style="margin:0">обходени ${num(r.total_crawled)}</div></td>
+              <td class="muted">${esc(next)}</td>
+              <td class="muted">${state}</td>
+              <td class="actions"><button class="btn btn-sm btn-ghost" data-au-forget="${esc(r.domain)}">✕</button></td>
+            </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table></div>
+      <div class="hint" style="margin-top:8px">„✕“ маха реда от този списък — разписанието остава (то се управлява от таб 📅 Разписания).</div>`
+          : '<div class="hint">Още нищо не е добавено. Сложи домейни горе и натисни „Пусни автопилота“.</div>'
+      }
+    </div>`;
+}
+
+function bindScraperAuto() {
+  const box = document.getElementById('au-out');
+  const send = async (extra) => {
+    const sites = (document.getElementById('au-sites') || {}).value || '';
+    if (!sites.trim()) return toast('Дай поне един адрес', 'warn');
+    const btn = document.getElementById('au-run');
+    if (btn) btn.disabled = true;
+    if (box)
+      box.innerHTML = '<div class="hint"><span class="spinner"></span> Проверявам сайтовете и решавам какво да правя с всеки. Това прави истински заявки — може да отнеме до минута.</div>';
+    try {
+      const r = await api('/scraper/autopilot', {
+        method: 'POST',
+        body: {
+          sites,
+          mode: (document.getElementById('au-mode') || {}).value || 'import',
+          respectRobots: ((document.getElementById('au-robots') || {}).value || '1') === '1',
+          dailyQuota: Number((document.getElementById('au-quota') || {}).value) || 0,
+          ...(extra || {}),
+        },
+      });
+
+      const rows = (r.items || [])
+        .map((i) => {
+          const [label, cls] = AU_ACTION[i.action] || ['—', 'pill-dim'];
+          return `<tr><td><b>${esc(i.domain)}</b></td><td><span class="pill ${cls}">${esc(label)}</span></td>
+            <td class="muted">${esc(i.strategy || i.platform || '—')}</td>
+            <td>${i.productsFound ? num(i.productsFound) + ' в пробата' : '—'}</td>
+            <td>${esc(i.reason)}</td></tr>`;
+        })
+        .join('');
+
+      if (box) {
+        box.innerHTML = `
+          <div class="card" style="border-color:rgba(74,222,128,.45)">
+            <div class="card-title">Резултат <span class="pill pill-green">${num(r.checked)} проверени</span>
+              ${r.createdSchedules ? `<span class="pill pill-green">${num(r.createdSchedules)} разписани</span>` : ''}
+              ${r.robotQueued ? `<span class="pill pill-gold">${num(r.robotQueued)} за домашния робот</span>` : ''}
+              ${r.skippedRobots ? `<span class="pill pill-dim">${num(r.skippedRobots)} прескочени (robots)</span>` : ''}
+            </div>
+            <div class="table-wrap" style="margin-top:8px"><table>
+              <thead><tr><th>Сайт</th><th>Какво направих</th><th>Стратегия</th><th>Проба</th><th>Защо</th></tr></thead>
+              <tbody>${rows || '<tr><td colspan="5" class="hint">Нищо не е проверено.</td></tr>'}</tbody>
+            </table></div>
+            ${r.note ? `<div class="hint warn" style="margin-top:8px">${esc(r.note)}</div>` : ''}
+            ${r.remaining ? `<div class="hint" style="margin-top:6px">Остават ${num(r.remaining)} сайта — натисни „Продължи с оставащите“.</div>` : ''}
+          </div>`;
+      }
+      toast(`Автопилот: ${r.checked} проверени, ${r.createdSchedules} разписани`);
+      // Презареждаме таба, за да се видят новите сайтове в списъка.
+      setTimeout(() => render('scraper', true), 1200);
+    } catch (e) {
+      if (box) box.innerHTML = `<div class="hint warn">${esc(e.message)}</div>`;
+      toast(e.message, 'error');
+    }
+    if (btn) btn.disabled = false;
+  };
+
+  const run = document.getElementById('au-run');
+  if (run) run.onclick = () => send();
+  const cont = document.getElementById('au-continue');
+  if (cont) cont.onclick = () => send({ sites: '', limit: 25 });
+
+  document.querySelectorAll('[data-au-forget]').forEach((b) => {
+    b.onclick = async () => {
+      await api('/scraper/autopilot/forget', { method: 'POST', body: { domain: b.dataset.auForget } }).catch(() => undefined);
+      render('scraper', true);
+    };
+  });
+}
+
 function scraperTabsHtml(queuePending) {
   return `<div class="sc-tabs">${SC_TABS.map(([id, label]) => {
     const cnt =
