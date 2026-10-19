@@ -293,8 +293,39 @@ export default function AssistantScreen() {
       .catch(() => undefined);
   }, []);
 
+  /**
+   * Води чата до най-долу, за да се ВИДИ новият отговор.
+   *
+   * Защо и през DOM: в web версията (Expo web) `scrollToEnd` на FlatList понякога
+   * не стига до дъното и последният отговор остава зад полето за писане — човекът
+   * вижда старата част и решава, че „Ценко не отговаря нищо“ (точно това се
+   * случи на 19.10.2026 с въпроса „Последни оферти“). Затова хващаме истинския
+   * скролер и го дърпаме до дъното.
+   */
   const scrollToEnd = useCallback(() => {
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+    const jump = () => {
+      try {
+        listRef.current?.scrollToEnd({ animated: false });
+      } catch {
+        /* няма списък още */
+      }
+      if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+      try {
+        const node =
+          (listRef.current as unknown as { getScrollableNode?: () => HTMLElement | null })
+            ?.getScrollableNode?.() ??
+          (document.querySelector('[data-testid="centko-list"]') as HTMLElement | null);
+        const isScroller = !!node && node.scrollHeight > node.clientHeight;
+        const scroller: HTMLElement | null = isScroller ? node : (node?.parentElement ?? null);
+        if (scroller && scroller.scrollHeight > scroller.clientHeight - 4) {
+          scroller.scrollTop = scroller.scrollHeight;
+        }
+      } catch {
+        /* не пречи на разговора */
+      }
+    };
+    setTimeout(jump, 60);
+    setTimeout(jump, 350);
   }, []);
 
   /** Извиква сървъра и добавя отговора. */
@@ -521,6 +552,7 @@ export default function AssistantScreen() {
       >
         <FlatList
           ref={listRef}
+          testID="centko-list"
           style={styles.list}
           data={listData}
           keyExtractor={(item) => item.id}
