@@ -3079,6 +3079,20 @@ function scraperCandidateRowHtml(c) {
     // emag.bg, jysk.bg, praktis.bg), също може да се обходи от домашния робот.
     btns.push(`<button class="btn btn-sm btn-warn" data-act="queue" data-domain="${d}">🖥️ Обходи от моя компютър</button>`);
   }
+  // 🚀 Към автопилота — едно натискане и сайтът влиза в автоматичното сканиране.
+  // Системата сама решава дали да го обхожда сървърът (разписание) или домашният
+  // робот, и сама смята колко продукта на ден. Вече добавените не се показват
+  // като бутон, за да не се пуска едно и също два пъти.
+  if (c.status !== 'error' && c.status !== 'rejected') {
+    if (c.in_autopilot) {
+      const [alabel] = AU_ACTION[c.autopilot_action] || ['🚀 В Автопилота'];
+      btns.push(`<span class="pill pill-green" title="Вече е в Автопилота — виж таб 🚀 Автопилот">🚀 ${esc(String(alabel).replace(/^\S+\s/, ''))}</span>`);
+    } else if (c.scheduled) {
+      btns.push(`<span class="pill pill-green" title="Има включено разписание — виж таб 📅 Разписания">📅 има разписание</span>`);
+    } else {
+      btns.push(`<button class="btn btn-sm btn-ok" data-act="autopilot" data-domain="${d}" title="Добавя сайта в Автопилота — системата решава сама как да го обхожда">🚀 Към автопилота</button>`);
+    }
+  }
   btns.push(`<button class="btn btn-sm btn-ghost" data-act="rescan" data-domain="${d}">⟳ Провери пак</button>`);
   btns.push(`<button class="btn btn-sm btn-ghost" data-act="reject" data-domain="${d}">✕ Скрий</button>`);
 
@@ -3259,6 +3273,20 @@ function bindScraperDiscovery() {
           if (u) u.value = `https://${domain}/`;
           const p = $('#sc-probe');
           if (p) p.click();
+          return;
+        }
+
+        if (act === 'autopilot') {
+          // Едно натискане: проверява сайта и го добавя в Автопилота (разписание
+          // или домашен робот). Показваме какво реши системата и с колко на ден.
+          btn.textContent = '…добавям в автопилота';
+          const r = await api('/scraper/autopilot', { method: 'POST', body: { sites: domain, mode: 'import' } });
+          const it = (r.items || [])[0] || {};
+          const [label] = AU_ACTION[it.action] || ['—'];
+          toast(`Автопилот: ${domain} → ${label}${it.quota ? ` · до ${num(it.quota)} на ден` : ''}`);
+          if (it.reason) toast(it.reason, 'warn');
+          const fresh = await api('/scraper/candidates?limit=40');
+          out.innerHTML = scraperCandidatesHtml(fresh.items || [], fresh.queue || {}, fresh.apify || {});
           return;
         }
 

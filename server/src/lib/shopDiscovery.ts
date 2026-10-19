@@ -813,6 +813,11 @@ export interface CandidateRow {
   query: string | null;
   found_via: string;
   checked_at: string | null;
+  /** Вече ли е в Автопилота (иначе панелът показва бутон „Към автопилота“). */
+  in_autopilot: boolean;
+  autopilot_action: string | null;
+  /** Има ли включено разписание за сайта. */
+  scheduled: boolean;
 }
 
 async function saveCandidate(c: ShopCheck, meta: { title?: string | null; query?: string; foundVia: string }): Promise<void> {
@@ -959,9 +964,14 @@ export async function discoverShops(input: {
         const c = await checkShop(next.domain, { delayMs: 200, deadline: Math.min(siteDeadline, Date.now() + 45_000) });
         await saveCandidate(c, { title: next.title, query: queryText || undefined, foundVia: next.foundVia });
         const saved = await one<CandidateRow>(
-          `select domain, url, title, platform, strategy, status, reason, scrapable,
-                  products_found, pages_probed, sample, query, found_via, checked_at::text
-             from shop_candidates where domain = $1`,
+          `select c.domain, c.url, c.title, c.platform, c.strategy, c.status, c.reason, c.scrapable,
+                  c.products_found, c.pages_probed, c.sample, c.query, c.found_via, c.checked_at::text,
+                  (a.id is not null) as in_autopilot,
+                  a.action as autopilot_action,
+                  exists (select 1 from scrape_schedules s where s.domain = c.domain and s.enabled) as scheduled
+             from shop_candidates c
+             left join scrape_autopilot a on a.domain = c.domain
+            where c.domain = $1`,
           [next.domain]
         );
         if (saved) items.push(saved);
@@ -980,6 +990,9 @@ export async function discoverShops(input: {
           sample: [],
           query: queryText || null,
           found_via: next.foundVia,
+          in_autopilot: false,
+          autopilot_action: null,
+          scheduled: false,
           checked_at: new Date().toISOString(),
         });
       }
@@ -1015,19 +1028,26 @@ export async function listCandidates(filter: { status?: string; q?: string; limi
   const where: string[] = [];
   if (filter.status && filter.status !== 'all') {
     params.push(filter.status);
-    where.push(`status = $${params.length}`);
+    where.push(`c.status = $${params.length}`);
   }
   if (filter.q) {
     params.push(`%${filter.q.toLowerCase()}%`);
-    where.push(`(lower(domain) like $${params.length} or lower(coalesce(title,'')) like $${params.length})`);
+    where.push(`(lower(c.domain) like $${params.length} or lower(coalesce(c.title,'')) like $${params.length})`);
   }
   params.push(limit);
   return many<CandidateRow>(
-    `select domain, url, title, platform, strategy, status, reason, scrapable,
-            products_found, pages_probed, sample, query, found_via, checked_at::text
-       from shop_candidates
+    `select c.domain, c.url, c.title, c.platform, c.strategy, c.status, c.reason, c.scrapable,
+            c.products_found, c.pages_probed, c.sample, c.query, c.found_via, c.checked_at::text,
+            -- Добавен ли е вече в Автопилота / има ли разписание. Панелът показва
+            -- „🚀 Към автопилота“ само когато сайтът още не е добавен, за да не
+            -- се пуска едно и също два пъти.
+            (a.id is not null) as in_autopilot,
+            a.action as autopilot_action,
+            exists (select 1 from scrape_schedules s where s.domain = c.domain and s.enabled) as scheduled
+       from shop_candidates c
+       left join scrape_autopilot a on a.domain = c.domain
       ${where.length ? `where ${where.join(' and ')}` : ''}
-      order by (status = 'ok') desc, (status = 'local') desc, coalesce(checked_at, created_at) desc
+      order by (c.status = 'ok') desc, (c.status = 'local') desc, coalesce(c.checked_at, c.created_at) desc
       limit $${params.length}`,
     params
   );
