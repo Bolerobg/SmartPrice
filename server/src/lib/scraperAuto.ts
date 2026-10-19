@@ -443,7 +443,7 @@ export async function tuneAutopilot(): Promise<number> {
     await query(
       `update scrape_autopilot
           set catalog_size = $2, quota = $3,
-              note = 'Сайтът има ~' || $2 || ' продукта. Разписано е по ' || $3 || ' на ден → целият сайт за ~' || $4 || ' дни, после спира сам.',
+              note = 'Сайтът има ~' || $2::text || ' продукта. Разписано е по ' || $3::text || ' на ден → целият сайт за ~' || $4::text || ' дни, после спира сам.',
               updated_at = now()
         where domain = $1`,
       [r.domain, size, quota, AUTOPILOT_DAYS]
