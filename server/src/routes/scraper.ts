@@ -87,6 +87,15 @@ const optionsSchema = z
     selectors: z.record(z.string().max(160)).optional(),
     saveProfile: z.coerce.boolean().optional(),
     allowPrivate: z.coerce.boolean().optional(),
+    /**
+     * 🎯 Умно одобрение (по подразбиране ВКЛЮЧЕНО).
+     *
+     * Добра оферта → влиза в приложението направо.
+     * Съмнителна (странна цена, нечетимо заглавие, находка с цена над
+     * „обичайната“) → остава в „Чакат одобрение“, за да я прегледа човек.
+     * Изключи го само ако искаш всичко да влиза без проверка.
+     */
+    smartApprove: z.coerce.boolean().optional(),
   })
   .strict();
 

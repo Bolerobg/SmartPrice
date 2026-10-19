@@ -67,6 +67,11 @@ export interface ScrapeOptions {
   /** За тестове: позволява и вътрешни адреси (по подразбиране забранено). */
   allowPrivate?: boolean;
   /**
+   * 🎯 Умно одобрение: добрата оферта влиза направо, съмнителната остава за
+   * преглед (по подразбиране включено).
+   */
+  smartApprove?: boolean;
+  /**
    * От кой адрес да започне обиколката (завърта списъка).
    * Разписанията слагат случаен брой всеки път, за да влизат от различно място
    * в каталога — различни продукти, различен маршрут, нищо за научаване.
@@ -76,7 +81,8 @@ export interface ScrapeOptions {
 
 const DEFAULTS: Required<Pick<ScrapeOptions,
   'count' | 'useAi' | 'downloadImages' | 'maxImageMb' | 'polarityMode' | 'categoryMode' |
-  'delayMs' | 'respectRobots' | 'maxPages' | 'skipWithoutImage' | 'dedupe' | 'addShopTag' | 'saveProfile'>> = {
+  'delayMs' | 'respectRobots' | 'maxPages' | 'skipWithoutImage' | 'dedupe' | 'addShopTag' |
+  'saveProfile' | 'smartApprove'>> = {
   count: 20,
   useAi: true,
   downloadImages: true,
@@ -90,6 +96,8 @@ const DEFAULTS: Required<Pick<ScrapeOptions,
   dedupe: 'url',
   addShopTag: true,
   saveProfile: true,
+  // 🎯 Добра оферта влиза направо, съмнителната чака одобрение (вж. judgeOffer).
+  smartApprove: true,
 };
 
 export const SCRAPE_CATEGORIES = [
@@ -2875,6 +2883,42 @@ async function routeToLocalRobot(
   }
 }
 
+/**
+ * 🎯 Преценка „добра ли е тази оферта“ (за умното одобрение).
+ *
+ * Идеята е проста и честна: каквото е сигурно — влиза направо; каквото е
+ * съмнително — отива при човека в „Чакат одобрение“. Проверките са без AI
+ * (детерминистични), за да е предвидимо и да не харчи:
+ *   • заглавието изобщо е продукт (не „Всички продукти“ или заглавие на блог);
+ *   • има разумна цена (не 0, не 50 стотинки, не 40 000 €);
+ *   • находка (🟢) не може да е с цена НАД обявената „обичайна“;
+ *   • има описание.
+ * Връща причината, за да я вижда човекът в списъка за преглед.
+ */
+function judgeOffer(input: {
+  title: string;
+  priceEur: number;
+  reference: number | null;
+  polarity: 'green' | 'red';
+  description: string;
+}): { ok: boolean; why: string } {
+  const t = (input.title ?? '').trim();
+  if (t.replace(/[^\p{L}\p{N}]/gu, '').length < 5) return { ok: false, why: 'заглавието не е четливо' };
+  if (
+    /^(всички|всичко|начало|блог|статии|категория|продукти|home|blog|category|products|menu|search)$/i.test(t)
+  ) {
+    return { ok: false, why: 'не изглежда продукт' };
+  }
+  if (!Number.isFinite(input.priceEur) || input.priceEur <= 0) return { ok: false, why: 'липсва цена' };
+  if (input.priceEur < 0.05) return { ok: false, why: 'цена под 5 стотинки' };
+  if (input.priceEur > 20000) return { ok: false, why: `цена ${Math.round(input.priceEur)} € е невероятна` };
+  if (input.polarity === 'green' && input.reference && input.priceEur > input.reference * 1.25) {
+    return { ok: false, why: 'маркирано е находка, а цената е над обичайната' };
+  }
+  if (!input.description || input.description.trim().length < 15) return { ok: false, why: 'няма описание' };
+  return { ok: true, why: '' };
+}
+
 export async function runJob(jobId: string): Promise<void> {
   const job = await one<JobRow>(
     `select id, url, domain, status, mode, options, target_count, schedule_id, created_by
@@ -3452,6 +3496,38 @@ export async function runJob(jobId: string): Promise<void> {
         continue;
       }
 
+      // 🎯 Умно одобрение: добра оферта → направо в приложението; съмнителна →
+      // остава 'parsed' и чака човешко одобрение в панела (нищо не се губи).
+      // Изключва се само ако изрично е избрано smartApprove: false.
+      if (o.smartApprove !== false) {
+        const verdict = judgeOffer({ title, priceEur, reference, polarity, description });
+        if (!verdict.ok) {
+          await insertItem(
+            jobId,
+            p,
+            ai,
+            {
+              title,
+              description,
+              priceEur,
+              category: cat,
+              unitQuantity: unit.quantity ?? null,
+              unitType,
+              polarity,
+              reference,
+              tags,
+              imageUrl: imageUrl ?? undefined,
+            },
+            'parsed',
+            `За преглед: ${verdict.why}`
+          );
+          await bump(jobId, 'parsed');
+          stored++;
+          await logLine(jobId, `За преглед (${verdict.why}): ${title.slice(0, 50)}`);
+          continue;
+        }
+      }
+
       try {
         const item = await insertItem(
           jobId,
@@ -3523,7 +3599,20 @@ export async function runJob(jobId: string): Promise<void> {
     }
 
     await setStatus(jobId, 'done', { finished_at: new Date() });
-    await logLine(jobId, `Готово: ${stored} ${o.mode === 'import' ? 'внесени' : 'готови за преглед'}.`);
+    // Отчетът казва ясно колко е влязло направо и колко чака човешко одобрение —
+    // иначе „внесени 40“ лъже, когато 12 от тях са само за преглед.
+    const counts = await one<{ imp: number; wait: number }>(
+      `select count(*) filter (where status = 'imported')::int as imp,
+              count(*) filter (where status = 'parsed')::int as wait
+         from scrape_items where job_id = $1`,
+      [jobId]
+    ).catch(() => null);
+    await logLine(
+      jobId,
+      o.mode === 'import'
+        ? `Готово: внесени направо ${counts?.imp ?? stored}, чакат одобрение ${counts?.wait ?? 0} (виж „Чакат одобрение“ горе).`
+        : `Готово: ${stored} готови за преглед.`
+    );
     if (job.schedule_id) await updateScheduleAfterJob(job.schedule_id, jobId);
   } catch (err) {
     await setStatus(jobId, 'failed', { error: (err as Error).message.slice(0, 400), finished_at: new Date() });
