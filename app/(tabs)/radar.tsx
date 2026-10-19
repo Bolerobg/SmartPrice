@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -15,19 +15,13 @@ import { PostCard } from '@/components/PostCard';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
-import { matchesUniversalSearch } from '@/lib/smartSearch';
 import { api } from '@/src/api/client';
-import { CategoryId } from '@/types';
+import { CategoryId, PostItem } from '@/types';
 
 export default function RadarScreen() {
-  const {
-    posts,
-    isRefreshing,
-    refreshAll,
-    isLoadingMore,
-    hasMorePosts,
-    loadMorePosts,
-  } = useApp();
+  // От общото състояние ползваме само постовете за броячите по градове —
+  // самата лента на радара се тегли отделно, филтрирана на сървъра.
+  const { posts } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [radarMode, setRadarMode] = useState<'red_hall' | 'green_gems'>('red_hall');
   const [activeCategory, setActiveCategory] = useState<CategoryId>('all');
@@ -123,50 +117,108 @@ export default function RadarScreen() {
     return () => {
       alive = false;
     };
-  }, [radarMode, activeCategory, activeCity, posts.length]);
+  }, [radarMode, activeCategory, activeCity]);
 
   const rankedVenues = serverVenues ?? localVenues;
 
-  const filteredAndSortedPosts = useMemo(() => {
-    const matching = posts.filter((p) => {
-      if (radarMode === 'red_hall' && p.polarity !== 'red') return false;
-      if (radarMode === 'green_gems' && p.polarity !== 'green') return false;
-      if (activeCategory !== 'all' && p.category !== activeCategory) return false;
-      if (activeCity !== 'Всички градове' && p.city !== activeCity) return false;
+  /**
+   * СВОЯ лента, филтрирана на СЪРВЪРА (не в телефона!).
+   *
+   * Защо: радарът филтрираше общата лента от 60 поста в паметта. След като в
+   * лентата влязоха стотици внесени стоки, в „черен“ режим оставаше 1 пост —
+   * човекът виждаше „само първия продукт“, а списъкът веднага искаше още и
+   * забиваше приложението (по 44 заявки в минута, проверено в логовете
+   * 19.10.2026). Сега заявката носи polarity/category/city и сървърът връща
+   * само нужното.
+   */
+  const PAGE = 60;
+  const [list, setList] = useState<PostItem[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [listHasMore, setListHasMore] = useState(false);
+  const [listRefreshing, setListRefreshing] = useState(false);
+  const [listBusy, setListBusy] = useState(false);
+  const [listTotal, setListTotal] = useState(0);
+  const busyRef = useRef(false);
+  const [query, setQuery] = useState('');
 
-      return matchesUniversalSearch(p, searchQuery);
-    });
+  // Изчакваме човекът да спре да пише, преди да питаме сървъра.
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(searchQuery.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
-    return matching.sort((a, b) => {
-      if (radarMode === 'red_hall') {
-        const scoreA = a.reactions.pureRobbery + a.reactions.avoid;
-        const scoreB = b.reactions.pureRobbery + b.reactions.avoid;
-        return scoreB - scoreA;
+  const loadList = useCallback(
+    async (offset: number, replace: boolean) => {
+      if (busyRef.current) return; // една заявка наведнъж — иначе списъкът „забива“
+      busyRef.current = true;
+      setListBusy(true);
+      if (replace) setListLoading(true);
+      try {
+        const feed = await api.feed({
+          polarity: radarMode === 'red_hall' ? 'red' : 'green',
+          category: activeCategory !== 'all' ? activeCategory : undefined,
+          city: activeCity !== 'Всички градове' ? activeCity : undefined,
+          q: query || undefined,
+          limit: PAGE,
+          offset,
+        });
+        setList((prev) => {
+          if (replace) return feed.items;
+          const seen = new Set(prev.map((p) => p.id));
+          return [...prev, ...feed.items.filter((p) => !seen.has(p.id))];
+        });
+        setListHasMore(Boolean(feed.hasMore));
+        if (replace) setListTotal(Number(feed.total) || 0);
+      } catch {
+        if (replace) setList([]);
+        setListHasMore(false);
+      } finally {
+        busyRef.current = false;
+        setListBusy(false);
+        setListLoading(false);
+        setListRefreshing(false);
       }
-      const scoreA = a.reactions.topDeal + a.reactions.worthIt;
-      const scoreB = b.reactions.topDeal + b.reactions.worthIt;
-      return scoreB - scoreA;
-    });
-  }, [posts, searchQuery, radarMode, activeCategory, activeCity]);
+    },
+    [radarMode, activeCategory, activeCity, query]
+  );
+
+  // Нови филтри (или търсене) → първа страница отначало.
+  useEffect(() => {
+    void loadList(0, true);
+  }, [loadList]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <FlatList
-        data={filteredAndSortedPosts}
+        data={list}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <PostCard post={item} />}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        refreshing={isRefreshing}
-        onRefresh={() => void refreshAll()}
+        refreshing={listRefreshing}
+        onRefresh={() => {
+          setListRefreshing(true);
+          void loadList(0, true);
+        }}
         onEndReached={() => {
-          if (hasMorePosts) {
-            void loadMorePosts();
+          if (listHasMore) {
+            void loadList(list.length, false);
           }
         }}
         onEndReachedThreshold={0.4}
+        ListEmptyComponent={
+          listLoading ? (
+            <View style={{ paddingVertical: 28, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={COLORS.greenBright} />
+            </View>
+          ) : (
+            <Text style={{ color: COLORS.textMuted, textAlign: 'center', paddingVertical: 24, fontSize: 13 }}>
+              Тук още няма нищо. Първият доклад е твой.
+            </Text>
+          )
+        }
         ListFooterComponent={
-          isLoadingMore ? (
+          listBusy && list.length > 0 ? (
             <View style={{ paddingVertical: 18, alignItems: 'center' }}>
               <ActivityIndicator size="small" color={COLORS.greenBright} />
             </View>
@@ -480,7 +532,7 @@ export default function RadarScreen() {
                   : '🔥 Сигнали „Топ Удар!“'}
               </Text>
               <Text style={styles.resultsCount}>
-                {filteredAndSortedPosts.length} резултата
+                {listTotal} резултата
               </Text>
             </View>
           </View>
