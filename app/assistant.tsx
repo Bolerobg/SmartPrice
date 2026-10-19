@@ -338,12 +338,15 @@ export default function AssistantScreen() {
           },
         ]);
         setQuotaLeft((n) => (n === null ? null : Math.max(0, n - 1)));
-        return true;
         // На телефон отговорът може да остане зад клавиатурата — скриваме я и
-        // скролваме пак, за да се ВИДИ отговорът (иначе изглежда, че мълчи).
+        // скролваме, за да се ВИДИ отговорът. (Този код стоеше СЛЕД `return true`
+        // и никога не се изпълняваше — затова понякога изглеждаше, че Ценко мълчи.)
         if (Platform.OS !== 'web') Keyboard.dismiss();
         scrollToEnd();
         setTimeout(scrollToEnd, 400);
+        // Дълъг отговор (списък с оферти) се рисува след малко — скролваме пак.
+        setTimeout(scrollToEnd, 1200);
+        return true;
       } catch (err) {
         const msg =
           err instanceof ApiError
@@ -415,8 +418,16 @@ export default function AssistantScreen() {
   );
 
   /* --------------------------------------------- какво прави бутонът */
+  /**
+   * Какво прави бутонът под отговора.
+   *
+   * ВАЖНО (бъг от 19.10.2026): преди тук имаше действие, което не правеше нищо, и
+   * надписи като „Последни оферти“ изглеждаха мъртви — човекът натискаше и „Ценко
+   * не отговаря нищо“. Сега ВСЕКИ бутон прави нещо: или води до екран, или пита
+   * Ценко със самия надпис на бутона (fallback долу).
+   */
   const runAction = useCallback(
-    (action: AssistantAction) => {
+    (action: AssistantAction, label?: string) => {
       switch (action) {
         case 'add_post':
           if (!isAuthenticated) {
@@ -431,21 +442,33 @@ export default function AssistantScreen() {
         case 'leaderboard':
           router.push('/(tabs)/community');
           return;
+        case 'favorites':
+          router.push('/favorites');
+          return;
+        case 'invite':
+          // Кодът за покана е в профила; гостът първо прави профил.
+          router.push(isAuthenticated ? '/(tabs)/profile' : '/(auth)/register');
+          return;
         case 'tour':
           router.push('/tour');
           return;
         case 'donate':
           openDonationModal('Ценко каза, че приложението живее от дарения. Подкрепи от 2 €!', true);
           return;
-        case 'invite':
         case 'check_price':
         case 'nearby':
-        default:
+        case 'search':
+        case 'latest':
+          // Всичко това се гледа в Потока (началния таб).
           router.push('/(tabs)/');
+          return;
+        default:
+          // Непознато действие (или 'none') → не мълчим: питаме Ценко с надписа.
+          if (label) void send(label);
           return;
       }
     },
-    [isAuthenticated, openDonationModal, router]
+    [isAuthenticated, openDonationModal, router, send]
   );
 
   const clearChat = useCallback(async () => {
@@ -566,13 +589,13 @@ export default function AssistantScreen() {
                   {item.suggestions && item.suggestions.length > 0 && (
                     <View style={styles.suggestionsRow}>
                       {item.suggestions
-                        .filter((s) => s.action !== 'none')
+                        .slice(0, 4)
                         .map((s, idx) => (
                           <TouchableOpacity
                             key={`${item.id}-${idx}`}
                             style={styles.suggestionChip}
                             activeOpacity={0.85}
-                            onPress={() => runAction(s.action)}
+                            onPress={() => runAction(s.action, s.label)}
                           >
                             <Text style={styles.suggestionText}>{s.label}</Text>
                             <Ionicons name="arrow-forward" size={12} color={COLORS.accentCyan} />

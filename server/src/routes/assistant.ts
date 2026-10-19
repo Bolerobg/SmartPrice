@@ -46,6 +46,7 @@ const ACTIONS = [
   'leaderboard', // класацията
   'favorites', // любими оферти
   'search', // търсене в потока
+  'latest', // последни оферти / какво ново
   'tour', // обиколката из приложението
   'donate', // подкрепа
   'nearby', // какво е изгодно около мен
@@ -152,8 +153,11 @@ const PERSONA = `Ти си **Ценко** — професионалният р�
 }
 - "steps": САМО когато обясняваш КАК се прави нещо. 2–5 стъпки, простички. Иначе — празен списък [].
 - "suggestions": 2–3 бутона, които РЕАЛНО помагат точно сега. Позволени action:
-check_price, add_post, radar, invite, leaderboard, favorites, search, tour, donate, nearby, none.
-Не слагай бутон за нещо, което човекът току-що е направил или което вече му предлагаш.`;
+check_price, add_post, radar, invite, leaderboard, favorites, search, latest, tour, donate, nearby, none.
+- Когато някой пита „последни оферти“, „какво ново“, „какво има днес“ — изреди в "reply" най-новите находки от живите данни (всяка на свой ред) и сложи бутон с action "latest".
+- Ако човекът пита нещо, което е в КАРТАТА НА ЗНАНИЕТО по-долу, но пълният текст не ти е даден — отговори с това, което знаеш от картата, и кажи къде се намира (кой екран/бутон).
+- НИКОГА не оставяй човека без отговор. Няма ли точна информация — кажи каквото знаеш, предложи най-близкия екран и поискай едно уточнение. Празен отговор не е позволен.
+- Не слагай бутон за нещо, което човекът току-що е направил или което вече му предлагаш.`;
 
 /* ------------------------------------------- наръчник (от базата) */
 
@@ -305,10 +309,10 @@ function pickKnowledge(rows: IndexedKnowledge[], question: string | null): Index
   let chars = 0;
   for (const s of scored.sort((a, b) => b.score - a.score || a.row.priority - b.row.priority)) {
     if (s.score < 20) continue;
-    if (chars + s.row.body.length > 5000) continue;
+    if (chars + s.row.body.length > 8000) continue;
     chosen.push(s.row);
     chars += s.row.body.length;
-    if (chosen.length >= 8) break;
+    if (chosen.length >= 10) break;
   }
 
   // Нищо не съвпадна (или съвпадна твърде малко)? Даваме най-важните теми, за да
@@ -332,6 +336,28 @@ function knowledgeBlock(rows: KnowledgeRow[]): string {
     '## Наръчник на Ценко (официалното знание за приложението)',
     'Следвай тези обяснения. Те са написани от екипа и са верни:',
     ...rows.map((r) => `\n### ${r.title}\n${r.body}`),
+  ].join('\n');
+}
+
+/**
+ * КАРТАТА НА ЗНАНИЕТО — заглавията (и ключовите думи) на ВСИЧКИ теми, които
+ * екипът е описал за приложението. Влиза в промпта при всеки въпрос, дори когато
+ * пълният текст на темата не е избран.
+ *
+ * Защо: иначе Ценко знае само 5–8 теми и на въпрос извън тях отговаря „не знам“,
+ * макар знанието да го има. С картата той вижда ВСИЧКО, което приложението умее,
+ * и може да отговори или поне да насочи човека към верния екран.
+ */
+function knowledgeMapBlock(index: IndexedKnowledge[]): string {
+  if (!index.length) return '';
+  return [
+    '## КАРТА НА ЗНАНИЕТО — всичко, което екипът е описал за приложението',
+    'Ако въпросът опира до нещо от този списък, отговори с него (пълният текст е в наръчника горе, когато темата е избрана).',
+    'Ако нещо не е нито тук, нито в живите данни — не си го измисляй: кажи какво знаеш и насочи човека към екрана.',
+    ...index
+      .slice()
+      .sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title))
+      .map((r) => `- ${r.title}${r.keywords.length ? ` (${r.keywords.slice(0, 6).join(', ')})` : ''}`),
   ].join('\n');
 }
 
@@ -1125,7 +1151,8 @@ async function callDeepSeek(
   knowledge: KnowledgeRow[]
 ): Promise<{ answer: ModelAnswer; usage: Record<string, number>; model: string }> {
   const kb = knowledgeBlock(knowledge);
-  const system = [PERSONA, groundingBlock(grounding), kb].filter(Boolean).join('\n\n---\n\n');
+  const map = knowledgeMapBlock(await loadAllKnowledge().catch(() => []));
+  const system = [PERSONA, groundingBlock(grounding), kb, map].filter(Boolean).join('\n\n---\n\n');
 
   /**
    * Опитите, по ред: DeepSeek → DeepSeek с повече място → резервен модел.
@@ -1362,21 +1389,18 @@ export default async function assistantRoutes(app: FastifyInstance) {
   app.get('/api/assistant/topics', async () => {
     if (!features.assistant) return { enabled: false, items: [] };
     const rows = await loadAllKnowledge();
-    const wanted = [
-      'Първи стъпки за нов човек (най-важното)',
-      'Как се качва находка (стъпка по стъпка)',
-      'Как да снимам касова бележка и AI да я прочете',
-      'Как се печелят точки доверие',
-      'Как работи Радарът (аларми за цени)',
-      'Томболите — как се участва',
-      'Как да покани приятел (покани)',
-      'Как да проверя дали една цена е изгодна',
-    ];
-    const order = new Map(wanted.map((t, i) => [t, i]));
+    /*
+     * Стартовите въпроси се вземат ДИНАМИЧНО от наръчника — най-важните теми
+     * (нисък приоритет = по-важна), без първите две служебни („Заглавие“ и
+     * „Какво е SmartPrice“). Преди тук имаше твърд списък със заглавия: щом
+     * заглавие се промени, чиповете намаляваха (веднъж остана САМО ЕДИН) и
+     * човекът виждаше празна начална страница.
+     */
+    const SKIP = new Set(['Заглавие', 'Какво е SmartPrice (едно изречение)']);
     const items = rows
-      .filter((r) => order.has(r.title))
-      .sort((a, b) => (order.get(a.title) ?? 99) - (order.get(b.title) ?? 99))
-      .slice(0, 6)
+      .filter((r) => r.priority <= 5 && !SKIP.has(r.title) && r.title.length <= 60)
+      .sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title))
+      .slice(0, 8)
       .map((r) => ({ id: r.id, title: r.title, question: r.title, category: r.category }));
     return { enabled: true, items };
   });
