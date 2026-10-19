@@ -440,13 +440,17 @@ export async function tuneAutopilot(): Promise<number> {
       [r.schedule_id, quota, size, planNextRun({ ...sched, daily_quota: quota } as never)]
     ).catch(() => undefined);
 
+    // Бележката се сглобява в JS — в SQL един параметър не може да е едновременно
+    // число (catalog_size) и текст (в бележката): Postgres дава
+    // „inconsistent types deduced for parameter $2“.
+    const learnedNote =
+      `Сайтът има ~${size} продукта. Разписано е по ${quota} на ден → ` +
+      `целият сайт за ~${AUTOPILOT_DAYS} дни, после спира сам.`;
     await query(
       `update scrape_autopilot
-          set catalog_size = $2, quota = $3,
-              note = 'Сайтът има ~' || $2::text || ' продукта. Разписано е по ' || $3::text || ' на ден → целият сайт за ~' || $4::text || ' дни, после спира сам.',
-              updated_at = now()
+          set catalog_size = $2, quota = $3, note = $4, updated_at = now()
         where domain = $1`,
-      [r.domain, size, quota, AUTOPILOT_DAYS]
+      [r.domain, size, quota, learnedNote]
     ).catch(() => undefined);
     tuned += 1;
   }
