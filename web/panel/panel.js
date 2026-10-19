@@ -2840,7 +2840,10 @@ function scraperAutoHtml(a) {
               <td><b>${num(r.total_imported)}</b><div class="hint" style="margin:0">обходени ${num(r.total_crawled)}</div></td>
               <td class="muted">${esc(next)}</td>
               <td class="muted">${state}</td>
-              <td class="actions"><button class="btn btn-sm btn-ghost" data-au-forget="${esc(r.domain)}">✕</button></td>
+              <td class="actions">
+                <button class="btn btn-sm btn-ghost" data-au-measure="${esc(r.domain)}" title="Премери каталога наново от продуктовата карта">📏</button>
+                <button class="btn btn-sm btn-ghost" data-au-forget="${esc(r.domain)}" title="Махни реда">✕</button>
+              </td>
             </tr>`;
             })
             .join('')}
@@ -2913,6 +2916,24 @@ function bindScraperAuto() {
   if (run) run.onclick = () => send();
   const cont = document.getElementById('au-continue');
   if (cont) cont.onclick = () => send({ sites: '', limit: 25 });
+
+  document.querySelectorAll('[data-au-measure]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = '⏳';
+      try {
+        const r = await api('/scraper/autopilot/remeasure', { method: 'POST', body: { domain: b.dataset.auMeasure } });
+        toast(
+          r.catalogSize
+            ? `${b.dataset.auMeasure}: ~${num(r.catalogSize)} продукта → ${num(r.quota)}/ден (за ~${num(r.days)} дни)`
+            : 'Не намерих продуктова карта на този сайт'
+        );
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+      render('scraper', true);
+    };
+  });
 
   document.querySelectorAll('[data-au-forget]').forEach((b) => {
     b.onclick = async () => {

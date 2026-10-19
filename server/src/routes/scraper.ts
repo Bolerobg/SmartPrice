@@ -24,6 +24,7 @@ import {
   autopilotStatus,
   cleanDomains,
   forgetAutopilotSite,
+  remeasureSite,
   runAutopilot,
 } from '../lib/scraperAuto.js';
 import {
@@ -1137,6 +1138,22 @@ export default async function scraperRoutes(app: FastifyInstance) {
   app.get('/api/admin/scraper/autopilot', async (req) => {
     await requireAdminPanel(req);
     return autopilotStatus();
+  });
+
+  /** Премерва сайта наново (продуктовата му карта) и пренастройва квотата. */
+  app.post('/api/admin/scraper/autopilot/remeasure', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { domain } = z.object({ domain: z.string().trim().min(3).max(200) }).parse(req.body ?? {});
+    const res = await remeasureSite(domain);
+    await audit({
+      admin,
+      action: 'scraper.autopilot_remeasure',
+      targetType: 'scrape_autopilot',
+      targetLabel: domain,
+      details: { catalogSize: res.catalogSize, quota: res.quota },
+      ip: req.ip,
+    });
+    return { ok: true, ...res };
   });
 
   /** Маха сайт от списъка на автопилота (разписанието му остава). */

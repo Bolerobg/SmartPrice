@@ -24,7 +24,14 @@ import { many, one, query } from '../db.js';
 import { getSetting, setSetting } from './settings.js';
 import { currentCursor } from './scrapeCursor.js';
 import { discoverShops, queueLocalScan, rememberJob } from './shopDiscovery.js';
-import { normalizeStartUrl, optionsForSite, planNextRun, runJob, sofiaParts } from './scraper.js';
+import {
+  normalizeStartUrl,
+  optionsForSite,
+  planNextRun,
+  politeFetch,
+  runJob,
+  sofiaParts,
+} from './scraper.js';
 
 /** За колко дни искаме да обходим целия каталог на сайта. */
 export const AUTOPILOT_DAYS = 14;
@@ -35,7 +42,9 @@ const START_QUOTA = 20;
 /** Колко продукта пробваме в проучвателната обиколка. */
 const PROBE_COUNT = 25;
 const MIN_QUOTA = 15;
-const MAX_QUOTA = 200;
+const MAX_QUOTA = 300;
+/** До колко адреса броим, когато мерим размера на каталога. */
+const CATALOG_SCAN_LIMIT = 40_000;
 
 const PENDING_KEY = 'autopilot_pending';
 
@@ -385,6 +394,118 @@ export async function runAutopilot(input: {
 /* ------------------------------------------------- самонастройка и преглед */
 
 /**
+ * Колко продукта има сайтът НАИСТИНА.
+ *
+ * Защо не ползваме броя от пробната обиколка: обиколката СПИРА да брои, щом
+ * събере колкото ѝ трябва (за проба от 25 продукта „открити“ излиза ~75). Затова
+ * за реален размер четем ПРОДУКТОВАТА карта на сайта (sitemap-products.xml и
+ * подобни) — тя изброява целия каталог. Точно това показа techmart.bg: пробата
+ * каза 75, а картата има 4 897 продукта.
+ */
+export interface CatalogMeasure {
+  /** Колко продукта има в картата. */
+  size: number;
+  /** true = броено само от ПРОДУКТОВАТА карта (точно); false = приблизително. */
+  exact: boolean;
+  /** Колко карти се прочетоха. */
+  maps: number;
+}
+
+/** Сваля един адрес като текст (с поддръжка на .gz карти). */
+async function fetchMapText(url: string): Promise<string | null> {
+  try {
+    if (/\.gz(\?|$)/i.test(url)) {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SmartPriceBot/1.0)', Accept: '*/*' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (/^\s*</.test(buf.toString('latin1').slice(0, 8))) return buf.toString('utf8');
+      const { gunzipSync } = await import('node:zlib');
+      return gunzipSync(buf).toString('utf8');
+    }
+    const r = await politeFetch(url, {
+      delayMs: 250,
+      respectRobots: true,
+      timeoutMs: 20_000,
+      accept: 'application/xml,text/xml,*/*',
+    });
+    return r.ok && r.text ? r.text : null;
+  } catch {
+    return null;
+  }
+}
+
+function locsOf(xml: string): string[] {
+  return [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+}
+
+/**
+ * Колко продукта има сайтът НАИСТИНА — от ПРОДУКТОВАТА му карта.
+ *
+ * Защо не ползваме броя от пробната обиколка: обиколката СПИРА да брои, щом
+ * събере колкото ѝ трябва (за проба от 25 продукта „открити“ излиза ~75). Затова
+ * четем sitemap.xml, взимаме само картите с „product“ в името и броим адресите
+ * им. Точно това показа techmart.bg: пробата каза 75, а картата има 4 897
+ * продукта (филтрите, 11 909 адреса, НЕ се броят за продукти).
+ */
+export async function measureCatalogSize(domain: string): Promise<CatalogMeasure | null> {
+  const origin = `https://${domain}`;
+
+  // 1) Къде е картата: от robots.txt или стандартните адреси.
+  const candidates: string[] = [];
+  const rb = await politeFetch(`${origin}/robots.txt`, {
+    delayMs: 250,
+    respectRobots: true,
+    timeoutMs: 15_000,
+    accept: 'text/plain',
+  }).catch(() => null);
+  if (rb?.ok && rb.text) {
+    for (const line of rb.text.split('\n')) {
+      const m = /^\s*sitemap:\s*(\S+)/i.exec(line);
+      if (m) candidates.push(m[1].trim());
+      if (candidates.length >= 4) break;
+    }
+  }
+  candidates.push(`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`, `${origin}/product-sitemap.xml`);
+
+  // 2) Първата, която се чете, определя дали е индекс, или директна карта.
+  let indexXml: string | null = null;
+  for (const c of candidates) {
+    indexXml = await fetchMapText(c);
+    if (indexXml && /<loc>/i.test(indexXml)) break;
+    indexXml = null;
+  }
+  if (!indexXml) return null;
+
+  const children = locsOf(indexXml);
+  const isIndex = /<sitemapindex/i.test(indexXml);
+  const productMaps = children.filter((u) => /product/i.test(u));
+
+  let total = 0;
+  let maps = 0;
+  if (isIndex && children.length) {
+    const targets = productMaps.length ? productMaps : children;
+    for (const m of targets.slice(0, 8)) {
+      const xml = await fetchMapText(m);
+      if (!xml) continue;
+      maps += 1;
+      total += locsOf(xml).length;
+      if (total > CATALOG_SCAN_LIMIT) break;
+    }
+  } else {
+    // Директна карта (urlset) — броим адресите в нея.
+    total = children.length;
+    maps = 1;
+  }
+
+  if (total <= 0) return null;
+  return { size: total, exact: productMaps.length > 0, maps };
+}
+
+/**
  * Самонастройка: щом проучвателната обиколка свърши, разбираме колко продукта
  * има сайтът и си смятаме квотата така, че целият каталог да се обходи за
  * ~14 дни. Слагаме и таван = размера на каталога, значи разписанието спира
@@ -414,7 +535,11 @@ export async function tuneAutopilot(): Promise<number> {
     ).catch(() => null);
     if (!job || job.status !== 'done') continue;
 
-    const size = Number(job.discovered ?? 0);
+    // Истинският размер идва от ПРОДУКТОВАТА карта на сайта. Броят от пробната
+    // обиколка е само долна граница — тя спира да брои, щом събере достатъчно.
+    const probeSize = Number(job.discovered ?? 0);
+    const measured = await measureCatalogSize(r.domain).catch(() => null);
+    const size = Math.max(measured?.size ?? 0, probeSize);
     if (size <= 0) {
       await query(
         `update scrape_autopilot set catalog_size = 0,
@@ -443,11 +568,12 @@ export async function tuneAutopilot(): Promise<number> {
     // Бележката се сглобява в JS — в SQL един параметър не може да е едновременно
     // число (catalog_size) и текст (в бележката): Postgres дава
     // „inconsistent types deduced for parameter $2“.
-    // Реалните дни се смятат от квотата (тя има минимум, затова не е винаги 14).
+    // Реалните дни се смятат от квотата (тя има минимум и таван).
     const days = Math.max(1, Math.ceil(size / quota));
+    const fromMap = (measured?.size ?? 0) >= probeSize && (measured?.exact ?? false);
     const learnedNote =
-      `Сайтът има ~${size} продукта. Разписано е по ${quota} на ден → ` +
-      `целият сайт за ~${days} дни, после спира сам.`;
+      `Сайтът има ~${size} продукта${fromMap ? ' (от продуктовата карта)' : ' (от пробната обиколка)'}. ` +
+      `Разписано е по ${quota} на ден → целият сайт за ~${days} дни, после спира сам.`;
     await query(
       `update scrape_autopilot
           set catalog_size = $2, quota = $3, note = $4, updated_at = now()
@@ -498,6 +624,60 @@ export async function autopilotStatus(): Promise<Record<string, unknown>> {
     },
     defaults: { days: AUTOPILOT_DAYS, batch: AUTOPILOT_BATCH, startQuota: START_QUOTA, minQuota: MIN_QUOTA, maxQuota: MAX_QUOTA },
   };
+}
+
+/**
+ * Премерва сайта наново и пренастройва квотата.
+ * Нужно е, когато каталогът се е променил (или първото мерене е било по проба).
+ */
+export async function remeasureSite(domain: string): Promise<{
+  domain: string;
+  catalogSize: number | null;
+  quota: number | null;
+  days: number | null;
+}> {
+  const row = await one<{ schedule_id: string | null }>(
+    `select schedule_id::text from scrape_autopilot where domain = $1`,
+    [domain]
+  ).catch(() => null);
+  const scheduleId = row?.schedule_id ?? null;
+
+  const measured = await measureCatalogSize(domain).catch(() => null);
+  const size = measured?.size ?? 0;
+  if (size <= 0) {
+    await query(
+      `update scrape_autopilot set note = 'Не намерих продуктова карта — не мога да премеря каталога.', updated_at = now()
+        where domain = $1`,
+      [domain]
+    ).catch(() => undefined);
+    return { domain, catalogSize: null, quota: null, days: null };
+  }
+
+  const quota = Math.max(MIN_QUOTA, Math.min(MAX_QUOTA, Math.ceil(size / AUTOPILOT_DAYS)));
+  const days = Math.max(1, Math.ceil(size / quota));
+
+  if (scheduleId) {
+    const sched = await one<Record<string, unknown>>(`select * from scrape_schedules where id = $1`, [scheduleId]).catch(() => null);
+    if (sched) {
+      await query(
+        `update scrape_schedules
+            set daily_quota = $2, max_total = $3, stop_when_done = true, rotate = true,
+                next_run_at = $4, updated_at = now()
+          where id = $1`,
+        [scheduleId, quota, size, planNextRun({ ...sched, daily_quota: quota } as never)]
+      ).catch(() => undefined);
+    }
+  }
+
+  const note =
+    `Сайтът има ~${size} продукта (${measured?.exact ? 'от продуктовата карта' : 'приблизително, от картата на сайта'}). ` +
+    `Разписано е по ${quota} на ден → целият сайт за ~${days} дни, после спира сам.`;
+  await query(
+    `update scrape_autopilot set catalog_size = $2, quota = $3, note = $4, updated_at = now() where domain = $1`,
+    [domain, size, quota, note]
+  ).catch(() => undefined);
+
+  return { domain, catalogSize: size, quota, days };
 }
 
 /** Махане от списъка на автопилота (не пипа разписанието). */
