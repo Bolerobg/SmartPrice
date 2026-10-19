@@ -5454,12 +5454,32 @@ async function renderFbReceipts(box) {
   document.querySelectorAll('[data-fb-reject]').forEach((b) => {
     b.onclick = async () => {
       const id = Number(b.dataset.fbReject);
+      b.disabled = true;
       try {
         await api('/fb-receipts/queue/reject', { method: 'POST', body: { ids: [id] } });
         toast('Отхвърлено');
         render('fb_receipts', true);
       } catch (e) {
         toast(e.message, 'error');
+        b.disabled = false;
+      }
+    };
+  });
+
+  // ↩︎ Връщане на отхвърлена бележка обратно в опашката (отхвърлена по грешка).
+  document.querySelectorAll('[data-fb-unreject]').forEach((b) => {
+    b.onclick = async () => {
+      const id = Number(b.dataset.fbUnreject);
+      b.disabled = true;
+      b.textContent = 'Връщам…';
+      try {
+        await api('/fb-receipts/queue/unreject', { method: 'POST', body: { ids: [id] } });
+        toast('Върнах я в опашката — виж таб „🖼 Без бележка“');
+        render('fb_receipts', true);
+      } catch (e) {
+        toast(e.message, 'error');
+        b.disabled = false;
+        b.textContent = '↩︎ Върни в опашката';
       }
     };
   });
@@ -5686,6 +5706,13 @@ function renderFbQueueItemCard(it) {
             ${
               it.status === 'pending' || it.status === 'not_receipt'
                 ? `<button class="btn btn-sm btn-danger" data-fb-reject="${esc(it.id)}">✕ Отхвърли</button>`
+                : ''
+            }
+            ${
+              // Отхвърлена по грешка? Досега нямаше как да се върне — затова тук
+              // има „Върни в опашката“ (връща я в „Без бележка“ за нов преглед).
+              it.status === 'rejected'
+                ? `<button class="btn btn-sm btn-ghost" data-fb-unreject="${esc(it.id)}">↩︎ Върни в опашката</button>`
                 : ''
             }
           </div>

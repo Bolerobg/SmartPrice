@@ -823,4 +823,32 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
 
     return { ok: true, rejected: input.ids.length };
   });
+
+  // ↩︎ Връщане на отхвърлена бележка обратно в опашката.
+  // Защо: таб „Отхвърлени“ беше задънена улица — отхвърлена по грешка бележка
+  // не можеше да се върне за нов преглед (проверено 19.10.2026).
+  app.post('/api/admin/fb-receipts/queue/unreject', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        ids: z.array(z.coerce.number().int().positive()).min(1).max(200),
+      })
+      .parse(req.body ?? {});
+
+    await query(
+      `update fb_receipt_queue
+          set status = 'not_receipt', reviewed_at = null, reviewed_by = null
+        where id = any($1::bigint[]) and status = 'rejected'`,
+      [input.ids]
+    );
+
+    await audit({
+      admin,
+      action: 'fb_receipts.unreject',
+      details: { count: input.ids.length, ids: input.ids },
+      ip: req.ip,
+    });
+
+    return { ok: true, restored: input.ids.length };
+  });
 }
