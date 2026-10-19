@@ -81,6 +81,7 @@ export default function PostDetailScreen() {
    */
   const [remotePost, setRemotePost] = useState<PostItem | null>(null);
   const [remoteTried, setRemoteTried] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const inLocalList = posts.some((p) => p.id === id);
 
   useEffect(() => {
@@ -102,7 +103,7 @@ export default function PostDetailScreen() {
     return () => {
       alive = false;
     };
-  }, [id, inLocalList]);
+  }, [id, inLocalList, retryKey]);
 
   // Гост, дошъл по споделен линк: показваме публичен преглед на офертата.
   // Без това линкът водеше до екран за вход и получателят не виждаше нищо.
@@ -128,8 +129,21 @@ export default function PostDetailScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.notFoundBox}>
           <Text style={styles.notFoundText}>Публикацията не е намерена.</Text>
+          <Text style={{ color: COLORS.textMuted, fontSize: 12.5, textAlign: 'center', marginBottom: 10 }}>
+            Ако връзката е слаба, опитай пак — публикацията може да не е стигнала до теб.
+          </Text>
           <TouchableOpacity
             style={styles.backBtnSimple}
+            onPress={() => {
+              setRemotePost(null);
+              setRemoteTried(false);
+              setRetryKey((k) => k + 1);
+            }}
+          >
+            <Text style={styles.backBtnSimpleText}>🔄 Опитай пак</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.backBtnSimple, { marginTop: 8 }]}
             onPress={() => goBack(router)}
           >
             <Text style={styles.backBtnSimpleText}>Назад</Text>
