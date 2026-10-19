@@ -111,7 +111,11 @@ export default function RadarScreen() {
         limit: 10,
       })
       .then((res) => {
-        if (alive) setServerVenues(res.items ?? []);
+        if (!alive) return;
+        const items = res.items ?? [];
+        // Празен отговор не е „няма обекти“ — падаме на местната сметка, за да
+        // не изчезне целият блок.
+        setServerVenues(items.length ? items : null);
       })
       .catch(() => {
         if (alive) setServerVenues(null);

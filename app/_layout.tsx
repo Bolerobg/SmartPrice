@@ -14,6 +14,7 @@ import { AlertHost } from '@/components/AlertHost';
 import { ShareModal } from '@/components/ShareModal';
 import { RafflePromoHost } from '@/components/RafflePromoModal';
 import { ScreenTracker } from '@/components/ScreenTracker';
+import { UpdateNotice } from '@/components/UpdateNotice';
 import { AuthPromptModal } from '@/components/AuthPromptModal';
 import { FounderCelebration } from '@/components/FounderCelebration';
 // Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
@@ -347,6 +348,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         <RafflePromoHost />
         {/* 👥 Брои кой къде отваря — за статистиката в админ панела. */}
         <ScreenTracker />
+        {/* 🔄 Има ли нов билд на приложението (иначе телефонът остава на стария) */}
+        <UpdateNotice />
         {/* Гост натисна нещо, което иска профил → покана вместо суха грешка */}
         <AuthPromptModal
           visible={isAuthPromptOpen}
