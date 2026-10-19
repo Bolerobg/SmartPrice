@@ -804,8 +804,15 @@ async function fetchApifyRunUsage(token: string, actor: string): Promise<number 
 function fbKeywordSearchUrls(groupId: string, keywords: string[], mobile = false): string[] {
   const host = mobile ? 'https://m.facebook.com' : 'https://www.facebook.com';
   return keywords
-    .map((k) => String(k || '').trim())
-    .filter(Boolean)
+    // Чистим думата: хората често я пишат в кавички или с излишни интервали
+    // („касова бележка“, "касов бон") — иначе търсенето във Facebook не намира нищо.
+    .map((k) =>
+      String(k || '')
+        .replace(/[„“”“"'’`]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+    .filter((k) => k.length >= 3)
     .slice(0, 5)
     .map((k) => `${host}/groups/${groupId}/search/?q=${encodeURIComponent(k)}`);
 }
