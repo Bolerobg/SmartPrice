@@ -183,6 +183,8 @@ export interface FetchOpts {
   maxSitemaps?: number;
   accept?: string;
   timeoutMs?: number;
+  /** Отместване в каталога (ротация) — за да съберем прозорец, който стига по-навътре. */
+  startOffset?: number;
 }
 
 /** Колко заявки е направила задачата (само страници, не снимки). */
@@ -1242,8 +1244,23 @@ export async function collectFromSitemap(
   const visited: string[] = [];
   const maxSitemaps = opts.maxSitemaps ?? 8;
 
+  /*
+   * Колко адреса да съберем.
+   *
+   * БЪГ (хванат 19.10.2026): събирахме само `limit * 3` (при 5 искани продукта =
+   * 15 адреса), а ротацията после върти списъка с `отместване % дължина`. Значи
+   * всеки сайт всеки път четеше едни и същи 15 продукта и обиколките пишеха
+   * „вече го има в системата“ — каталогът на vikiwat (46 764 продукта) не
+   * помръдваше никъде. Сега прозорецът расте с отместването (таван 900 адреса),
+   * така че 300/ден минават подред през каталога, вместо да стоят в началото му.
+   */
+  const want = Math.min(
+    900,
+    Math.max(limit * 3, limit * 3 + Math.max(0, Number(opts.startOffset ?? 0)))
+  );
+
   async function walk(sitemapUrl: string, depth: number): Promise<void> {
-    if (productUrls.size >= limit) return;
+    if (productUrls.size >= want) return;
     if (seenSitemaps.size >= maxSitemaps) return;
     if (seenSitemaps.has(sitemapUrl) || depth > 2) return;
     seenSitemaps.add(sitemapUrl);
@@ -1293,12 +1310,12 @@ export async function collectFromSitemap(
     }
     for (const loc of [...preferred, ...fallback]) {
       productUrls.add(loc);
-      if (productUrls.size >= limit * 3) return;
+      if (productUrls.size >= want) return;
     }
   }
 
   for (const c of candidates) {
-    if (productUrls.size >= limit * 3) break;
+    if (productUrls.size >= want) break;
     await walk(c, 0);
   }
   return { urls: [...productUrls], usedSitemap: visited[0], fromProductSitemap };
@@ -2944,6 +2961,9 @@ export async function runJob(jobId: string): Promise<void> {
     allowPrivate: o.allowPrivate,
     maxPages: o.maxPages,
     jobId: job.id,
+    // 🧭 Ротацията: колкото по-навътре сме в каталога, толкова по-голям прозорец
+    // събираме от sitemap-а (иначе всеки път четем първите 15 адреса).
+    startOffset: Number(o.startOffset ?? 0),
   };
 
   try {
