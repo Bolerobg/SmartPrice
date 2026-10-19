@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -16,6 +16,7 @@ import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { matchesUniversalSearch } from '@/lib/smartSearch';
+import { api } from '@/src/api/client';
 import { CategoryId } from '@/types';
 
 export default function RadarScreen() {
@@ -42,7 +43,7 @@ export default function RadarScreen() {
     return counts;
   }, [posts]);
 
-  const rankedVenues = useMemo(() => {
+  const localVenues = useMemo(() => {
     const map: Record<
       string,
       {
@@ -87,6 +88,40 @@ export default function RadarScreen() {
       .sort((a, b) => b.score - a.score)
       .slice(0, 4);
   }, [posts, radarMode, activeCategory, activeCity]);
+
+  /**
+   * Класацията се смята на СЪРВЪРА, върху всички публикувани постове.
+   *
+   * Защо: екранът черпи само първите 60 поста от лентата (а сега в тях има и
+   * стотици внесени продукти), затова обектите с гласове от по-стари постове
+   * изчезваха и черният списък показваше само 1 обект. Ако сървърът не отговори,
+   * оставаме с местната сметка (по-добре нещо, отколкото нищо).
+   */
+  const [serverVenues, setServerVenues] = useState<typeof localVenues | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const city = activeCity !== 'Всички градове' ? activeCity : undefined;
+    const category = activeCategory !== 'all' ? activeCategory : undefined;
+    api
+      .venueRanking({
+        polarity: radarMode === 'red_hall' ? 'red' : 'green',
+        city,
+        category,
+        limit: 10,
+      })
+      .then((res) => {
+        if (alive) setServerVenues(res.items ?? []);
+      })
+      .catch(() => {
+        if (alive) setServerVenues(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [radarMode, activeCategory, activeCity, posts.length]);
+
+  const rankedVenues = serverVenues ?? localVenues;
 
   const filteredAndSortedPosts = useMemo(() => {
     const matching = posts.filter((p) => {

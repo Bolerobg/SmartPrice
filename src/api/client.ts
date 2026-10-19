@@ -896,6 +896,27 @@ export const api = {
     return rawRequest<FeedResponse>(`/api/posts?${params.toString()}`);
   },
 
+  /**
+   * Класация на обектите за „Радар“ — смята се в базата върху ВСИЧКИ постове,
+   * не само върху заредените (иначе черният списък показваше 1 обект).
+   */
+  venueRanking: (query: { polarity: 'red' | 'green'; category?: string; city?: string; limit?: number }) => {
+    const params = new URLSearchParams({ polarity: query.polarity, limit: String(query.limit ?? 10) });
+    if (query.category && query.category !== 'all') params.set('category', query.category);
+    if (query.city && query.city !== 'Всички градове') params.set('city', query.city);
+    return rawRequest<{
+      polarity: string;
+      items: Array<{
+        placeName: string;
+        city: string;
+        address?: string;
+        score: number;
+        reportsCount: number;
+        hasReceipt: boolean;
+      }>;
+    }>(`/api/posts/venues?${params.toString()}`);
+  },
+
   post: (id: string) => rawRequest<{ post: PostItem }>(`/api/posts/${id}`),
 
   /**

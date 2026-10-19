@@ -91,6 +91,14 @@ const listQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
 
+// Класация на обектите за „Радар“ (черен списък / сертификат „Честно място“).
+const venuesQuerySchema = z.object({
+  polarity: z.enum(['green', 'red']).default('red'),
+  category: z.string().max(40).optional(),
+  city: z.string().max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
 function computePricePerUnit(
   pricePaid: number,
   unitQuantity?: number,
@@ -135,6 +143,56 @@ export default async function postRoutes(app: FastifyInstance) {
     };
     const [items, total] = await Promise.all([loadPosts(filters, userId), countPosts(filters)]);
     return { items, total, limit: q.limit, offset: q.offset, hasMore: q.offset + items.length < total };
+  });
+
+  // Класация на обектите (Радар). Защо отделна заявка: екранът черпи само
+  // първите 60 поста от лентата, а обектите с гласове са разпръснати из целия
+  // каталог — затова черният списък показваше 1 обект вместо всичките.
+  // Тук смятаме класацията в базата, върху ВСИЧКИ публикувани постове.
+  app.get('/api/posts/venues', async (req) => {
+    const q = venuesQuerySchema.parse(req.query);
+    const rows = await many<{
+      place_name: string;
+      city: string;
+      address: string | null;
+      score: number;
+      reports_count: number;
+      has_receipt: boolean;
+    }>(
+      `select btrim(coalesce(v.place_name, '')) as place_name,
+              coalesce(v.city, '') as city,
+              min(nullif(btrim(coalesce(v.address, '')), '')) as address,
+              count(*)::int as reports_count,
+              sum(case when $1 = 'red'
+                    then coalesce((v.reactions->>'pureRobbery')::int, 0)
+                       + coalesce((v.reactions->>'avoid')::int, 0)
+                    else coalesce((v.reactions->>'topDeal')::int, 0)
+                       + coalesce((v.reactions->>'worthIt')::int, 0)
+                  end)::int as score,
+              bool_or(coalesce(v.verified_valid_today_count, 0) > 0) as has_receipt
+         from v_posts_full v
+         join posts p on p.id = v.id
+        where p.status = 'published'
+          and v.polarity = $1
+          and btrim(coalesce(v.place_name, '')) <> ''
+          and ($2::text is null or v.category = $2)
+          and ($3::text is null or v.city = $3)
+        group by 1, 2
+        order by score desc, reports_count desc, place_name asc
+        limit $4`,
+      [q.polarity, q.category ?? null, q.city ?? null, q.limit]
+    );
+    return {
+      polarity: q.polarity,
+      items: rows.map((r) => ({
+        placeName: r.place_name,
+        city: r.city,
+        address: r.address ?? undefined,
+        score: Number(r.score) || 0,
+        reportsCount: Number(r.reports_count) || 0,
+        hasReceipt: Boolean(r.has_receipt),
+      })),
+    };
   });
 
   // Любими (отметки) — със GPS мястото на всяка оферта, за да се стигне до нея
