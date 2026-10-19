@@ -443,9 +443,11 @@ export async function tuneAutopilot(): Promise<number> {
     // Бележката се сглобява в JS — в SQL един параметър не може да е едновременно
     // число (catalog_size) и текст (в бележката): Postgres дава
     // „inconsistent types deduced for parameter $2“.
+    // Реалните дни се смятат от квотата (тя има минимум, затова не е винаги 14).
+    const days = Math.max(1, Math.ceil(size / quota));
     const learnedNote =
       `Сайтът има ~${size} продукта. Разписано е по ${quota} на ден → ` +
-      `целият сайт за ~${AUTOPILOT_DAYS} дни, после спира сам.`;
+      `целият сайт за ~${days} дни, после спира сам.`;
     await query(
       `update scrape_autopilot
           set catalog_size = $2, quota = $3, note = $4, updated_at = now()
