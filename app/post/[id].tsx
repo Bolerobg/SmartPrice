@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   KeyboardAvoidingView,
@@ -30,6 +31,7 @@ import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAt, formatPostedAtLong, formatRelativeTime } from '@/src/lib/format';
 import { api, loadSimilarOffers } from '@/src/api/client';
 import type { SimilarOffer } from '@/src/api/client';
+import type { PostItem } from '@/types';
 
 
 export default function PostDetailScreen() {
@@ -69,13 +71,57 @@ export default function PostDetailScreen() {
     };
   }, [id, isAuthenticated]);
 
+  /**
+   * Ако публикацията не е в заредената лента — взимаме я от сървъра по id.
+   *
+   * Защо: екранът търсеше само в `posts` (общата лента). Радарът вече тегли
+   * СВОЯТА филтрирана лента (червени/зелени), значи при натискане на оферта от
+   * „Червени флагове“ публикацията не беше в общия списък и екранът казваше
+   * „Публикацията не е намерена“, макар тя да съществува (проверено 19.10.2026).
+   */
+  const [remotePost, setRemotePost] = useState<PostItem | null>(null);
+  const [remoteTried, setRemoteTried] = useState(false);
+  const inLocalList = posts.some((p) => p.id === id);
+
+  useEffect(() => {
+    if (!id || inLocalList) {
+      setRemoteTried(true);
+      return;
+    }
+    let alive = true;
+    setRemoteTried(false);
+    api
+      .post(String(id))
+      .then((r) => {
+        if (alive) setRemotePost(r.post);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (alive) setRemoteTried(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id, inLocalList]);
+
   // Гост, дошъл по споделен линк: показваме публичен преглед на офертата.
   // Без това линкът водеше до екран за вход и получателят не виждаше нищо.
   if (!isAuthenticated) {
     return <PublicPostPreview id={id} />;
   }
 
-  const post = posts.find((p) => p.id === id);
+  const post = posts.find((p) => p.id === id) ?? remotePost;
+
+  // Още теглим от сървъра — не показваме „не е намерена“ преждевременно.
+  if (!post && !remoteTried) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.notFoundBox}>
+          <ActivityIndicator size="small" color={COLORS.greenBright} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!post) {
     return (
