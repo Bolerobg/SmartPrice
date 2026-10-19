@@ -815,31 +815,32 @@ async function fetchViaApify(
   count: number,
   apifyToken: string,
   onLog: (msg: string) => Promise<void>,
-  keywords: string[] = []
+  keywords: string[] = [],
+  extraStartUrls: string[] = []
 ): Promise<RawFbPost[]> {
   await onLog(`Изпращам заявка към Apify Facebook Groups Scraper за до ${count} поста…`);
   const endpoint = `https://api.apify.com/v2/acts/apify~facebook-groups-scraper/run-sync-get-dataset-items?token=${encodeURIComponent(
     apifyToken
   )}`;
 
-  // 🔎 Освен самата група, пускаме и търсенето по въведените думи — така
-  // постовете с тях идват автоматично, без да се рови ръчно в групата.
+  // 🔎 Освен самата група, могат да се подадат и адреси за търсене по думи.
+  // Ако САМИЯТ адрес е търсене, не добавяме още (иначе се дублира).
+  const isSearchUrl = /\/search\//.test(groupUrl);
   let searchUrls: string[] = [];
   try {
-    searchUrls = keywords.length ? fbKeywordSearchUrls(parseFbGroupUrl(groupUrl).groupId, keywords) : [];
+    searchUrls =
+      !isSearchUrl && keywords.length ? fbKeywordSearchUrls(parseFbGroupUrl(groupUrl).groupId, keywords) : [];
   } catch {
     searchUrls = [];
   }
-  if (searchUrls.length) {
-    await onLog(`🔎 Търся в групата и по думите: ${keywords.slice(0, 5).join(' · ')}`);
-  }
+  const allStartUrls = [groupUrl, ...extraStartUrls, ...searchUrls];
 
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      startUrls: [{ url: groupUrl }, ...searchUrls.map((url) => ({ url }))],
-      resultsLimit: Math.min(150, Math.max(5, count * 2 + searchUrls.length * 10)),
+      startUrls: allStartUrls.map((url) => ({ url })),
+      resultsLimit: Math.min(150, Math.max(5, count * 2)),
       viewOption: 'CHRONOLOGICAL',
     }),
     signal: AbortSignal.timeout(180_000),
@@ -2202,6 +2203,36 @@ export async function runFbGroupJob(
       `update fb_receipt_jobs set discovered = $2, strategy = $3 where id = $1`,
       [jobId, rawPosts.length, strategy || 'none']
     );
+
+    // 🔎 Ключовите думи, въведени от човека: търсим ги в групата АВТОМАТИЧНО —
+    // като отделна заявка в try/catch, за да не съсипе обиколката, ако търсенето
+    // не мине. Намереното слагаме ОТПРЕД, за да го обработи AI-ят с предимство.
+    // (При четене без Apify търсенето вече е включено в самата обиколка.)
+    try {
+      const keywords = await getFbKeywords();
+      if (keywords.length && cfg.hasApifyToken) {
+        const searchUrls = fbKeywordSearchUrls(groupId, keywords);
+        if (searchUrls.length) {
+          await logJob(jobId, `🔎 Търся в групата и по думите: ${keywords.slice(0, 5).join(' · ')}`);
+          const found = await fetchViaApify(
+            searchUrls[0]!,
+            Math.max(3, Math.ceil(job.target_count / 2)),
+            cfg.apifyToken,
+            (m) => logJob(jobId, m),
+            [],
+            searchUrls.slice(1)
+          );
+          if (found.length) {
+            await logJob(jobId, `🔎 По думите: ${found.length} поста от търсенето в групата.`);
+            const seen = new Set(rawPosts.map((p) => p.postId || p.postUrl));
+            const fresh = found.filter((p) => !seen.has(p.postId || p.postUrl));
+            rawPosts = [...fresh, ...rawPosts];
+          }
+        }
+      }
+    } catch (err) {
+      await logJob(jobId, `🔎 Търсене по думи (предупреждение): ${(err as Error).message.slice(0, 140)}`);
+    }
 
     if (rawPosts.length === 0) {
       const hint = !cfg.hasApifyToken
