@@ -793,23 +793,53 @@ async function fetchApifyRunUsage(token: string, actor: string): Promise<number 
   }
 }
 
+/**
+ * 🔎 Адресите за търсене на ключови думи ВЪТРЕ в групата.
+ *
+ * Защо: човекът въвежда думи (напр. „касова бележка“) и иска системата да ги
+ * търси САМА при всяка обиколка — както търси оферти и цени, а не само с бутон.
+ * Facebook дава резултатите от търсенето в групата на адрес
+ * `/groups/<id>/search/?q=<дума>`; същият четящ код минава и по него.
+ */
+function fbKeywordSearchUrls(groupId: string, keywords: string[], mobile = false): string[] {
+  const host = mobile ? 'https://m.facebook.com' : 'https://www.facebook.com';
+  return keywords
+    .map((k) => String(k || '').trim())
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((k) => `${host}/groups/${groupId}/search/?q=${encodeURIComponent(k)}`);
+}
+
 async function fetchViaApify(
   groupUrl: string,
   count: number,
   apifyToken: string,
-  onLog: (msg: string) => Promise<void>
+  onLog: (msg: string) => Promise<void>,
+  keywords: string[] = []
 ): Promise<RawFbPost[]> {
   await onLog(`Изпращам заявка към Apify Facebook Groups Scraper за до ${count} поста…`);
   const endpoint = `https://api.apify.com/v2/acts/apify~facebook-groups-scraper/run-sync-get-dataset-items?token=${encodeURIComponent(
     apifyToken
   )}`;
 
+  // 🔎 Освен самата група, пускаме и търсенето по въведените думи — така
+  // постовете с тях идват автоматично, без да се рови ръчно в групата.
+  let searchUrls: string[] = [];
+  try {
+    searchUrls = keywords.length ? fbKeywordSearchUrls(parseFbGroupUrl(groupUrl).groupId, keywords) : [];
+  } catch {
+    searchUrls = [];
+  }
+  if (searchUrls.length) {
+    await onLog(`🔎 Търся в групата и по думите: ${keywords.slice(0, 5).join(' · ')}`);
+  }
+
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      startUrls: [{ url: groupUrl }],
-      resultsLimit: Math.min(100, Math.max(5, count * 2)),
+      startUrls: [{ url: groupUrl }, ...searchUrls.map((url) => ({ url }))],
+      resultsLimit: Math.min(150, Math.max(5, count * 2 + searchUrls.length * 10)),
       viewOption: 'CHRONOLOGICAL',
     }),
     signal: AbortSignal.timeout(180_000),
@@ -942,7 +972,8 @@ async function fetchViaDirectHttp(
   groupId: string,
   count: number,
   fbCookie: string,
-  onLog: (msg: string) => Promise<void>
+  onLog: (msg: string) => Promise<void>,
+  keywords: string[] = []
 ): Promise<RawFbPost[]> {
   const headers: Record<string, string> = {
     'User-Agent': pickUserAgent(),
@@ -954,7 +985,14 @@ async function fetchViaDirectHttp(
   };
   if (fbCookie) headers.Cookie = fbCookie;
 
+  // 🔎 Търсенето по думите върви ПЪРВО (взима до половината квота), за да има
+  // място и за обичайната обиколка на групата — иначе думите изяждат всичко.
+  const searchUrls = keywords.length ? fbKeywordSearchUrls(groupId, keywords, true) : [];
+  if (searchUrls.length) {
+    await onLog(`🔎 Търся в групата и по думите: ${keywords.slice(0, 5).join(' · ')}`);
+  }
   const candidateUrls = [
+    ...searchUrls,
     groupUrl,
     `https://m.facebook.com/groups/${groupId}`,
     `https://mbasic.facebook.com/groups/${groupId}`,
@@ -964,7 +1002,8 @@ async function fetchViaDirectHttp(
   const seenImages = new Set<string>();
 
   for (const url of candidateUrls) {
-    if (posts.length >= count) break;
+    const cap = searchUrls.includes(url) ? Math.max(3, Math.ceil(count / 2)) : count;
+    if (posts.length >= cap) continue;
     try {
       await onLog(`Проверявам директно: ${url}…`);
       const res = await fetch(url, {
@@ -1050,7 +1089,7 @@ async function fetchViaDirectHttp(
           text: bestText,
           imageUrls: [pb.uri],
         });
-        if (posts.length >= count * 2) break;
+        if (posts.length >= cap * 2) break;
       }
     } catch {
       /* преминаваме към следващия вариант */
@@ -2118,7 +2157,13 @@ export async function runFbGroupJob(
     // 1) Първо пробваме Apify Facebook Groups Scraper, ако има токен
     if (cfg.hasApifyToken) {
       try {
-        rawPosts = await fetchViaApify(canonicalUrl, job.target_count, cfg.apifyToken, (m) => logJob(jobId, m));
+        rawPosts = await fetchViaApify(
+          canonicalUrl,
+          job.target_count,
+          cfg.apifyToken,
+          (m) => logJob(jobId, m),
+          await getFbKeywords()
+        );
         if (rawPosts.length > 0) {
           strategy = 'apify';
           await logJob(jobId, `Apify върна ${rawPosts.length} поста със снимки.`);
@@ -2144,7 +2189,8 @@ export async function runFbGroupJob(
         groupId,
         job.target_count,
         cfg.fbCookie,
-        (m) => logJob(jobId, m)
+        (m) => logJob(jobId, m),
+        await getFbKeywords()
       );
       if (rawPosts.length > 0) {
         strategy = cfg.hasFbCookie ? 'direct+cookie' : 'direct';

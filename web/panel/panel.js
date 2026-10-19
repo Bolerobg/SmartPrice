@@ -5093,8 +5093,9 @@ async function renderFbReceipts(box) {
       <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(34,197,94,.35);border-radius:12px;background:rgba(34,197,94,.06)">
         <span><strong>🔎 Ключови думи (пишеш ги сам)</strong> — освен готовите теми горе, тук можеш да напишеш
         конкретни думи, които търсиш в групата (напр. <em>касова бележка, касов бон, промоция</em>).
-        Думата се ползва за търсене в бележките долу, дава пряк линк към търсенето в самата група и се
-        подсказва на AI-я като „търсим специално това“.</span>
+        <strong>Системата търси тези думи САМА при всяка обиколка на групата</strong> — както търси оферти и цени,
+        без да натискаш нищо. Думата се ползва и за търсене в бележките долу, дава пряк линк за ръчна проверка
+        и се подсказва на AI-я като „търсим специално това“.</span>
         <label class="field full" style="margin-top:8px"><span>Думи (по един ред или със запетая)</span>
           <textarea id="fb-keywords" rows="2" placeholder="касова бележка, касов бон, промоция">${esc(keywords.join(', '))}</textarea></label>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:center">
