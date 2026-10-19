@@ -2770,7 +2770,18 @@ export async function runScheduleNow(scheduleId: string, force = false): Promise
   const burst = force
     ? Math.max(1, Math.min(s.burst_max, s.daily_quota))
     : Math.max(1, Math.min(remaining, Math.round(rand(s.burst_min, s.burst_max))));
-  const options = { ...(s.options ?? {}), count: burst, mode: s.mode === 'import' ? 'import' : 'preview' };
+  const options: Record<string, unknown> = {
+    ...((s.options ?? {}) as Record<string, unknown>),
+    count: burst,
+    mode: s.mode === 'import' ? 'import' : 'preview',
+  };
+  /*
+   * 🧭 Същият „различен вход всеки път“ като при плановите обиколки.
+   *
+   * БЪГ (19.10.2026): ръчното пускане („Пусни сега“ в панела) не слагаше
+   * отместване, затова тръгваше отначало и вадеше „вече го има в системата“.
+   */
+  if (s.rotate && !options.startOffset) options.startOffset = Math.floor(Math.random() * 5000);
   const job = await one<{ id: string }>(
     `insert into scrape_jobs (url, domain, mode, options, target_count, status, schedule_id, source_kind)
      values ($1,$2,$3,$4::jsonb,$5,'queued',$6,'schedule') returning id::text`,
