@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -117,6 +117,49 @@ export default function FeedScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [codeBusy, setCodeBusy] = useState(false);
+  /** Реф към потока — за „обратно най-горе“ и за скок при ново търсене. */
+  const feedRef = useRef<FlatList<PostItem>>(null);
+  /** Показваме бутона „↑“ само когато човекът е слязъл надолу. */
+  const [showToTop, setShowToTop] = useState(false);
+
+  /**
+   * Връща потока най-горе.
+   *
+   * Защо и през DOM: в уеб версията (Expo web) `scrollToOffset` понякога не стига
+   * до началото, а на телефон човек трябва да „изтегля“ стотици оферти нагоре, за
+   * да стигне до търсачката. Затова дърпаме и истинския скролер.
+   */
+  const scrollFeedToTop = useCallback((animated = true) => {
+    try {
+      feedRef.current?.scrollToOffset({ offset: 0, animated });
+    } catch {
+      /* списъкът още не е готов */
+    }
+    if (typeof document === 'undefined') return;
+    try {
+      const root = document.querySelector('[data-testid="feed-list"]') as HTMLElement | null;
+      const all: HTMLElement[] = root ? [root] : [];
+      if (root) {
+        const inner = root.querySelectorAll('div');
+        for (let i = 0; i < inner.length && i < 30; i += 1) all.push(inner[i] as HTMLElement);
+      }
+      for (const el of all) {
+        let oy = '';
+        try {
+          oy = window.getComputedStyle(el).overflowY;
+        } catch {
+          oy = '';
+        }
+        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+          el.scrollTop = 0;
+          break;
+        }
+      }
+    } catch {
+      /* не пречи на разглеждането */
+    }
+  }, []);
+
   const [isToolsExpanded, setIsToolsExpanded] = useState(false);
   const router = useRouter();
 
@@ -289,6 +332,16 @@ export default function FeedScreen() {
     });
     return map;
   }, [posts, userCoords, selectedCityFilter, userProfile.city]);
+
+  /**
+   * Ново търсене или нов филтър → показваме резултатите ОТ НАЧАЛОТО.
+   * Иначе човек търси нещо и вижда средата на стария списък.
+   */
+  useEffect(() => {
+    scrollFeedToTop(false);
+    const t = setTimeout(() => scrollFeedToTop(false), 350);
+    return () => clearTimeout(t);
+  }, [debouncedQuery, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter, scrollFeedToTop]);
 
   const filteredPosts = useMemo(() => {
     const isSearchActive = Boolean(debouncedQuery) && serverResults !== null;
@@ -1047,8 +1100,15 @@ export default function FeedScreen() {
       <SafeAreaView style={styles.safeArea}>
         {/* ВАЖНО: подаваме ЕЛЕМЕНТ (renderHeader()), не самата функция. */}
         <FlatList
+          ref={feedRef}
+          testID="feed-list"
           data={filteredPosts}
           keyExtractor={(item) => item.id}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            setShowToTop((prev) => (prev === y > 900 ? prev : y > 900));
+          }}
+          scrollEventThrottle={64}
           renderItem={({ item }) => (
             <PostCard post={item} distanceKm={postDistances[item.id]} />
           )}
@@ -1099,6 +1159,20 @@ export default function FeedScreen() {
         onClose={() => setIsQuickPhotoOpen(false)}
       />
 
+      {/* ↑ Обратно най-горе — появява се, щом човекът е слязъл надолу,
+          за да не се налага да изтегля целия поток, за да търси пак. */}
+      {showToTop && (
+        <TouchableOpacity
+          style={styles.toTop}
+          activeOpacity={0.85}
+          onPress={() => scrollFeedToTop(true)}
+          accessibilityLabel="Обратно най-горе"
+        >
+          <Ionicons name="arrow-up" size={19} color={COLORS.textPrimary} />
+          <Text style={styles.toTopText}>Нагоре</Text>
+        </TouchableOpacity>
+      )}
+
       <SmartToolsModal
         visible={isSmartToolsOpen}
         initialTab={smartToolsTab}
@@ -1109,6 +1183,28 @@ export default function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
+  /* „↑ Нагоре“ — виси над лентата с табовете, за да не пречи на нищо. */
+  toTop: {
+    position: 'absolute',
+    right: 14,
+    bottom: 86,
+    zIndex: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 13,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(11,20,36,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.55)',
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  toTopText: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
   sellCard: {
     flexDirection: 'row',
     alignItems: 'center',
