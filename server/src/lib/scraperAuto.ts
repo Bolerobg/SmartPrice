@@ -491,13 +491,38 @@ export async function measureCatalogSize(domain: string): Promise<CatalogMeasure
   let total = 0;
   let maps = 0;
   let capped = false;
+
+  /**
+   * Брои адресите в карта, слизайки и в ПОД-ИНДЕКСИТЕ.
+   *
+   * БЪГ (19.10.2026): брояхме само първото ниво, затова praktis.bg излизаше
+   * „2 продукта“ — взехме самите файлове products_1.xml/products_2.xml за
+   * продукти, вместо да влезем в тях. Magento влага картите на три нива
+   * (index → products.xml → products_1.xml), а във файл има по 50 000 продукта.
+   */
+  const countMap = async (url: string, depth: number): Promise<number> => {
+    const xml = await fetchMapText(url);
+    if (!xml) return 0;
+    maps += 1;
+    const locs = locsOf(xml);
+    if (/<sitemapindex/i.test(xml) && depth < 3) {
+      let sum = 0;
+      for (const child of locs.slice(0, 8)) {
+        sum += await countMap(child, depth + 1);
+        if (sum > CATALOG_SCAN_LIMIT) {
+          capped = true;
+          break;
+        }
+      }
+      return sum;
+    }
+    return locs.length;
+  };
+
   if (isIndex && children.length) {
     const targets = productMaps.length ? productMaps : children;
     for (const m of targets.slice(0, 8)) {
-      const xml = await fetchMapText(m);
-      if (!xml) continue;
-      maps += 1;
-      total += locsOf(xml).length;
+      total += await countMap(m, 1);
       if (total > CATALOG_SCAN_LIMIT) {
         capped = true;
         break;
