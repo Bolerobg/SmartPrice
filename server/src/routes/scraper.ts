@@ -813,12 +813,23 @@ export default async function scraperRoutes(app: FastifyInstance) {
         maxTotal: z.coerce.number().int().min(0).max(100000).optional(),
         stopWhenDone: z.coerce.boolean().default(true),
         rotate: z.coerce.boolean().default(true),
+        /**
+         * Умна квота: системата сама ще премери колко продукта има всеки сайт
+         * (от продуктовата му карта) и ще сметне квота и таван. Включено по
+         * подразбиране — иначе всеки сайт получава твърдо 20/ден и голям
+         * каталог (напр. techmart.bg, 4 888 продукта) се влачи месеци.
+         */
+        autoQuota: z.coerce.boolean().default(true),
       })
       .parse(req.body ?? {});
 
     const lines =
       typeof input.urls === 'string' ? input.urls.split(/[\s,;]+/).filter(Boolean) : input.urls;
-    const options = (input.options ?? {}) as Record<string, unknown>;
+    const options = {
+      ...((input.options ?? {}) as Record<string, unknown>),
+      // Маркерът се маха, когато самонастройката приключи (вж. scraperAuto.ts).
+      ...(input.autoQuota ? { autoQuota: true } : {}),
+    };
     const seen = new Set<string>();
     const created: string[] = [];
     const skipped: Array<{ url: string; reason: string }> = [];
@@ -891,10 +902,15 @@ export default async function scraperRoutes(app: FastifyInstance) {
       targetType: 'scrape_schedule',
       targetId: created[0] ?? null,
       targetLabel: `${created.length} сайта`,
-      details: { created: created.length, skipped: skipped.length, dailyQuota: input.dailyQuota },
+      details: {
+        created: created.length,
+        skipped: skipped.length,
+        dailyQuota: input.dailyQuota,
+        autoQuota: input.autoQuota,
+      },
       ip: req.ip,
     });
-    return { ok: true, created: created.length, skipped, ids: created };
+    return { ok: true, created: created.length, skipped, ids: created, autoQuota: input.autoQuota };
   });
 
   app.post('/api/admin/scraper/schedules/:id/run', async (req) => {

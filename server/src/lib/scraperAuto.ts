@@ -599,6 +599,82 @@ export async function tuneAutopilot(): Promise<number> {
   return tuned;
 }
 
+/**
+ * Самонастройка за разписанията, създадени „на сляпо“ — от
+ * „🔎 Търси магазини → 📅 Разписание за всички сканируеми“ и от
+ * „📅 Разписания → ➕ Няколко сайта“. Те получават options.autoQuota = true и
+ * тук им се мери каталогът, за да се сметне квотата (вместо твърдо 20/ден).
+ *
+ * Върви на малки порции (по 1–2 сайта на пускане от фоновия работник), за да
+ * не товарим сървъра. Веднъж настроен, сайтът влиза и в списъка на Автопилота,
+ * за да се вижда на едно място.
+ */
+export async function tuneAutoQuotaSchedules(limit = 1): Promise<number> {
+  const rows = await many<{ id: string; domain: string }>(
+    `select id::text, domain from scrape_schedules
+      where coalesce(options->>'autoQuota', 'false') = 'true'
+        and coalesce(options->>'autoQuotaDone', 'false') <> 'true'
+      order by created_at asc
+      limit ${Math.max(1, Math.min(5, limit))}`
+  ).catch(() => []);
+
+  let done = 0;
+  for (const r of rows) {
+    const measured = await measureCatalogSize(r.domain).catch(() => null);
+    const size = measured?.size ?? 0;
+
+    if (size <= 0) {
+      await query(
+        `update scrape_schedules
+            set options = options || '{"autoQuotaDone":true}'::jsonb, updated_at = now()
+          where id = $1`,
+        [r.id]
+      ).catch(() => undefined);
+      done += 1;
+      continue;
+    }
+
+    const capped = measured?.capped ?? false;
+    const quota = Math.max(MIN_QUOTA, Math.min(MAX_QUOTA, Math.ceil(size / AUTOPILOT_DAYS)));
+    const days = Math.max(1, Math.ceil(size / quota));
+    const sched = await one<Record<string, unknown>>(`select * from scrape_schedules where id = $1`, [r.id]).catch(() => null);
+    if (!sched) continue;
+
+    await query(
+      `update scrape_schedules
+          set daily_quota = $2,
+              max_total = $3,
+              stop_when_done = true,
+              rotate = true,
+              options = options || jsonb_build_object('autoQuotaDone', true, 'catalogSize', $4::int),
+              next_run_at = $5,
+              updated_at = now()
+        where id = $1`,
+      [r.id, quota, capped ? null : size, size, planNextRun({ ...sched, daily_quota: quota } as never)]
+    ).catch(() => undefined);
+
+    const note = capped
+      ? `Сайтът има поне ~${size} продукта (много голям каталог). Разписано е по ${quota} на ден — обикаля го, докато свърши (спира сам след 3 празни обиколки).`
+      : `Сайтът има ~${size} продукта${measured?.exact ? ' (от продуктовата карта)' : ' (приблизително, от картата на сайта)'}. ` +
+        `Разписано е по ${quota} на ден → целият сайт за ~${days} дни, после спира сам.`;
+
+    await upsertRow({
+      domain: r.domain,
+      status: 'ok',
+      action: 'schedule',
+      strategy: null,
+      platform: null,
+      productsFound: 0,
+      catalogSize: size,
+      quota,
+      scheduleId: r.id,
+      note,
+    });
+    done += 1;
+  }
+  return done;
+}
+
 /** Какво е състоянието на автопилота (за таба). */
 export async function autopilotStatus(): Promise<Record<string, unknown>> {
   await tuneAutopilot().catch(() => 0);

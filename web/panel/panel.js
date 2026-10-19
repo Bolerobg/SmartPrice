@@ -3513,6 +3513,11 @@ function bindScraperSchedules() {
         <textarea id="blk-urls" rows="8" placeholder="https://magazin1.bg\nhttps://magazin2.bg\nhttps://magazin3.bg/kategoriya">${esc(bulkPrefill)}</textarea></label>
       <div class="form-grid" style="margin-top:10px">
         <label class="field"><span>Колко продукта на ден (за всеки)</span><input id="blk-quota" type="number" min="1" max="2000" value="${Number(lastOpts.__quota ?? 20)}"></label>
+        <label class="field" style="max-width:340px"><span>Квота</span>
+          <select id="blk-auto">
+            <option value="1" selected>🎯 Умна — сам да я сметне (препоръчано)</option>
+            <option value="0">Фиксирана — колкото съм написал горе</option>
+          </select></label>
         <label class="field"><span>Група от</span><input id="blk-bmin" type="number" min="1" max="200" value="3"></label>
         <label class="field"><span>Група до</span><input id="blk-bmax" type="number" min="1" max="200" value="6"></label>
         <label class="field"><span>Активен от (час)</span><input id="blk-hf" type="number" min="0" max="23" value="8"></label>
@@ -3545,6 +3550,9 @@ function bindScraperSchedules() {
                   hourFrom: Number($('#blk-hf').value),
                   hourTo: Number($('#blk-ht').value),
                   minGapMin: Number($('#blk-gap').value),
+                  // 🎯 Умната квота: системата мери всеки сайт от продуктовата му
+                  // карта и смята квота + таван сама (вместо твърдо 20/ден).
+                  autoQuota: ($('#blk-auto') || {}).value !== '0',
                   maxTotal: Number($('#blk-maxtotal').value) || 0,
                   mode: $('#blk-mode').value,
                   stopWhenDone: true,
@@ -3558,6 +3566,7 @@ function bindScraperSchedules() {
                 },
               });
               const skipped = r.skipped || [];
+              if (r.autoQuota) toast('Добавени — меря всеки сайт и слагам умна квота (виж 🚀 Автопилот след минута)');
               toast(`Добавени ${r.created} сайта${skipped.length ? `, \u043f\u0440\u0435\u0441\u043a\u043e\u0447\u0435\u043d\u0438 ${skipped.length}` : ''}`);
               if (skipped.length) {
                 openModal(

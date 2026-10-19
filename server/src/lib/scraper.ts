@@ -3584,6 +3584,8 @@ async function insertItem(
 /* ------------------------------------------------------------- worker */
 
 let workerTimer: NodeJS.Timeout | null = null;
+/** Кога за последно сме пускали самонастройката на квотите (веднъж в минута). */
+let lastAutoQuotaTune = 0;
 /** Едновременно вървящи задачи. Повече от 3 няма смисъл — ще ударим сайтовете. */
 const MAX_PARALLEL = 3;
 const runningJobs = new Set<string>();
@@ -3616,6 +3618,16 @@ export async function startScraperWorker(): Promise<void> {
         }
       } catch {
         /* следващият тик ще опита пак */
+      }
+
+      // 1б) Самонастройка на квотата за разписания, създадени „на сляпо“
+      //     („Разписание за всички сканируеми“ / „➕ Няколко сайта“). Върви на
+      //     малки порции веднъж в минута, за да не товари сървъра.
+      if (Date.now() - lastAutoQuotaTune > 60_000) {
+        lastAutoQuotaTune = Date.now();
+        void import('./scraperAuto.js')
+          .then((m) => m.tuneAutoQuotaSchedules(1))
+          .catch(() => undefined);
       }
 
       // 2) Пускаме чакащите задачи, до 3 наведнъж.
