@@ -16,8 +16,11 @@ import { z } from 'zod';
 import { audit, requireAdminPanel, requireFullAdmin } from '../lib/admin.js';
 import { requireUserId } from '../lib/auth.js';
 import {
+  analyticsFunnel,
   analyticsOverview,
+  analyticsRetention,
   analyticsScreens,
+  analyticsSources,
   analyticsUserDetail,
   analyticsUsers,
   pruneActivity,
@@ -78,6 +81,26 @@ export default async function analyticsRoutes(app: FastifyInstance): Promise<voi
     await requireAdminPanel(req);
     const { days } = z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }).parse(req.query ?? {});
     return { items: await analyticsScreens(days) };
+  });
+
+  /** Задържане по седмици: връщат ли се хората (D1/D7/D30). */
+  app.get('/api/admin/analytics/retention', async (req) => {
+    await requireAdminPanel(req);
+    const { weeks } = z.object({ weeks: z.coerce.number().int().min(1).max(26).default(8) }).parse(req.query ?? {});
+    return { items: await analyticsRetention(weeks) };
+  });
+
+  /** Откъде идват: канал, първо докосване (utm), устройство, град. */
+  app.get('/api/admin/analytics/sources', async (req) => {
+    await requireAdminPanel(req);
+    const { days } = z.object({ days: z.coerce.number().int().min(1).max(365).default(90) }).parse(req.query ?? {});
+    return analyticsSources(days);
+  });
+
+  /** Пътят на потребителя: регистрация, потвърждение, първа полза. */
+  app.get('/api/admin/analytics/funnel', async (req) => {
+    await requireAdminPanel(req);
+    return analyticsFunnel();
   });
 
   app.post('/api/admin/analytics/prune', async (req) => {

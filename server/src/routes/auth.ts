@@ -37,11 +37,31 @@ const registerSchema = z.object({
   ref: z.string().trim().max(32).optional(),
   // Откъде е дошъл (whatsapp/viber/story-card…) — за да знаем кой канал работи.
   refChannel: z.string().trim().max(32).optional(),
+  // Първо докосване (utm/referrer) — по избор, само за статистиката.
+  source: z
+    .object({
+      source: z.string().trim().max(60).optional(),
+      medium: z.string().trim().max(60).optional(),
+      campaign: z.string().trim().max(80).optional(),
+      referrer: z.string().trim().max(120).optional(),
+      landing: z.string().trim().max(120).optional(),
+    })
+    .optional(),
 });
 
 const loginSchema = z.object({
   email: z.string().email('Невалиден имейл.'),
   password: z.string().min(1, 'Паролата е задължителна.'),
+  // Първо докосване — по избор, за да се вижда от кой канал се връщат хората.
+  source: z
+    .object({
+      source: z.string().trim().max(60).optional(),
+      medium: z.string().trim().max(60).optional(),
+      campaign: z.string().trim().max(80).optional(),
+      referrer: z.string().trim().max(120).optional(),
+      landing: z.string().trim().max(120).optional(),
+    })
+    .optional(),
 });
 
 const codeSchema = z.object({
@@ -219,6 +239,32 @@ export default async function authRoutes(app: FastifyInstance) {
       }
       throw err;
     }
+
+    // 🔎 Откъде е дошъл (първо докосване). Пишем само ако още няма запис —
+    // първото докосване е истината, по-късните посещения не го пипат.
+    const src = input.source ?? null;
+    if (src && (src.source || src.referrer || src.campaign)) {
+      await one(
+        `update profiles set
+           signup_source   = coalesce(signup_source, $2),
+           signup_medium   = coalesce(signup_medium, $3),
+           signup_campaign = coalesce(signup_campaign, $4),
+           signup_referrer = coalesce(signup_referrer, $5),
+           signup_landing  = coalesce(signup_landing, $6)
+         where id = $1 returning id`,
+        [userId, src.source ?? null, src.medium ?? null, src.campaign ?? null, src.referrer ?? null, src.landing ?? null]
+      ).catch(() => undefined);
+    }
+
+    // 👥 Статистика: нова регистрация + откъде е дошла.
+    await recordAuthEvent({
+      userId,
+      email,
+      kind: 'register',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] as string | undefined,
+      source: src,
+    });
 
     // Поканата се записва сега, но точките се дават чак при потвърден имейл
     // (иначе един човек може да си направи 100 профила и да трупа точки).
@@ -484,6 +530,7 @@ export default async function authRoutes(app: FastifyInstance) {
       kind: 'login',
       ip: req.ip,
       userAgent: req.headers['user-agent'] as string | undefined,
+      source: input.source ?? null,
     });
 
     return sessionPayload(app, row.id, await loadFullProfile(row.id));

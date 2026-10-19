@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { firstTouch, type FirstTouch } from '@/lib/firstTouch';
 import type {
   CategoryId,
   CommentItem,
@@ -825,15 +826,23 @@ export const api = {
     ref?: string;
     /** Откъде е дошъл кодът — за статистика по канал. */
     refChannel?: string;
+    /** Първо докосване (utm/referrer). Ако не се подаде — взима се само. */
+    source?: FirstTouch;
   }) =>
     rawRequest<RegisterResponse>('/api/auth/register', {
       method: 'POST',
-      body: input,
+      // Откъде е дошъл човекът — за статистиката в панела (не чупи входа,
+      // ако няма запис: полето просто не се праща).
+      body: { ...input, source: input.source ?? firstTouch() },
       auth: false,
     }),
 
-  login: (input: { email: string; password: string }) =>
-    rawRequest<AuthResponse>('/api/auth/login', { method: 'POST', body: input, auth: false }),
+  login: (input: { email: string; password: string; source?: FirstTouch }) =>
+    rawRequest<AuthResponse>('/api/auth/login', {
+      method: 'POST',
+      body: { ...input, source: input.source ?? firstTouch() },
+      auth: false,
+    }),
 
   /** Потвърждава имейла с кода от писмото и влиза директно. */
   verifyEmail: (input: { email: string; code: string }) =>

@@ -20,7 +20,12 @@ import { FounderCelebration } from '@/components/FounderCelebration';
 // Импортът е само за страничния ефект и трябва да е преди първия Alert.alert.
 import '@/lib/alertHost';
 import { ONBOARDING_SEEN_KEY } from './(auth)/onboarding';
+import { captureFirstTouch } from '@/lib/firstTouch';
 import { COLORS } from '@/constants/theme';
+
+// Отбелязваме откъде е дошъл човекът (utm_source/referrer) — веднъж, при
+// първото отваряне. Нужно е за статистиката „откъде идват хората“ в панела.
+captureFirstTouch();
 
 /** Колко минимум да се вижда splash екранът (за да не премигва) */
 

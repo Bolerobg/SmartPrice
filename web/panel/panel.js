@@ -7484,11 +7484,33 @@ async function renderPeople(box) {
       peopleState.onlyActive ? '&onlyActive=true' : ''
     }`
   );
+  // Новите отчети (задържане, източници, път на потребителя). Ако сървърът
+  // още не ги познава (по време на деплой) — панелът пак работи.
+  const ret = await api('/analytics/retention?weeks=8').catch(() => null);
+  const srcRep = await api('/analytics/sources').catch(() => null);
+  const fun = await api('/analytics/funnel').catch(() => null);
   const u = o.users || {}, a = o.active || {}, l = o.logins || {}, c = o.content || {};
   const tl = o.timeline || [], maxActive = Math.max(1, ...tl.map((t) => t.active));
   const maxLogin = Math.max(1, ...tl.map((t) => t.logins));
   const screens = o.topScreens || [], maxScreen = Math.max(1, ...screens.map((x) => x.views));
   const maxHour = Math.max(1, ...(o.hourly || []).map((x) => x.logins));
+
+  const srcBars = (rows, color) => {
+    const arr = rows || [];
+    const mx = Math.max(1, ...arr.map((x) => x.users));
+    return arr.length
+      ? arr
+          .map(
+            (x) => `<div style="margin-bottom:6px">
+        <div class="hint" style="display:flex;justify-content:space-between"><span>${esc(x.key)}</span><span><b>${num(x.users)}</b></span></div>
+        ${bar(x.users, mx, color || '#A78BFA')}</div>`
+          )
+          .join('')
+      : '<div class="hint">още няма данни</div>';
+  };
+  const funSteps = (fun && fun.steps) || [];
+  const funFirst = funSteps.length ? funSteps[0].users || 0 : 0;
+  const funMax = Math.max(1, ...funSteps.map((s) => s.users));
 
   const kpi = (label, value, sub, color) => `
     <div class="card" style="margin:0">
@@ -7623,6 +7645,82 @@ async function renderPeople(box) {
         Показани ${num((users.items || []).length)} от ${num(users.total)} потребители.
         Отварянията са от реалното ползване на приложението (събират се от днес нататък).
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔁 Задържане <span class="muted">— връщат ли се хората (по седмица на регистрация)</span></div>
+      ${
+        ret && (ret.items || []).length
+          ? `<div class="table-wrap"><table>
+        <thead><tr><th>Седмица</th><th>Нови хора</th><th>Върнали се на 1-вия ден</th><th>Върнали се до 7 дни</th><th>Върнали се до 30 дни</th></tr></thead>
+        <tbody>
+          ${(ret.items || [])
+            .map((r) => {
+              const pct = (v, mature) =>
+                !mature
+                  ? '<span class="muted">—</span>'
+                  : r.size
+                    ? `<b>${Math.round((v / r.size) * 100)}%</b> <span class="hint">(${num(v)} от ${num(r.size)})</span>`
+                    : '<span class="muted">0</span>';
+              return `<tr><td>${esc(r.cohort)}</td><td><b>${num(r.size)}</b></td>
+            <td>${pct(r.d1, r.mature1)}</td><td>${pct(r.d7, r.mature7)}</td><td>${pct(r.d30, r.mature30)}</td></tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table></div>
+      <div class="hint" style="margin-top:8px">„—“ значи, че периодът още не е изтекъл (за тази седмица D30 не може да се сметне). Числата в скоби са същинските хора.</div>`
+          : '<div class="hint">Още няма данни за задържане — събират се от първото ползване нататък.</div>'
+      }
+    </div>
+
+    <div class="card">
+      <div class="card-title">🌍 Откъде идват хората</div>
+      ${
+        srcRep
+          ? `<div class="grid grid-2">
+        <div>
+          <div class="hint" style="margin-bottom:6px"><b>Канал</b></div>
+          ${srcBars(srcRep.channels, '#FBBF24')}
+          <div class="hint" style="margin:12px 0 6px"><b>Първо докосване</b> — utm_source или сайтът, който ги е пратил</div>
+          ${srcBars(srcRep.utm, '#60A5FA')}
+          ${
+            srcRep.untracked
+              ? `<div class="hint" style="margin-top:4px">Още <b>${num(srcRep.untracked)}</b> профила са без записан източник (регистрирани преди въвеждането му).</div>`
+              : ''
+          }
+          <div class="hint" style="margin:12px 0 6px"><b>По кой канал е споделена поканата</b></div>
+          ${srcBars(srcRep.refChannels, '#34D399')}
+        </div>
+        <div>
+          <div class="hint" style="margin-bottom:6px"><b>Устройство при първи вход</b></div>
+          ${srcBars(srcRep.firstDevice, '#F472B6')}
+          <div class="hint" style="margin:12px 0 6px"><b>Топ градове</b></div>
+          ${srcBars(srcRep.cities, '#38BDF8')}
+        </div>
+      </div>`
+          : '<div class="hint">Още няма данни.</div>'
+      }
+    </div>
+
+    <div class="card">
+      <div class="card-title">🎯 Пътят на потребителя <span class="muted">— къде отпадат хората</span></div>
+      ${
+        funSteps.length
+          ? funSteps
+              .map((s, i) => {
+                const prev = i > 0 ? funSteps[i - 1].users || 0 : 0;
+                const drop = i > 0 && prev > 0 ? Math.round(((prev - s.users) / prev) * 100) : 0;
+                return `<div style="margin-bottom:10px">
+          <div class="hint" style="display:flex;justify-content:space-between">
+            <span><b>${esc(s.label)}</b>${i > 0 && drop > 0 ? ` <span style="color:#FCA5A5">−${drop}%</span>` : ''}</span>
+            <span><b>${num(s.users)}</b>${funFirst ? ` <span class="muted">(${Math.round((s.users / funFirst) * 100)}% от регистрираните)</span>` : ''}</span>
+          </div>
+          ${bar(s.users, funMax, '#34D399')}</div>`;
+              })
+              .join('')
+          : '<div class="hint">Още няма данни.</div>'
+      }
+      <div class="hint" style="margin-top:6px">Червеното е колко процента от предишната стъпка са отпаднали.</div>
     </div>
 
     <div id="p-detail"></div>`;

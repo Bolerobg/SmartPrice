@@ -58,6 +58,17 @@ export function uaInfo(userAgent: string | undefined | null, hint?: string | nul
 
 /* ============================================================ записване */
 
+/** Откъде е дошъл човекът (първо докосване) — идва от приложението. */
+export interface SourceInfo {
+  source?: string | null;
+  medium?: string | null;
+  campaign?: string | null;
+  referrer?: string | null;
+  landing?: string | null;
+}
+
+const s60 = (v: unknown) => String(v ?? '').trim().slice(0, 60) || null;
+
 /** Записва вход / регистрация / изход / неуспешен опит. */
 export async function recordAuthEvent(input: {
   userId?: string | null;
@@ -66,11 +77,14 @@ export async function recordAuthEvent(input: {
   ip?: string | null;
   userAgent?: string | null;
   platformHint?: string | null;
+  /** Откъде е дошъл (utm/referrer) — по избор. */
+  source?: SourceInfo | null;
 }): Promise<void> {
   const ua = uaInfo(input.userAgent, input.platformHint);
+  const src = input.source ?? null;
   await query(
-    `insert into auth_events (user_id, email, kind, ip, user_agent, platform, browser)
-     values ($1,$2,$3,$4,$5,$6,$7)`,
+    `insert into auth_events (user_id, email, kind, ip, user_agent, platform, browser, source, medium, campaign)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
       input.userId ?? null,
       String(input.email ?? '').slice(0, 200) || null,
@@ -79,6 +93,9 @@ export async function recordAuthEvent(input: {
       String(input.userAgent ?? '').slice(0, 400) || null,
       ua.platform,
       ua.browser,
+      s60(src?.source),
+      s60(src?.medium),
+      s60(src?.campaign),
     ]
   ).catch(() => undefined);
 
@@ -426,4 +443,175 @@ export async function pruneActivity(keepDays = 180): Promise<number> {
     [String(keepDays)]
   ).catch(() => null);
   return Number((res as { rowCount?: number } | null)?.rowCount ?? 0);
+}
+
+/* ============================================================ задържане (връщат ли се) */
+
+export interface RetentionRow {
+  /** Начало на седмицата, в която са се регистрирали (кохорта). */
+  cohort: string;
+  /** Колко нови потребители има в тази седмица. */
+  size: number;
+  /** Върнали са се на следващия ден. */
+  d1: number;
+  /** Върнали са се до 7 дни. */
+  d7: number;
+  /** Върнали са се до 30 дни. */
+  d30: number;
+  /** Минал ли е вече периодът (иначе „—“, защото още не може да се изчисли). */
+  mature1: boolean;
+  mature7: boolean;
+  mature30: boolean;
+}
+
+/**
+ * Задържане по кохорти (седмица на регистрация).
+ * Отговаря на въпроса „връщат ли се хората?“, не просто „колко са влезли“.
+ */
+export async function analyticsRetention(weeks = 8): Promise<RetentionRow[]> {
+  const w = Math.max(1, Math.min(26, weeks));
+  const rows = await many<Record<string, string>>(
+    `with cohorts as (
+       select id as user_id, date_trunc('week', created_at)::date as cohort
+         from profiles
+        where deleted_at is null
+          and created_at > now() - ($1 || ' weeks')::interval
+     ),
+     act as (select distinct user_id, day from user_daily_activity)
+     select c.cohort::text as cohort,
+            count(distinct c.user_id)::text as size,
+            count(distinct case when a.day = c.cohort + 1 then c.user_id end)::text as d1,
+            count(distinct case when a.day > c.cohort and a.day <= c.cohort + 7 then c.user_id end)::text as d7,
+            count(distinct case when a.day > c.cohort and a.day <= c.cohort + 30 then c.user_id end)::text as d30,
+            (c.cohort + 1 <= current_date)::text as m1,
+            (c.cohort + 7 <= current_date)::text as m7,
+            (c.cohort + 30 <= current_date)::text as m30
+       from cohorts c
+       left join act a on a.user_id = c.user_id
+      group by c.cohort
+      order by c.cohort desc`,
+    [String(w)]
+  ).catch(() => []);
+  return rows.map((r) => ({
+    cohort: r.cohort,
+    size: n(r.size),
+    d1: n(r.d1),
+    d7: n(r.d7),
+    d30: n(r.d30),
+    mature1: r.m1 === 'true',
+    mature7: r.m7 === 'true',
+    mature30: r.m30 === 'true',
+  }));
+}
+
+/* ============================================================ откъде идват */
+
+export interface SourceRow {
+  key: string;
+  users: number;
+}
+
+export interface SourcesReport {
+  /** Реферал (поканен от приятел) срещу директно. */
+  channels: SourceRow[];
+  /** Първо докосване (utm_source / referrer) — само за новите профили. */
+  utm: SourceRow[];
+  /** На колко профила още няма записан източник. */
+  untracked: number;
+  /** Устройство при ПЪРВИ вход (iOS/Android/компютър). */
+  firstDevice: SourceRow[];
+  /** Топ градове от профила. */
+  cities: SourceRow[];
+  /** По кой канал е споделен кодът за покана. */
+  refChannels: SourceRow[];
+}
+
+/** Откъде идват потребителите — канали, първо докосване, устройство, град. */
+export async function analyticsSources(days = 90): Promise<SourcesReport> {
+  const d = Math.max(1, Math.min(365, days));
+  const [channels, utm, untracked, device, cities, refChannels] = await Promise.all([
+    many<Record<string, string>>(
+      `select case when referred_by is not null then 'Поканен от приятел' else 'Сам се регистрира' end as key,
+              count(*)::text as users
+         from profiles where deleted_at is null
+        group by 1 order by count(*) desc`
+    ).catch(() => []),
+    many<Record<string, string>>(
+      `select coalesce(nullif(btrim(signup_source), ''), 'direct') as key, count(*)::text as users
+         from profiles
+        where deleted_at is null and signup_source is not null
+          and created_at > now() - ($1 || ' days')::interval
+        group by 1 order by count(*) desc limit 12`,
+      [String(d)]
+    ).catch(() => []),
+    one<{ n: string }>(
+      `select count(*)::text as n from profiles
+        where deleted_at is null and signup_source is null`
+    ).catch(() => null),
+    many<Record<string, string>>(
+      `select coalesce(f.platform, 'other') as key, count(*)::text as users
+         from (select distinct on (user_id) user_id, platform
+                 from auth_events
+                where user_id is not null and kind in ('login', 'register')
+                order by user_id, created_at asc) f
+        group by 1 order by count(*) desc limit 10`
+    ).catch(() => []),
+    many<Record<string, string>>(
+      `select coalesce(nullif(btrim(city), ''), '—') as key, count(*)::text as users
+         from profiles where deleted_at is null
+        group by 1 order by count(*) desc limit 10`
+    ).catch(() => []),
+    many<Record<string, string>>(
+      `select coalesce(nullif(btrim(channel), ''), 'link') as key, count(*)::text as users
+         from referrals group by 1 order by count(*) desc limit 10`
+    ).catch(() => []),
+  ]);
+
+  const map = (rows: Record<string, string>[]): SourceRow[] =>
+    rows.map((r) => ({ key: String(r.key ?? '—'), users: n(r.users) }));
+
+  return {
+    channels: map(channels),
+    utm: map(utm),
+    untracked: n(untracked?.n),
+    firstDevice: map(device),
+    cities: map(cities),
+    refChannels: map(refChannels),
+  };
+}
+
+/* ============================================================ пътят на потребителя */
+
+export interface FunnelStep {
+  key: string;
+  label: string;
+  users: number;
+}
+
+/**
+ * Пътят от регистрация до първа полезна стъпка: потвърди → отвори → пусни
+ * находка → направи аларма → пусне обява. Показва КЪДЕ отпадат хората.
+ */
+export async function analyticsFunnel(): Promise<{ steps: FunnelStep[] }> {
+  const row = await one<Record<string, string>>(
+    `select
+       (select count(*) from profiles where deleted_at is null)::text as registered,
+       (select count(*) from profiles where deleted_at is null and email_verified_at is not null)::text as verified,
+       (select count(distinct p.id) from profiles p where p.deleted_at is null
+          and (exists (select 1 from user_screen_views v where v.user_id = p.id)
+               or exists (select 1 from auth_events e where e.user_id = p.id and e.kind = 'login')))::text as opened,
+       (select count(distinct author_id) from posts)::text as posted,
+       (select count(distinct user_id) from price_alerts)::text as alert,
+       (select count(distinct user_id) from listings where user_id is not null)::text as listing`
+  ).catch(() => null);
+
+  const steps: FunnelStep[] = [
+    { key: 'registered', label: 'Регистрирани', users: n(row?.registered) },
+    { key: 'verified', label: 'Потвърдили имейл', users: n(row?.verified) },
+    { key: 'opened', label: 'Отворили приложението', users: n(row?.opened) },
+    { key: 'posted', label: 'Пуснали находка/оферта', users: n(row?.posted) },
+    { key: 'alert', label: 'Направили си аларма', users: n(row?.alert) },
+    { key: 'listing', label: 'Пуснали обява', users: n(row?.listing) },
+  ];
+  return { steps };
 }
