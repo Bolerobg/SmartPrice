@@ -1262,7 +1262,16 @@ export async function collectFromSitemap(
   async function walk(sitemapUrl: string, depth: number): Promise<void> {
     if (productUrls.size >= want) return;
     if (seenSitemaps.size >= maxSitemaps) return;
-    if (seenSitemaps.has(sitemapUrl) || depth > 2) return;
+    /*
+     * Дълбочина на картите.
+     *
+     * БЪГ (19.10.2026): беше `depth > 2`, а Magento (praktis.bg) влага картите
+     * така: google_sitemap_index.xml → google_sitemap_products.xml → products_1.xml
+     * (по 50 000 продукта във файл). На 2 нива стигахме само до самите файлове и
+     * ги пишехме за „продукти“ → каталогът излизаше „2 продукта“ и сайтът никога
+     * не се обхождаше. Затова разрешаваме до 4 нива.
+     */
+    if (seenSitemaps.has(sitemapUrl) || depth > 4) return;
     seenSitemaps.add(sitemapUrl);
 
     let res: FetchResult;
@@ -1304,6 +1313,8 @@ export async function collectFromSitemap(
     const preferred: string[] = [];
     const fallback: string[] = [];
     for (const loc of locs) {
+      // Самите карти никога не са продукти (иначе „продукт“ става products_1.xml).
+      if (/\.xml(\?|$)/i.test(loc)) continue;
       if (/\.(jpg|jpeg|png|webp|gif|pdf)$/i.test(loc)) continue;
       if (looksLikeNonProductUrl(loc)) continue;
       (looksLikeProductUrl(loc) ? preferred : fallback).push(loc);
