@@ -39,6 +39,40 @@ export interface FbTopic {
   hint: string;
 }
 
+/**
+ * Категория за таблицата с оферти (`posts`).
+ *
+ * Темите на Facebook модула имат по-богат набор (имоти, авто, обекти, услуги), а
+ * `posts.category` позволява само седем стойности. Досега това чупеше
+ * ПУБЛИКУВАНЕТО на всяка бележка с тема „Имоти“ или „Авто“:
+ *   „new row for relation "posts" violates check constraint "posts_category_check"“
+ * — тоест модулът разчиташе бележки, а нито една не можеше да влезе.
+ * Тук свеждаме категорията до позволената, без да пипаме темата в опашката.
+ */
+const POSTS_CATEGORIES = [
+  'restaurants',
+  'hotels_airbnb',
+  'supermarket',
+  'cafes_bars',
+  'services_tech',
+  'other',
+  'private_sellers',
+] as const;
+
+function postsCategory(cat: string | null | undefined): string {
+  const c = String(cat ?? '').trim();
+  if ((POSTS_CATEGORIES as readonly string[]).includes(c)) return c;
+  const map: Record<string, string> = {
+    real_estate: 'private_sellers',
+    vehicles: 'private_sellers',
+    shops_places: 'other',
+    deals: 'supermarket',
+    services: 'services_tech',
+    masters: 'services_tech',
+  };
+  return map[c] ?? 'other';
+}
+
 export const FB_TOPICS: FbTopic[] = [
   {
     key: 'deals',
@@ -1387,8 +1421,9 @@ export async function analyzeFbReceiptWithAi(params: {
   const catRaw = String(parsed.category ?? 'other').trim() as ReceiptCategory;
   // За темите с фиксирана категория (услуги, имоти, обекти, частни продавачи) тя печели,
   // за да не попадат офертите в „Други“.
-  const category: ReceiptCategory =
-    topicObj?.category ?? ((CATEGORIES as readonly string[]).includes(catRaw) ? catRaw : 'other');
+  const category: ReceiptCategory = postsCategory(
+    topicObj?.category ?? ((CATEGORIES as readonly string[]).includes(catRaw) ? catRaw : 'other')
+  ) as ReceiptCategory;
   const polarity: 'green' | 'red' = parsed.polarity === 'green' ? 'green' : 'red';
 
   const merchantName = str(parsed.merchantName, 200) ?? str(parsed.placeName, 200) ?? 'Неразчетен търговец';
@@ -2269,7 +2304,9 @@ export async function approveFbReceiptItem(
   const polarity: 'green' | 'red' = overrides?.polarity ?? (row.polarity === 'green' ? 'green' : 'red');
   // Темата на сигнала може да наложи категория (услуги / имоти / обекти / частни продавачи).
   const topicObj = FB_TOPICS.find((t) => t.key === row.topic) ?? null;
-  const category = overrides?.category ?? topicObj?.category ?? row.category ?? 'other';
+  // Свеждаме до позволените категории в posts (имоти/авто → частни продавачи и т.н.),
+  // иначе публикуването гърми с posts_category_check.
+  const category = postsCategory(overrides?.category ?? topicObj?.category ?? row.category ?? 'other');
   const placeName = (overrides?.placeName ?? row.place_name ?? row.merchant_name).trim().slice(0, 200) || 'Магазин';
   const city = (overrides?.city ?? row.city).trim().slice(0, 80) || 'София';
   const address = (overrides?.address !== undefined ? overrides.address : row.address)?.trim().slice(0, 300) || null;
