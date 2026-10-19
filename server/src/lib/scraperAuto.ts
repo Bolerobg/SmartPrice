@@ -403,10 +403,12 @@ export async function runAutopilot(input: {
  * каза 75, а картата има 4 897 продукта.
  */
 export interface CatalogMeasure {
-  /** Колко продукта има в картата. */
+  /** Колко продукта има в картата (долна граница, ако е голям каталог). */
   size: number;
   /** true = броено само от ПРОДУКТОВАТА карта (точно); false = приблизително. */
   exact: boolean;
+  /** true = каталогът е по-голям от тавана на броенето (40 000). */
+  capped: boolean;
   /** Колко карти се прочетоха. */
   maps: number;
 }
@@ -486,6 +488,7 @@ export async function measureCatalogSize(domain: string): Promise<CatalogMeasure
 
   let total = 0;
   let maps = 0;
+  let capped = false;
   if (isIndex && children.length) {
     const targets = productMaps.length ? productMaps : children;
     for (const m of targets.slice(0, 8)) {
@@ -493,7 +496,10 @@ export async function measureCatalogSize(domain: string): Promise<CatalogMeasure
       if (!xml) continue;
       maps += 1;
       total += locsOf(xml).length;
-      if (total > CATALOG_SCAN_LIMIT) break;
+      if (total > CATALOG_SCAN_LIMIT) {
+        capped = true;
+        break;
+      }
     }
   } else {
     // Директна карта (urlset) — броим адресите в нея.
@@ -502,7 +508,7 @@ export async function measureCatalogSize(domain: string): Promise<CatalogMeasure
   }
 
   if (total <= 0) return null;
-  return { size: total, exact: productMaps.length > 0, maps };
+  return { size: total, exact: productMaps.length > 0 && !capped, capped, maps };
 }
 
 /**
@@ -556,13 +562,16 @@ export async function tuneAutopilot(): Promise<number> {
     const sched = await one<Record<string, unknown>>(`select * from scrape_schedules where id = $1`, [r.schedule_id]).catch(() => null);
     if (!sched) continue;
 
+    const capped = measured?.capped ?? false;
     await query(
       `update scrape_schedules
           set daily_quota = $2, max_total = $3, stop_when_done = true, rotate = true,
               options = options || '{"dedupe":"url"}'::jsonb,
               next_run_at = $4, updated_at = now()
         where id = $1`,
-      [r.schedule_id, quota, size, planNextRun({ ...sched, daily_quota: quota } as never)]
+      // При много голям каталог не слагаме таван (не знаем точния размер) —
+      // разписанието пак спира само, като свърши (3 обиколки без нови продукти).
+      [r.schedule_id, quota, capped ? null : size, planNextRun({ ...sched, daily_quota: quota } as never)]
     ).catch(() => undefined);
 
     // Бележката се сглобява в JS — в SQL един параметър не може да е едновременно
@@ -570,10 +579,15 @@ export async function tuneAutopilot(): Promise<number> {
     // „inconsistent types deduced for parameter $2“.
     // Реалните дни се смятат от квотата (тя има минимум и таван).
     const days = Math.max(1, Math.ceil(size / quota));
-    const fromMap = (measured?.size ?? 0) >= probeSize && (measured?.exact ?? false);
+    const fromMap = measured?.size != null && measured.size >= probeSize;
+    const sizeText = measured?.capped
+      ? `поне ~${size} продукта (много голям каталог)`
+      : fromMap
+        ? `~${size} продукта (${measured?.exact ? 'от продуктовата карта' : 'приблизително, от картата на сайта'})`
+        : `~${size} продукта (от пробната обиколка)`;
     const learnedNote =
-      `Сайтът има ~${size} продукта${fromMap ? ' (от продуктовата карта)' : ' (от пробната обиколка)'}. ` +
-      `Разписано е по ${quota} на ден → целият сайт за ~${days} дни, после спира сам.`;
+      `Сайтът има ${sizeText}. Разписано е по ${quota} на ден → ` +
+      (measured?.capped ? 'обикаля го, докато свърши (спира сам след 3 празни обиколки).' : `целият сайт за ~${days} дни, после спира сам.`);
     await query(
       `update scrape_autopilot
           set catalog_size = $2, quota = $3, note = $4, updated_at = now()
@@ -664,14 +678,17 @@ export async function remeasureSite(domain: string): Promise<{
             set daily_quota = $2, max_total = $3, stop_when_done = true, rotate = true,
                 next_run_at = $4, updated_at = now()
           where id = $1`,
-        [scheduleId, quota, size, planNextRun({ ...sched, daily_quota: quota } as never)]
+        [scheduleId, quota, measured?.capped ? null : size, planNextRun({ ...sched, daily_quota: quota } as never)]
       ).catch(() => undefined);
     }
   }
 
+  const sizeText = measured?.capped
+    ? `поне ~${size} продукта (много голям каталог)`
+    : `~${size} продукта (${measured?.exact ? 'от продуктовата карта' : 'приблизително, от картата на сайта'})`;
   const note =
-    `Сайтът има ~${size} продукта (${measured?.exact ? 'от продуктовата карта' : 'приблизително, от картата на сайта'}). ` +
-    `Разписано е по ${quota} на ден → целият сайт за ~${days} дни, после спира сам.`;
+    `Сайтът има ${sizeText}. Разписано е по ${quota} на ден → ` +
+    (measured?.capped ? 'обикаля го, докато свърши (спира сам след 3 празни обиколки).' : `целият сайт за ~${days} дни, после спира сам.`);
   await query(
     `update scrape_autopilot set catalog_size = $2, quota = $3, note = $4, updated_at = now() where domain = $1`,
     [domain, size, quota, note]
