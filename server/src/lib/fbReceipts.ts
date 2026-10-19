@@ -1764,13 +1764,42 @@ export async function processRawFbPosts(params: {
   queued: number;
   skipped: number;
   failed: number;
+  autoApproved: number;
   items: Array<Record<string, unknown>>;
 }> {
   let queued = 0;
   let skipped = 0;
   let failed = 0;
+  let autoApproved = 0;
   const insertedIds: string[] = [];
   const cap = params.maxReceipts ?? 50;
+
+  /*
+   * ⚡ АВТОМАТИЧНО ОДОБРЕНИЕ (19.10.2026).
+   *
+   * Настройката „Автоматично одобряване на сигнали с висока увереност“ (в панела,
+   * заедно с прага) се четеше от кода, но НИКЪДЕ не се прилагаше: всяка бележка
+   * се записваше като 'pending' и чакаше човек. Затова на 19.10.2026 в опашката
+   * стояха 23 бележки с увереност 1.00, а настройката беше включена.
+   * Сега: увереност ≥ прага → публикува се веднага, без ръчно одобрение.
+   */
+  const cfg = await getFbScraperConfig().catch(() => null);
+  const jobAdmin = params.jobId
+    ? (
+        await one<{ created_by: string | null }>(
+          `select created_by from fb_receipt_jobs where id = $1`,
+          [params.jobId]
+        ).catch(() => null)
+      )?.created_by ?? null
+    : null;
+  const fallbackAdmin = jobAdmin
+    ? null
+    : (
+        await one<{ id: string }>(
+          `select id::text from profiles where role = 'admin' order by created_at limit 1`
+        ).catch(() => null)
+      )?.id ?? null;
+  const autoAdminId = jobAdmin ?? fallbackAdmin;
 
   for (const post of params.posts) {
     if (queued >= cap) break;
@@ -1907,6 +1936,31 @@ export async function processRawFbPosts(params: {
 
         if (analysis.isReceipt) {
           queued++;
+          // ⚡ Увереност над прага → влиза направо (настройката от панела).
+          if (
+            row &&
+            cfg?.autoApprove &&
+            Number(analysis.confidenceScore) >= cfg.autoApproveMin &&
+            autoAdminId
+          ) {
+            try {
+              await approveFbReceiptItem(row.id, autoAdminId);
+              autoApproved++;
+              if (params.jobId) {
+                await logJob(
+                  params.jobId,
+                  `⚡ Автоматично одобрено (увереност ${Number(analysis.confidenceScore).toFixed(2)}): „${analysis.title}“`
+                );
+              }
+            } catch (err) {
+              if (params.jobId) {
+                await logJob(
+                  params.jobId,
+                  `⚠️ Автоматичното одобрение не мина: ${(err as Error).message.slice(0, 120)}`
+                );
+              }
+            }
+          }
           if (params.jobId) {
             await query(`update fb_receipt_jobs set receipts_found = receipts_found + 1 where id = $1`, [
               params.jobId,
@@ -1942,7 +1996,7 @@ export async function processRawFbPosts(params: {
       )
     : [];
 
-  return { queued, skipped, failed, items };
+  return { queued, skipped, failed, autoApproved, items };
 }
 
 /**
