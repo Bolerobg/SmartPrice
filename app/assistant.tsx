@@ -331,8 +331,14 @@ export default function AssistantScreen() {
           (document.querySelector('[data-testid="centko-list"]') as HTMLElement | null);
         const isScroller = !!node && node.scrollHeight > node.clientHeight;
         const scroller: HTMLElement | null = isScroller ? node : (node?.parentElement ?? null);
-        if (scroller && scroller.scrollHeight > scroller.clientHeight - 4) {
+        if (scroller) {
+          // Два опита в СЪЩАТА рамка: първият мести скролера, вторият хваща
+          // случая, в който браузърът е преизчислил височината между двата
+          // (точно това отрязваше новия въпрос най-горе на телефон).
           scroller.scrollTop = scroller.scrollHeight;
+          requestAnimationFrame(() => {
+            scroller.scrollTop = scroller.scrollHeight;
+          });
         }
       } catch {
         /* не пречи на разговора */
@@ -341,6 +347,33 @@ export default function AssistantScreen() {
     setTimeout(jump, 60);
     setTimeout(jump, 350);
   }, []);
+
+  /**
+   * Клавиатурата на телефона сменя височината на видимата част — при затваряне
+   * съдържанието се „измества“ и най-новото остава отрязано най-горе (точно това
+   * виждаше човекът: „скрива се въпросът“). Затова при всяка промяна на
+   * височината връщаме чата до дъното.
+   */
+  useEffect(() => {
+    scrollToEnd();
+    const t = setTimeout(scrollToEnd, 320);
+    return () => clearTimeout(t);
+  }, [viewHeight, scrollToEnd]);
+
+  /**
+   * Всяко ново съобщение (въпрос или отговор) води чата до дъното — веднага и
+   * след като се изрисува. Иначе на телефон дългият отговор остава извън екрана.
+   */
+  useEffect(() => {
+    if (!messages.length) return;
+    scrollToEnd();
+    const t1 = setTimeout(scrollToEnd, 250);
+    const t2 = setTimeout(scrollToEnd, 900);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [messages.length, scrollToEnd]);
 
   /** Извиква сървъра и добавя отговора. */
   const ask = useCallback(
@@ -464,6 +497,11 @@ export default function AssistantScreen() {
 
       setMessages((prev) => [...prev, { id: uid(), role: 'user', text: value, at: Date.now() }]);
       setInput('');
+      // На телефон затваряме клавиатурата веднага щом въпросът тръгне — иначе тя
+      // покрива половината екран и отговорът изглежда „не е дошъл“.
+      if (Platform.OS === 'web' && typeof document !== 'undefined' && window.innerWidth <= 760) {
+        (document.activeElement as HTMLElement | null)?.blur?.();
+      }
       scrollToEnd();
       void (async () => {
         // Първи опит. Ако мрежата „преглътне“ заявката (точно това се случваше),
