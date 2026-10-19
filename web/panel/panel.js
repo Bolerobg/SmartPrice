@@ -4707,6 +4707,8 @@ python import_receipts.py --file receipts.json --commit  # внася наист
 /* ------------------------------------------- Фейсбук касови бележки */
 
 let fbReceiptsFilter = 'pending';
+/** 🔎 Думи за търсене в бележките (пише ги човекът в полето). */
+let fbReceiptsQuery = '';
 let fbReceiptsTopic = '';
 let fbFlaggedOnly = false;
 /** Заглавия на темите (интересите) — за етикетите в опашката. */
@@ -5014,8 +5016,10 @@ function stopFbReceiptsPoll() {
 async function renderFbReceipts(box) {
   stopFbReceiptsPoll();
   const data = await api(
-    `/fb-receipts/info?status=${encodeURIComponent(fbReceiptsFilter)}&limit=60&topic=${encodeURIComponent(fbReceiptsTopic)}`
+    `/fb-receipts/info?status=${encodeURIComponent(fbReceiptsFilter)}&limit=60` +
+      `&topic=${encodeURIComponent(fbReceiptsTopic)}&q=${encodeURIComponent(fbReceiptsQuery)}`
   );
+  const keywords = Array.isArray(data?.keywords) ? data.keywords : [];
   const topicsAll = Array.isArray(data?.topics?.all) ? data.topics.all : [];
   const topicsEnabled = Array.isArray(data?.topics?.enabled) ? data.topics.enabled : [];
   const cost = data?.cost || {};
@@ -5084,6 +5088,33 @@ async function renderFbReceipts(box) {
               : '— (само „Оферти и цени“ по подразбиране)'
           }</strong></span>
         </div>
+      </div>
+
+      <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(34,197,94,.35);border-radius:12px;background:rgba(34,197,94,.06)">
+        <span><strong>🔎 Ключови думи (пишеш ги сам)</strong> — освен готовите теми горе, тук можеш да напишеш
+        конкретни думи, които търсиш в групата (напр. <em>касова бележка, касов бон, промоция</em>).
+        Думата се ползва за търсене в бележките долу, дава пряк линк към търсенето в самата група и се
+        подсказва на AI-я като „търсим специално това“.</span>
+        <label class="field full" style="margin-top:8px"><span>Думи (по един ред или със запетая)</span>
+          <textarea id="fb-keywords" rows="2" placeholder="касова бележка, касов бон, промоция">${esc(keywords.join(', '))}</textarea></label>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:center">
+          <button class="btn btn-sm btn-ok" id="fb-save-keywords">💾 Запази думите</button>
+          <span class="hint" style="margin:0">Записани сега: <strong>${keywords.length ? esc(keywords.join(' · ')) : '— още няма'}</strong></span>
+        </div>
+        ${
+          keywords.length
+            ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+                 ${keywords
+                   .map(
+                     (k) =>
+                       `<button class="btn btn-sm btn-ghost" data-fb-search="${esc(k)}">🔎 Търси „${esc(k)}“ в групата</button>`
+                   )
+                   .join('')}
+                 <span class="hint" style="margin:0">Отваря търсенето в групата (в нов раздел) — там плъзни бутона
+                 „📌 Прати от FB група“ и постовете с тази дума идват тук.</span>
+               </div>`
+            : ''
+        }
       </div>
 
       <div class="field full" style="margin-top:14px;padding:10px 12px;border:1px solid rgba(168,85,247,.35);border-radius:12px;background:rgba(168,85,247,.06)">
@@ -5180,6 +5211,15 @@ async function renderFbReceipts(box) {
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+        <span class="hint" style="margin:0">🔎 Търси в бележките:</span>
+        <input id="fb-search" value="${esc(fbReceiptsQuery)}" placeholder="касова бележка, промоция…" style="max-width:260px">
+        <button class="btn btn-sm" id="fb-search-go">Търси</button>
+        ${
+          fbReceiptsQuery
+            ? `<button class="btn btn-sm btn-ghost" id="fb-search-clear">✕ Изчисти търсенето</button>
+               <span class="hint" style="margin:0">Филтър: „${esc(fbReceiptsQuery)}“</span>`
+            : ''
+        }
         <span class="hint" style="margin:0">Тема:</span>
         <button class="btn btn-sm ${fbReceiptsTopic === '' ? 'btn-primary' : 'btn-ghost'}" data-fb-topic="">Всички теми</button>
         ${
@@ -5268,6 +5308,51 @@ async function renderFbReceipts(box) {
       } catch (e) {
         toast(e.message, 'err');
       }
+    };
+  }
+
+  // 🔎 Ключови думи, въведени от човека (пише ги сам).
+  const saveKeywordsBtn = document.getElementById('fb-save-keywords');
+  if (saveKeywordsBtn) {
+    saveKeywordsBtn.onclick = async () => {
+      const raw = (document.getElementById('fb-keywords') || {}).value || '';
+      const keywords = raw
+        .split(/[,\n;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      try {
+        const r = await api('/fb-receipts/keywords', { method: 'POST', body: JSON.stringify({ keywords }) });
+        toast(`Записани думи: ${(r.keywords || []).join(', ') || '—'}`, 'ok');
+        render('fb_receipts', true);
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    };
+  }
+
+  // 🔎 „Търси „касова бележка“ в групата“ — отваря търсенето във Facebook.
+  document.querySelectorAll('[data-fb-search]').forEach((b) => {
+    b.onclick = () => openFbGroupSearch(b.dataset.fbSearch);
+  });
+
+  // 🔎 Търсене в самите бележки (заглавие, описание, място, търговец, текст от поста).
+  const searchEl = document.getElementById('fb-search');
+  const searchGo = document.getElementById('fb-search-go');
+  const applySearch = () => {
+    fbReceiptsQuery = searchEl ? searchEl.value.trim() : '';
+    render('fb_receipts', true);
+  };
+  if (searchEl) {
+    searchEl.onkeydown = (e) => {
+      if (e.key === 'Enter') applySearch();
+    };
+  }
+  if (searchGo) searchGo.onclick = applySearch;
+  const searchClear = document.getElementById('fb-search-clear');
+  if (searchClear) {
+    searchClear.onclick = () => {
+      fbReceiptsQuery = '';
+      render('fb_receipts', true);
     };
   }
   const topicsAllBtn = document.getElementById('fb-topics-all');
@@ -5719,6 +5804,24 @@ function renderFbQueueItemCard(it) {
         </div>
       </div>
     </div>`;
+}
+
+/**
+ * 🔎 Отваря търсенето в групата за дадена дума.
+ *
+ * Защо: търсенето във Facebook групата (напр. „касова бележка“) връща само
+ * постовете с тази дума — там се пуска бутонът „📌 Прати от FB група“ и влизат
+ * точно те. Ако групата не е попълнена, отваряме общото търсене във Facebook.
+ */
+function openFbGroupSearch(keyword) {
+  const el = document.getElementById('fb-group-url');
+  const raw = String((el && el.value) || fbReceiptsLastGroupUrl || '');
+  const m = raw.match(/groups\/(\d+)/);
+  const q = encodeURIComponent(keyword);
+  const url = m
+    ? `https://www.facebook.com/groups/${m[1]}/search/?q=${q}`
+    : `https://www.facebook.com/search/posts?q=${q}`;
+  window.open(url, '_blank', 'noopener');
 }
 
 /** Прозорец за редакция на разчетената бележка преди нейното публикуване. */

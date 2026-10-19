@@ -34,6 +34,8 @@ import {
   getFbGroups,
   getFbTopics,
   saveFbTopics,
+  getFbKeywords,
+  saveFbKeywords,
   getFbScraperConfig,
   runAllFbGroups,
   saveFbGroups,
@@ -99,10 +101,12 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
         limit: z.coerce.number().int().min(1).max(200).default(50),
         /** Филтър по тема (интерес): deals, services, masters, real_estate, shops_places, private_sellers. */
         topic: z.string().trim().max(40).optional(),
+        /** 🔎 Търсене с думи в самата бележка (заглавие, описание, място, търговец, текст от поста). */
+        q: z.string().trim().max(80).optional(),
       })
       .parse(req.query ?? {});
 
-    const [cfg, counts, jobs, queue, enabledTopics] = await Promise.all([
+    const [cfg, counts, jobs, queue, enabledTopics, keywords] = await Promise.all([
       getFbScraperConfig(),
       one<{
         pending: number;
@@ -141,11 +145,23 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
            left join posts p on p.id = q.post_id
           where ($1 = 'all' or q.status = $1)
             and ($3::text is null or coalesce(q.topic, 'deals') = $3)
+            and ($4::text is null
+                 or q.title ilike '%' || $4 || '%'
+                 or q.description ilike '%' || $4 || '%'
+                 or q.place_name ilike '%' || $4 || '%'
+                 or q.merchant_name ilike '%' || $4 || '%'
+                 or q.fb_post_text ilike '%' || $4 || '%')
           order by q.created_at desc
           limit $2`,
-        [q.status, q.limit, q.topic && q.topic.trim() !== '' ? q.topic.trim() : null]
+        [
+          q.status,
+          q.limit,
+          q.topic && q.topic.trim() !== '' ? q.topic.trim() : null,
+          q.q && q.q.trim() !== '' ? q.q.trim() : null,
+        ]
       ),
       getFbTopics(),
+      getFbKeywords(),
     ]);
 
     // Жълти флагове: автоматични проверки преди публикуване (цена, дубликати, място, ЕИК…).
@@ -172,6 +188,8 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
         autoApprove: cfg.autoApprove,
         autoApproveMin: cfg.autoApproveMin,
       },
+      // 🔎 Думите, които човекът сам е въвел (за търсене в групата и в бележките).
+      keywords,
       topics: {
         enabled: enabledTopics.map((t) => t.key),
         all: FB_TOPICS.map((t) => ({
@@ -421,6 +439,24 @@ export default async function fbReceiptRoutes(app: FastifyInstance) {
   });
 
   /** Запис на избраните теми (интереси) — какво да търсим във Facebook групите. */
+  // 🔎 Ключови думи, които човекът въвежда сам (напр. „касова бележка“).
+  app.post('/api/admin/fb-receipts/keywords', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        keywords: z.array(z.string().trim().max(60)).max(40).default([]),
+      })
+      .parse(req.body ?? {});
+    const saved = await saveFbKeywords(input.keywords);
+    await audit({
+      admin,
+      action: 'fb_receipts.keywords',
+      details: { keywords: saved },
+      ip: req.ip,
+    });
+    return { ok: true, keywords: saved };
+  });
+
   app.post('/api/admin/fb-receipts/topics', async (req) => {
     const admin = await requireFullAdmin(req);
     const input = z.object({ keys: z.array(z.string().trim().max(40)).max(20) }).parse(req.body ?? {});

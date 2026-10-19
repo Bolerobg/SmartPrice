@@ -147,6 +147,38 @@ export async function saveFbTopics(keys: string[]): Promise<FbTopic[]> {
   return FB_TOPICS.filter((t) => final.includes(t.key));
 }
 
+/**
+ * 🔎 Ключови думи, които човекът търси в групите (настройка `fb_keywords`).
+ *
+ * Защо: темите са готови отметки, но понякога трябва конкретна дума — напр.
+ * „касова бележка“, „касов бон“, „промоция“. Думата се ползва за търсене в
+ * бележките, дава пряк линк към търсенето в самата група и се подсказва на AI-я
+ * като „търсим специално това“.
+ */
+export async function getFbKeywords(): Promise<string[]> {
+  const saved = (await getSetting('fb_keywords', '')).trim();
+  if (!saved) return [];
+  return saved
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+/** Запис на ключовите думи (до 20 думи, всяка до 40 знака). */
+export async function saveFbKeywords(list: string[]): Promise<string[]> {
+  const clean = Array.from(
+    new Set(
+      list
+        .map((s) => s.trim().replace(/\s+/g, ' '))
+        .filter(Boolean)
+        .map((s) => s.slice(0, 40))
+    )
+  ).slice(0, 20);
+  await setSetting('fb_keywords', clean.join(', '));
+  return clean;
+}
+
 export interface RawFbPost {
   postId?: string;
   postUrl: string;
@@ -1194,6 +1226,7 @@ export async function analyzeFbReceiptWithAi(params: {
   }
 
   const topics = await getFbTopics();
+  const keywords = await getFbKeywords();
   const cleanPostText = maskSensitiveText(params.fbPostText).slice(0, 2500);
   const fallbackCity = (params.defaultCity || 'София').trim() || 'София';
 
@@ -1204,6 +1237,13 @@ export async function analyzeFbReceiptWithAi(params: {
     'АКТИВНИ ТЕМИ (интереси) — приемаме само постове, които влизат в някоя от тях:',
     ...topics.map((t) => `   • "${t.key}" — ${t.title}: ${t.hint}.`),
     'Ако постът не влиза в нитоя от активните теми → "topic": "not_relevant" и "kind": "not_relevant".',
+    ...(keywords.length
+      ? [
+          '',
+          'ДУМИ, КОИТО ЧОВЕКЪТ ТЪРСИ СПЕЦИАЛНО В ТАЗИ ГРУПА (ако постът е за тях — обработи го с предимство и го остави в темата, в която пасва):',
+          `   • ${keywords.join(' • ')}`,
+        ]
+      : []),
     '',
     'КАК СЕ ИЗБИРА ТЕМАТА (гледай ЗА КАКВО Е ПОСТЪТ, не само какво има на снимката):',
     '   • "deals" — постът е основно за ЦЕНАТА НА ПРОДУКТ/СТОКА: бележка, етикет, рафт, меню, такса, промоция.',
