@@ -222,6 +222,27 @@ export default function AssistantScreen() {
    */
   const [viewHeight, setViewHeight] = useState<number | null>(null);
 
+  /**
+   * Safari на iOS (iPhone 13 и всички): докато Ценко е отворен, страницата НЕ
+   * бива да се плъзга. Иначе клавиатурата вдига цялата страница нагоре и след
+   * затварянето ѝ чатът остава изместен — точно тогава „въпросът се скрива и не
+   * идва отговор“. Правилото важи само за този екран и се маха при излизане.
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const id = 'centko-lock-scroll';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent =
+      'html,body{overflow:hidden!important;position:fixed!important;width:100%!important;height:100%!important;' +
+      'overscroll-behavior:none!important;-webkit-text-size-adjust:100%;}';
+    document.head.appendChild(style);
+    return () => {
+      document.getElementById(id)?.remove();
+    };
+  }, []);
+
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const vv = (
@@ -243,8 +264,25 @@ export default function AssistantScreen() {
     };
     apply();
     vv.addEventListener('resize', apply);
+
+    /*
+     * Safari на iOS понякога НЕ праща resize, когато се отвори клавиатурата —
+     * тогава височината остава голяма and отговорът/полето остават под нея.
+     * Затова преизчисляваме и при фокус/загуба на фокус (с малко изчакване,
+     * докато клавиатурата се анимира).
+     */
+    const reapply = () => {
+      setTimeout(apply, 250);
+      setTimeout(apply, 650);
+    };
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('focusin', reapply);
+      window.addEventListener('focusout', reapply);
+    }
     return () => {
       vv.removeEventListener('resize', apply);
+      window.removeEventListener('focusin', reapply);
+      window.removeEventListener('focusout', reapply);
     };
   }, []);
   const [topics, setTopics] = useState<AssistantTopic[]>([]);
@@ -317,29 +355,54 @@ export default function AssistantScreen() {
   }, [busy]);
 
   const scrollToEnd = useCallback(() => {
+    /** Намира елемента, който наистина се скролва (различен е на Chrome и Safari). */
+    const findScroller = (): HTMLElement | null => {
+      if (typeof document === 'undefined') return null;
+      const root = document.querySelector('[data-testid="centko-list"]') as HTMLElement | null;
+      if (!root) return null;
+      const all: HTMLElement[] = [root];
+      const inner = root.querySelectorAll('div');
+      for (let i = 0; i < inner.length && i < 40; i += 1) all.push(inner[i] as HTMLElement);
+      if (root.parentElement) all.push(root.parentElement);
+      for (const el of all) {
+        let overflowY = '';
+        try {
+          overflowY = window.getComputedStyle(el).overflowY;
+        } catch {
+          overflowY = '';
+        }
+        const scrollable = overflowY === 'auto' || overflowY === 'scroll';
+        if (scrollable && el.scrollHeight > el.clientHeight + 4) return el;
+      }
+      // Последен вариант: първият, който изобщо има скрито съдържание.
+      for (const el of all) {
+        if (el.scrollHeight > el.clientHeight + 4) return el;
+      }
+      return null;
+    };
+
     const jump = () => {
+      // 1) През React — най-надеждно е, когато работи.
+      try {
+        listRef.current?.scrollToOffset?.({ offset: 1_000_000, animated: false });
+      } catch {
+        /* няма списък още */
+      }
       try {
         listRef.current?.scrollToEnd({ animated: false });
       } catch {
         /* няма списък още */
       }
-      if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+      if (Platform.OS !== 'web') return;
+      // 2) През истинския DOM скролер — покрива Safari (iPhone), където горното
+      //    понякога не стига до дъното (затова отговорът оставаше извън екрана).
       try {
-        const node =
-          (listRef.current as unknown as { getScrollableNode?: () => HTMLElement | null })
-            ?.getScrollableNode?.() ??
-          (document.querySelector('[data-testid="centko-list"]') as HTMLElement | null);
-        const isScroller = !!node && node.scrollHeight > node.clientHeight;
-        const scroller: HTMLElement | null = isScroller ? node : (node?.parentElement ?? null);
-        if (scroller) {
-          // Два опита в СЪЩАТА рамка: първият мести скролера, вторият хваща
-          // случая, в който браузърът е преизчислил височината между двата
-          // (точно това отрязваше новия въпрос най-горе на телефон).
+        const scroller = findScroller();
+        if (!scroller) return;
+        scroller.scrollTop = scroller.scrollHeight;
+        requestAnimationFrame(() => {
           scroller.scrollTop = scroller.scrollHeight;
-          requestAnimationFrame(() => {
-            scroller.scrollTop = scroller.scrollHeight;
-          });
-        }
+        });
       } catch {
         /* не пречи на разговора */
       }
@@ -367,11 +430,11 @@ export default function AssistantScreen() {
   useEffect(() => {
     if (!messages.length) return;
     scrollToEnd();
-    const t1 = setTimeout(scrollToEnd, 250);
-    const t2 = setTimeout(scrollToEnd, 900);
+    // Няколко опита: клавиатурата на iPhone се анимира бавно, а отговорът се
+    // рисува след малко — затова настояваме и след 1.8 сек.
+    const timers = [250, 900, 1800].map((ms) => setTimeout(scrollToEnd, ms));
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+      timers.forEach(clearTimeout);
     };
   }, [messages.length, scrollToEnd]);
 
@@ -605,6 +668,8 @@ export default function AssistantScreen() {
         // зад лентата на браузъра или зад клавиатурата).
         viewHeight ? { height: viewHeight } : null,
         !viewHeight && Platform.OS === 'web' ? ({ height: '100dvh' } as never) : null,
+        // Заковаваме екрана на web: иначе iOS Safari го плъзга под клавиатурата.
+        Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0 } as never) : null,
       ]}
     >
       {/* ---------------------------------------------------------- Хедър */}
