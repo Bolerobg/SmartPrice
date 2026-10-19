@@ -72,6 +72,12 @@ export interface ScrapeOptions {
    */
   smartApprove?: boolean;
   /**
+   * Вътрешно: това е ПРОУЧВАТЕЛНА обиколка (само да научим размера на сайта).
+   * Намереното не е за внасяне и не бива да пълни списъка „Чакат одобрение“ —
+   * затова неговите редове се записват като „пропуснати“.
+   */
+  probe?: boolean;
+  /**
    * От кой адрес да започне обиколката (завърта списъка).
    * Разписанията слагат случаен брой всеки път, за да влизат от различно място
    * в каталога — различни продукти, различен маршрут, нищо за научаване.
@@ -3470,17 +3476,26 @@ export async function runJob(jobId: string): Promise<void> {
         ).slice(0, 4000);
 
       if (o.mode === 'preview') {
-        await insertItem(jobId, p, ai, {
-          title,
-          description,
-          priceEur,
-          category: cat,
-          unitQuantity: unit.quantity ?? null,
-          unitType,
-          polarity,
-          reference,
-          tags,
-        }, 'parsed', null);
+        await insertItem(
+          jobId,
+          p,
+          ai,
+          {
+            title,
+            description,
+            priceEur,
+            category: cat,
+            unitQuantity: unit.quantity ?? null,
+            unitType,
+            polarity,
+            reference,
+            tags,
+          },
+          // Проучвателната обиколка само мери сайта: не оставя редове „за одобрение“,
+          // иначе броячът на чакащите се пълни с несъществуващи оферти (19.10.2026).
+          o.probe ? 'skipped' : 'parsed',
+          o.probe ? 'Проба за измерване на каталога — не е за внасяне' : null
+        );
         stored++;
         continue;
       }

@@ -216,6 +216,8 @@ async function probeSchedule(adminId: string, domain: string, scheduleId: string
       ...autoOptions(true),
       count: PROBE_COUNT,
       mode: 'preview',
+      // Само проучване: намереното НЕ е за одобрение (не пълни брояча на чакащите).
+      probe: true,
       startOffset: await currentCursor(domain),
     };
     const options = await optionsForSite(domain, raw as never);
