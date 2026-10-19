@@ -668,3 +668,20 @@ input[type="file"]::file-selector-button:hover { border-color: var(--line-2); ba
   border: 1px solid rgba(96,165,250,.35);
   color: #93C5FD;
 }
+
+
+/* ⏳ Брояч на чакащите одобрение в навигацията (19.10.2026).
+   Вижда се веднага, за да не се рови човек из табовете. */
+.nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: #1a1206;
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+  line-height: 1.5;
+}
+.nav-item { display: flex; align-items: center; gap: 8px; }

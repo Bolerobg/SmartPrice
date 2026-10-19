@@ -128,6 +128,37 @@ export default async function adminRoutes(app: FastifyInstance) {
     return loadDashboardStats();
   });
 
+  /**
+   * ⏳ Колко чака одобрение — на едно място.
+   *
+   * Защо: одобрението живее на три различни места (оферти от сайтовете в Скрапера,
+   * бележки от Фейсбук и нови групи за преглед). Човек трябваше да обикаля
+   * табовете, за да види има ли нещо за него. Тук връщаме едно число за всяко
+   * място, а панелът ги показва като значки и карта на началния екран.
+   */
+  app.get('/api/admin/pending/summary', async (req) => {
+    await requireAdminPanel(req);
+    const [offers, receipts, groups, robot] = await Promise.all([
+      one<{ n: number }>(
+        `select count(*)::int as n from scrape_items where status = 'parsed'`
+      ).catch(() => null),
+      one<{ n: number }>(
+        `select count(*)::int as n from fb_receipt_queue where status = 'pending'`
+      ).catch(() => null),
+      one<{ n: number }>(
+        `select count(*)::int as n from fb_group_candidates where status = 'pending'`
+      ).catch(() => null),
+      one<{ n: number }>(
+        `select count(*)::int as n from local_scan_queue where status in ('pending', 'taken')`
+      ).catch(() => null),
+    ]);
+    const o = offers?.n ?? 0;
+    const r = receipts?.n ?? 0;
+    const g = groups?.n ?? 0;
+    const b = robot?.n ?? 0;
+    return { offers: o, receipts: r, groups: g, robot: b, total: o + r + g };
+  });
+
   /* ------------------------------------------- бонус за основатели */
 
   /**

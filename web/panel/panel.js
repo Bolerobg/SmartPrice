@@ -166,8 +166,56 @@ async function showApp() {
   $('#who').innerHTML = `<strong>${esc(state.admin.name || '')}</strong><br>${esc(state.admin.email)}<br><span class="pill" id="role-badge" hidden></span>`;
   applyRoleUi();
   $('#stamp').textContent = `Заредено: ${new Date().toLocaleTimeString('bg-BG')}`;
+  void loadPendingSummary();
   navigate(state.page || 'overview');
 }
+
+/* ------------------------------------------- ⏳ брояч на чакащите одобрение */
+
+/**
+ * Колко чака одобрение — на едно място.
+ *
+ * Одобрението живее на три места (оферти от сайтовете в Скрапера, бележки от
+ * Фейсбук, нови групи за преглед). Досега човек трябваше да обикаля табовете,
+ * за да разбере има ли нещо за него. Сега числата стоят като значки до имената
+ * на табовете и като карта в „Преглед“.
+ */
+let pendingSummary = { offers: 0, receipts: 0, groups: 0, robot: 0, total: 0 };
+
+async function loadPendingSummary() {
+  try {
+    const p = await api('/pending/summary');
+    pendingSummary = p || pendingSummary;
+    const put = (id, n, title) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = n ? String(n) : '';
+      el.hidden = !n;
+      if (title) el.title = title;
+    };
+    put(
+      'nb-scraper',
+      pendingSummary.offers,
+      `${pendingSummary.offers} оферти от сайтовете чакат одобрение (Скрапер → 🕓 История → задача → „⬇ Внеси избраните“)`
+    );
+    put(
+      'nb-fb',
+      (pendingSummary.receipts || 0) + (pendingSummary.groups || 0),
+      `${pendingSummary.receipts} бележки и ${pendingSummary.groups} групи чакат одобрение (ФБ Бележки → ⏳ Чакащи / Нови групи)`
+    );
+  } catch {
+    /* броячът не е критичен — панелът работи и без него */
+  }
+  return pendingSummary;
+}
+
+/* Всяка карта с data-goto води до съответния таб. */
+document.addEventListener('click', (e) => {
+  const el = e.target.closest ? e.target.closest('[data-goto]') : null;
+  if (el && el.dataset.goto) navigate(el.dataset.goto);
+});
+
+setInterval(() => void loadPendingSummary(), 120000);
 
 /* ---------------------------------------------------------- навигация */
 
@@ -299,6 +347,16 @@ async function render(page, force = false) {
 async function renderOverview(box, force) {
   if (force || !cache.stats) cache.stats = await api('/stats');
   const s = cache.stats;
+  const pend = await loadPendingSummary();
+
+  /** Карта, която при натискане отваря съответния таб. */
+  const pendCard = (label, value, sub, page) => `
+    <div class="card kpi" data-goto="${page}" style="cursor:pointer"
+         title="Натисни, за да отвориш">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value ${value ? 'gold' : ''}">${num(value)}</div>
+      <div class="kpi-sub">${sub}</div>
+    </div>`;
 
   const kpi = (label, value, sub, cls = '') => `
     <div class="card kpi">
@@ -308,6 +366,13 @@ async function renderOverview(box, force) {
     </div>`;
 
   box.innerHTML = `
+    <div class="grid grid-4" style="margin-bottom:14px">
+      ${pendCard('⏳ Чакат одобрение', pend.total, 'общо за преглед от теб', 'scraper')}
+      ${pendCard('🕸️ Оферти от сайтове', pend.offers, 'Скрапер → История → „Внеси избраните“', 'scraper')}
+      ${pendCard('🧾 ФБ бележки', pend.receipts, 'ФБ Бележки → ⏳ Чакащи', 'fb_receipts')}
+      ${pendCard('🔎 Нови ФБ групи', pend.groups, 'ФБ Бележки → Нови групи', 'fb_receipts')}
+    </div>
+
     <div class="grid grid-4" style="margin-bottom:14px">
       ${kpi('Потребители', num(s.users.total), `днес +${num(s.users.today)} · 7 дни +${num(s.users.week)}`, 'cyan')}
       ${kpi('Оферти', num(s.posts.total), `днес +${num(s.posts.today)} · публични ${num(s.posts.published)}`, 'green')}
