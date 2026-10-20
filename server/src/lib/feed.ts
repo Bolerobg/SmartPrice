@@ -72,18 +72,17 @@ function buildWhere(filters: FeedFilters): Where {
   if (filters.authorId) clauses.push(`p.author_id = ${bind(filters.authorId)}`);
   if (filters.sellerType) clauses.push(`p.seller_type = ${bind(filters.sellerType)}`);
 
-  // Търсене по ID (публичния код). От миграция 017 кодът е САМО ЧИСЛА
-  // (напр. 48219357), затова тук приемаме и число, и стар формат с букви.
-  if (filters.q && filters.q.trim().length > 0) {
-    const raw = filters.q.trim();
-    // Само цифри → търсим точно този номер (или негово начало/край).
-    if (/^\d{4,12}$/.test(raw)) {
-      clauses.push(`p.public_code like ${bind(`${raw}%`)}`);
-    } else if (/^(sp)?[-\s]?[a-z0-9]{4,12}$/i.test(raw)) {
-      const code = bind(`%${raw.replace(/[^a-z0-9]/gi, '')}%`);
-      clauses.push(`upper(replace(p.public_code, '-', '')) like upper(${code})`);
-    }
-  }
+  /**
+   * ⚠️ Тук ИМАШЕ отделен клон за търсене по публичен код (ID на офертата) —
+   * и той беше ТВЪРДО `and` условие, което убиваше търсенето по марка.
+   *
+   * Защо: `/^(sp)?[-\s]?[a-z0-9]{4,12}$/i` приема и „ansmann“ (7 букви), затова
+   * заявка за марка получаваше допълнително условие „публичният код да съдържа
+   * ansmann“ — което никога не е вярно → 0 резултата. Проверено на живо:
+   * q=ANSMANN, q=bauhaus, q=Wera → 0, а q=батерия (кирилица, не минава този
+   * regex) → 33. Клонът е ИЗЛИШЕН: кодът вече се търси в голямата OR група по-долу
+   * (`upper(replace(p.public_code,'-','')) like upper(pattern)`).
+   */
 
   if (filters.q && filters.q.trim().length > 0) {
       // Разделяме заявката на думи и изискваме ВСЯКА дума да съвпадне в НЯКОЕ

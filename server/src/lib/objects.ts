@@ -286,13 +286,13 @@ export async function searchObjects(params: {
      * получаваше 0 резултата, макар офертите да са в базата.
      */
     where.push(
-      `(place_name ilike $${args.length}
-        or city ilike $${args.length}
-        or coalesce(merchant_name,'') ilike $${args.length}
+      `(v.place_name ilike $${args.length}
+        or v.city ilike $${args.length}
+        or coalesce(v.merchant_name,'') ilike $${args.length}
         or exists (
           select 1 from posts p2
            where md5(lower(btrim(coalesce(p2.place_name,'')) || '|' || lower(btrim(coalesce(p2.city,'')))))
-                 = md5(lower(btrim(coalesce(place_name,'')) || '|' || lower(btrim(coalesce(city,'')))))
+                 = md5(lower(btrim(coalesce(v.place_name,'')) || '|' || lower(btrim(coalesce(v.city,'')))))
              and p2.status = 'published'
              and (p2.title ilike $${args.length}
                   or sp_fold(p2.title) like lower($${args.length})
@@ -311,11 +311,11 @@ export async function searchObjects(params: {
   const clause = where.length ? 'where ' + where.join(' and ') : '';
 
   const rows = await many<ObjectRow>(
-    `select ${OBJECT_COLUMNS} from v_objects ${clause} order by ${order} limit ${limit} offset ${offset}`,
+    `select ${OBJECT_COLUMNS} from v_objects v ${clause} order by ${order} limit ${limit} offset ${offset}`,
     args
   );
   const total = await one<{ n: string }>(
-    `select count(*)::text as n from v_objects ${clause}`,
+    `select count(*)::text as n from v_objects v ${clause}`,
     args
   );
 
