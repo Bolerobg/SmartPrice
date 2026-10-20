@@ -170,6 +170,17 @@ export default function RadarScreen() {
   const [listBusy, setListBusy] = useState(false);
   const [listTotal, setListTotal] = useState(0);
   const busyRef = useRef(false);
+  /**
+   * Заявка, която чака текущата да свърши.
+   *
+   * ПИТФОЛ (хванат на живо): досега новата заявка просто се ИЗХВЪРЛЯШЕ, ако
+   * предишната още върви (`if (busyRef.current) return`). При смяна на режима
+   * („Къде да НЕ се ходи“ → „Честни места“) заявката за зеления списък се
+   * губеше и на екрана оставаше СТАРИЯТ, къс списък — изглеждаше, че „Честни
+   * места“ показва само няколко оферти. Сега се помни и се пуска веднага щом
+   * текущата приключи.
+   */
+  const pendingRef = useRef<{ offset: number; replace: boolean } | null>(null);
   const [query, setQuery] = useState('');
 
   // Изчакваме човекът да спре да пише, преди да питаме сървъра.
@@ -180,7 +191,11 @@ export default function RadarScreen() {
 
   const loadList = useCallback(
     async (offset: number, replace: boolean) => {
-      if (busyRef.current) return; // една заявка наведнъж — иначе списъкът „забива“
+      if (busyRef.current) {
+        // Помним я и я пускаме, щом текущата свърши (не я губим).
+        pendingRef.current = { offset, replace };
+        return;
+      }
       busyRef.current = true;
       setListBusy(true);
       if (replace) setListLoading(true);
@@ -208,6 +223,12 @@ export default function RadarScreen() {
         setListBusy(false);
         setListLoading(false);
         setListRefreshing(false);
+        const pending = pendingRef.current;
+        pendingRef.current = null;
+        if (pending) {
+          // Пусни изчакалата заявка (напр. новия режим) веднага.
+          setTimeout(() => void loadList(pending.offset, pending.replace), 0);
+        }
       }
     },
     [radarMode, activeCategory, activeCity, query]
@@ -218,14 +239,58 @@ export default function RadarScreen() {
     void loadList(0, true);
   }, [loadList]);
 
+  /** „↑ Нагоре“ — същото като в потока, за да не се скролва целият списък. */
+  const listRef = useRef<FlatList<PostItem>>(null);
+  const [showToTop, setShowToTop] = useState(false);
+
+  const scrollListToTop = useCallback((animated = true) => {
+    try {
+      listRef.current?.scrollToOffset({ offset: 0, animated });
+    } catch {
+      /* списъкът още не е готов */
+    }
+    if (typeof document === 'undefined') return;
+    try {
+      // В уеб версията `scrollToOffset` не винаги стига — дърпаме и DOM скролера.
+      const nodes: HTMLElement[] = [];
+      const marker = document.querySelector('[data-testid="radar-list"]') as HTMLElement | null;
+      if (marker) {
+        nodes.push(marker);
+        const inner = marker.querySelectorAll('div');
+        for (let i = 0; i < inner.length && i < 30; i += 1) nodes.push(inner[i] as HTMLElement);
+      }
+      for (const el of nodes) {
+        let oy = '';
+        try {
+          oy = window.getComputedStyle(el).overflowY;
+        } catch {
+          oy = '';
+        }
+        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+          el.scrollTop = 0;
+          break;
+        }
+      }
+    } catch {
+      /* не пречи на разглеждането */
+    }
+  }, []);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <FlatList
+        ref={listRef}
+        testID="radar-list"
         data={list}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <PostCard post={item} />}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          setShowToTop((prev) => (prev === y > 900 ? prev : y > 900));
+        }}
+        scrollEventThrottle={64}
         refreshing={listRefreshing}
         onRefresh={() => {
           setListRefreshing(true);
@@ -252,6 +317,46 @@ export default function RadarScreen() {
           listBusy && list.length > 0 ? (
             <View style={{ paddingVertical: 18, alignItems: 'center' }}>
               <ActivityIndicator size="small" color={COLORS.greenBright} />
+            </View>
+          ) : list.length > 0 ? (
+            <View style={{ paddingVertical: 16, alignItems: 'center', gap: 8 }}>
+              {/* Брояч за прозрачност + ръчен бутон: на уеб „стигнах до края“
+                  невинаги се задейства, а човекът остава с усещането, че са му
+                  показали само няколко оферти. */}
+              <Text style={{ color: COLORS.textMuted, fontSize: 11.5, fontWeight: '700' }}>
+                Показвам {list.length}
+                {listTotal > list.length ? ` от ${listTotal}` : ''} оферти
+              </Text>
+              {listHasMore ? (
+                <TouchableOpacity
+                  onPress={() => void loadList(list.length, false)}
+                  activeOpacity={0.85}
+                  style={{
+                    borderWidth: 1,
+                    borderColor:
+                      radarMode === 'red_hall' ? COLORS.redBorder : COLORS.greenBorder,
+                    backgroundColor:
+                      radarMode === 'red_hall' ? COLORS.redSoftBg : COLORS.greenSoftBg,
+                    borderRadius: 12,
+                    paddingHorizontal: 14,
+                    paddingVertical: 9,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: radarMode === 'red_hall' ? COLORS.redBright : COLORS.greenBright,
+                      fontSize: 12.5,
+                      fontWeight: '900',
+                    }}
+                  >
+                    Зареди още оферти
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={{ color: COLORS.textMuted, fontSize: 11 }}>
+                  Това са всички оферти в този режим.
+                </Text>
+              )}
             </View>
           ) : null
         }
@@ -580,6 +685,20 @@ export default function RadarScreen() {
           </View>
         }
       />
+
+      {/* ↑ Обратно най-горе — същото като в „Поток“, за да не се изтегля целият
+          списък, когато човек иска пак да види филтрите. */}
+      {showToTop ? (
+        <TouchableOpacity
+          style={styles.toTop}
+          activeOpacity={0.85}
+          onPress={() => scrollListToTop(true)}
+          accessibilityLabel="Обратно най-горе"
+        >
+          <Ionicons name="arrow-up" size={19} color={COLORS.textPrimary} />
+          <Text style={styles.toTopText}>Нагоре</Text>
+        </TouchableOpacity>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -603,6 +722,28 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: -0.5,
   },
+  /* „↑ Нагоре“ — същото като в „Поток“, за да е еднакво за човека. */
+  toTop: {
+    position: 'absolute',
+    right: 14,
+    bottom: 86,
+    zIndex: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 13,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(11,20,36,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.55)',
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  toTopText: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
   screenSub: {
     color: COLORS.textSecondary,
     fontSize: 13,
