@@ -1413,6 +1413,8 @@ export interface ObjectPlace {
 
 export interface ObjectDetail {
   object: ObjectSummary;
+  /** Онлайн магазин ли е (тогава статистиката на цените няма смисъл). */
+  is_shop?: boolean;
   /** Google Maps: рейтинг, отзиви, работно време. Може да липсва. */
   place?: ObjectPlace | null;
   signals: ObjectSignal[];

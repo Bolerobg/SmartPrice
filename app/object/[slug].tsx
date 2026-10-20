@@ -167,7 +167,7 @@ export default function ObjectScreen() {
 
           <View style={styles.pillRow}>
             <View style={[styles.pill, styles.pillGreen]}>
-              <Text style={styles.pillText}>{formatNumber(o.signals_count)} сигнала</Text>
+              <Text style={styles.pillText}>{formatNumber(o.signals_count)} оферти</Text>
             </View>
             {o.reporters_count > 1 ? (
               <View style={[styles.pill, styles.pillCyan]}>
@@ -181,27 +181,43 @@ export default function ObjectScreen() {
             ) : null}
           </View>
 
-          <View style={styles.statsRow}>
+          {/*
+            🏬 За онлайн магазин НЕ показваме средна/най-ниска/най-висока цена:
+            в каталога има крушка за 0.35 € и машина за 1240 € — числата са верни,
+            но нямат смисъл и плашат („защо ми показва 1240 € в червено?“).
+            За заведение/магазин на място статистиката си остава полезна.
+          */}
+          {data.is_shop ? (
             <View style={styles.stat}>
-              <Text style={styles.statLabel}>Средна цена</Text>
-              <Text style={styles.statValue}>{o.avg_price != null ? formatMoney(o.avg_price) : '—'}</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statLabel}>Най-ниска</Text>
-              <Text style={[styles.statValue, { color: COLORS.greenBright }]}>
-                {o.min_price != null ? formatMoney(o.min_price) : '—'}
+              <Text style={styles.statLabel}>Онлайн магазин · цени по каталога</Text>
+              <Text style={styles.hint}>
+                Тук са офертите от целия каталог на магазина — от евтини до скъпи, затова не показваме
+                „средна“ и „най-висока“ цена (няма как да се сравни крушка с машина). Виж офертите долу.
               </Text>
             </View>
-            <View style={styles.stat}>
-              <Text style={styles.statLabel}>Най-висока</Text>
-              <Text style={[styles.statValue, { color: COLORS.redBright }]}>
-                {o.max_price != null ? formatMoney(o.max_price) : '—'}
-              </Text>
+          ) : (
+            <View style={styles.statsRow}>
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>Средна цена</Text>
+                <Text style={styles.statValue}>{o.avg_price != null ? formatMoney(o.avg_price) : '—'}</Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>Най-ниска</Text>
+                <Text style={[styles.statValue, { color: COLORS.greenBright }]}>
+                  {o.min_price != null ? formatMoney(o.min_price) : '—'}
+                </Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>Най-висока</Text>
+                <Text style={[styles.statValue, { color: COLORS.redBright }]}>
+                  {o.max_price != null ? formatMoney(o.max_price) : '—'}
+                </Text>
+              </View>
             </View>
-          </View>
+          )}
 
           <Text style={styles.hint}>
-            Първи сигнал: {formatRelativeTime(o.first_seen)} · последен: {formatRelativeTime(o.last_seen)}
+            Първа оферта: {formatRelativeTime(o.first_seen)} · последна: {formatRelativeTime(o.last_seen)}
             {o.green_count || o.red_count
               ? ' · ' + o.green_count + ' добри / ' + o.red_count + ' лоши'
               : ''}
@@ -338,6 +354,9 @@ export default function ObjectScreen() {
           </View>
         ) : null}
 
+        {/* Графиката на „цените във времето“ има смисъл за едно и също нещо
+            (кафе, хляб). За онлайн магазин тя смесва крушки и машини → скриваме я. */}
+        {data.is_shop ? null : (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>📉 История на цените</Text>
           {data.history.length === 0 ? (
@@ -387,10 +406,11 @@ export default function ObjectScreen() {
             </>
           )}
         </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            👥 Всички сигнали ({formatNumber(o.signals_count)})
+            🛒 Всички оферти ({formatNumber(o.signals_count)})
           </Text>
           {data.signals.map((s) => (
             <SignalRow key={s.id} signal={s} onPress={() => router.push(`/post/${s.id}` as never)} />

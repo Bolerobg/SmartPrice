@@ -54,6 +54,8 @@ export interface ObjectRow {
 
 export interface ObjectSignal {
   id: string;
+  /** Откъде е офертата: user | scraper | olx | receipt_basket | … */
+  source: string | null;
   title: string;
   description: string;
   polarity: string;
@@ -136,6 +138,8 @@ export async function loadObject(slug: string): Promise<{
   signals: ObjectSignal[];
   history: Array<{ id: string; price: number; title: string; created_at: string; polarity: string; image_url: string }>;
   months: ObjectMonth[];
+  /** Онлайн магазин ли е (тогава статистиката за цени няма смисъл). */
+  is_shop: boolean;
   /** Google Maps: рейтинг, отзиви, работно време. null, ако още не е обогатен. */
   place: ObjectPlace | null;
 } | null> {
@@ -147,7 +151,7 @@ export async function loadObject(slug: string): Promise<{
 
   const [signals, history, months] = await Promise.all([
     many<ObjectSignal>(
-      `select p.id::text, p.title, p.description, p.polarity, p.category, p.price_paid::float,
+      `select p.id::text, p.source, p.title, p.description, p.polarity, p.category, p.price_paid::float,
               p.currency, p.image_url, p.created_at::text, p.helped_count,
               p.unit_quantity::float, p.unit_type, p.price_per_unit::float,
               p.is_fake_promo, p.is_shrinkflation, r.verified_by_ai,
@@ -195,7 +199,26 @@ export async function loadObject(slug: string): Promise<{
     [key]
   );
 
-  return { object, signals, history, months, place: place ?? null };
+  /**
+   * 🏬 Онлайн магазин ли е този „обект“?
+   *
+   * Защо е важно: обект = място + град и е замислен за ЗАВЕДЕНИЕ или магазин,
+   * където човек сравнява едно и също нещо (кафе, хляб). Когато обектът е онлайн
+   * магазин (нашият скрапер е внесъл целия каталог: praktis.bg, sopharmacy.bg),
+   * в „най-ниска/най-висока цена“ влизат крушка за 0.35 € и гроздомелачка за
+   * 1240 € — числата са ВЕРНИ, но нямат никакъв смисъл и плашат хората
+   * („защо ми показва 1240 € в червено?“).
+   *
+   * Затова: за онлайн магазин app-ът НЕ показва средна/най-ниска/най-висока
+   * цена и графика на цените — показва офертите (те сами носят цените си).
+   * Разпознаваме го по името (домейн: нещо.бг / нещо.com) или по това, че
+   * офертите идват от скрапера.
+   */
+  const isShop =
+    /^[a-z0-9][a-z0-9.-]*\.(bg|com|net|org|eu|de|gr|ro)$/i.test(String(object.place_name ?? '').trim()) ||
+    (signals.length > 0 && signals.every((s) => s.source === 'scraper'));
+
+  return { object, signals, history, months, is_shop: isShop, place: place ?? null };
 }
 
 /** Слугът на обекта, към който принадлежи даден пост (за бутона в офертата). */
