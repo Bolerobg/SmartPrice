@@ -162,11 +162,14 @@ export const PriceDuelCard: React.FC<Props> = ({ duel, myCurrency = '€', onOpe
             )}
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle} numberOfLines={1}>
-                {o.place || o.title}
+              {/* Показваме ЗАГЛАВИЕТО на конкурентната оферта, не само магазина —
+                  така човекът вижда с очите си дали наистина е същият продукт. */}
+              <Text style={styles.rowTitle} numberOfLines={2}>
+                {o.title}
               </Text>
               <Text style={styles.rowMeta} numberOfLines={1}>
-                {o.source === 'scraper' ? '🌐 онлайн магазин' : '📍 ' + (o.city || 'място от офертата')}
+                {o.place ? o.place : 'място от офертата'}
+                {o.source === 'scraper' ? ' · 🌐 онлайн магазин' : o.city ? ' · 📍 ' + o.city : ''}
                 {o.code ? ` · #${o.code}` : ''}
                 {/* Честно: ако заглавията съвпадат частично, казваме „подобен“. */}
                 {o.similarity < 0.75 ? ' · ≈ подобен продукт' : ''}
@@ -207,8 +210,9 @@ export const PriceDuelCard: React.FC<Props> = ({ duel, myCurrency = '€', onOpe
         </Text>
       </View>
       <Text style={styles.hintFoot}>
-        Сравнението се прави по смислените думи в заглавието на продукта. Провери цената в магазина, преди да
-        платиш — натисни офертата, за да видиш подробностите ѝ.
+        Цените на конкурентите са от последното сканиране на магазина. Отвори офертата и натисни „Провери цената
+        в магазина сега“, ако искаш потвърждение на живо. Сравняваме по марката и модела в заглавието (общи думи
+        като „детски“, „сини“, „маратонки“ не се броят за доказателство).
       </Text>
     </View>
   );

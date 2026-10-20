@@ -12,6 +12,26 @@ import { many, closePool } from '../db.js';
 import { compareForPosts, priceDuel, productTokens } from '../lib/priceDuel.js';
 
 async function main() {
+  // С конкретен id: проверяваме само него (за да хващаме фалшивите конкурент.
+  const only = process.argv[2];
+  if (only) {
+    const duel = await priceDuel(only);
+    console.log(`\n=== Дуел за ${only} ===`);
+    if (!duel) {
+      console.log('  (няма конкурент — правилно, ако продуктът е уникален)');
+    } else {
+      console.log(
+        `моята цена ${duel.myPrice.toFixed(2)} € · присъда ${duel.verdict} · min ${duel.minPrice.toFixed(2)} · avg ${duel.avgPrice.toFixed(2)}`
+      );
+      for (const o of duel.others) {
+        console.log(
+          `  ${o.cheaper ? '🟢' : '🚩'} ${o.price.toFixed(2)} € — "${o.title}" · ${o.place ?? ''} · сходство ${o.similarity}`
+        );
+      }
+    }
+    return;
+  }
+
   const ids = await many<{ id: string }>(
     `select id from posts where status = 'published' and price_paid > 0
       order by created_at desc limit 40`

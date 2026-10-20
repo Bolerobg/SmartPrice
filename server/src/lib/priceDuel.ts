@@ -28,6 +28,17 @@ const STOP_WORDS = new Set([
   'см', 'мм', 'инч', 'бр.', 'бройки', 'бройка', 'пак', 'запечатан',
   'безплатна', 'доставка', 'доставката', 'отстъпка', 'подарък', 'комплект',
   'капак', 'кутия', 'оригинал', 'гаранция', 'качество', 'топ',
+  // Цвят, пол, възраст и разфасовка — общи за СТОТИЦИ различни продукти.
+  // „Детски маратонки elefanten, сини“ и „Детски маратонки PUMA, сини“ не са
+  // един продукт само защото споделят „детски“, „маратонки“ и „сини“.
+  'детски', 'детска', 'детско', 'дамски', 'дамска', 'мъжки', 'мъжка', 'женски',
+  'женска', 'момче', 'момиче', 'момичета', 'бебе', 'бебешки', 'хлапе',
+  'сини', 'син', 'синя', 'черни', 'черна', 'черно', 'бели', 'бяла', 'бяло',
+  'червени', 'червена', 'червено', 'зелени', 'зелена', 'жълт', 'жълта',
+  'лилави', 'лилава', 'розов', 'розова', 'розови', 'кафяви', 'кафява',
+  'бежов', 'бежова', 'нюд', 'сив', 'сива', 'оранжев', 'тюркоаз', 'тъмно',
+  'светло', 'малък', 'малка', 'малки', 'голям', 'голяма', 'големи', 'среден',
+  'чифт', 'чифта', 'втора', 'употреба', 'марка',
 ]);
 
 /** Смислените думи на заглавието — по тях сравняваме продуктите. */
@@ -72,12 +83,43 @@ export function titleSimilarity(a: string[], b: string[]): number {
 }
 
 /**
+ * Числата в заглавието (модел, размер, разфасовка) — например 200651, 3367,
+ * 12000, 8, 500.
+ *
+ * Защо са важни: „Отвертка Wera 3367“ и „Отвертка Wera 3350“ са различни
+ * инструменти, а „Витамин D3 2000 IU x 60“ и „… x 120“ са различни разфасовки.
+ * Ако и двете заглавия имат числа и НЕ си споделят нито едно — не са същият
+ * продукт.
+ */
+export function numberSignature(title: string): number[] {
+  // И едноцифрените числа са важни: „6+“ срещу „0-6“ е друг вариант на продукта.
+  const found = String(title ?? '').match(/\d+(?:[.,]\d+)?/g) ?? [];
+  const out: number[] = [];
+  for (const raw of found) {
+    const n = Number(raw.replace(',', '.'));
+    if (!Number.isFinite(n)) continue;
+    if (!out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/**
  * Едни и същи ли са продуктите.
  *
- * Прагът е умишлено строг: искаме ПОНЕ ДВЕ общи смислени думи и поне 60% от
- * думите на по-късото заглавие. Иначе „Телевизор LG OLED“ съвпадаше с
- * „Телевизор Samsung OLED“ (обща дума „телевизор“) и човекът виждаше фалшиво
- * „по-евтино другаде“ за съвсем друг модел.
+ * Правилата (всичките трябва да минат):
+ *  1. поне ДВЕ общи смислени думи — след като цветът, полът, възрастта и
+ *     разфасовката вече са изхвърлени (те са общи за стотици продукти);
+ *  2. поне 75% от по-късото и поне 50% от по-дългото заглавие да съвпадат;
+ *  3. числата (модел/размер/разфасовка) да си споделят поне едно, ако и двете
+ *     заглавия имат числа.
+ *
+ * Защо така (реални примери, хванати на живо):
+ *  • „Детски маратонки elefanten TIAM, сини“ (17.99 €) вече НЕ съвпада с
+ *    „Детски маратонки PUMA Caven, сини“ (2.99 €) — общите думи (детски,
+ *    маратонки, сини) вече не се броят за доказателство;
+ *  • „Parodont Active Паста за зъби“ не съвпада с „Parodont Active Четка за
+ *    зъби“ — съвпадението по марка + дума „зъби“ вече не е достатъчно (75%);
+ *  • „Apivita Express Beauty маска за КОСА“ не съвпада с „… маска за ЛИЦЕ“.
  */
 export function isSameProduct(a: string[], b: string[]): boolean {
   const setB = new Set(b);
@@ -85,10 +127,20 @@ export function isSameProduct(a: string[], b: string[]): boolean {
   // Еднодумни заглавия — само при точно съвпадение на дълга дума.
   if (a.length === 1 && b.length === 1) return a[0] === b[0] && a[0].length >= 5;
   if (common.length < 2) return false;
-  if (common.length / Math.min(a.length, b.length) < 0.6) return false;
-  // Дълги заглавия (4+ смислени думи) искат поне три общи — иначе е друг модел.
-  if (Math.max(a.length, b.length) >= 4 && common.length < 3) return false;
+  if (common.length / Math.min(a.length, b.length) < 0.75) return false;
+  if (common.length / Math.max(a.length, b.length) < 0.5) return false;
+  // Дълги заглавия (5+ смислени думи) искат поне три общи — иначе е друга стока
+  // от същата марка/серия.
+  if (Math.max(a.length, b.length) >= 5 && common.length < 3) return false;
   return true;
+}
+
+/** Съвместими ли са размерите/моделите (числата) на двете заглавия. */
+export function sizeCompatible(titleA: string, titleB: string): boolean {
+  const na = numberSignature(titleA);
+  const nb = numberSignature(titleB);
+  if (!na.length || !nb.length) return true;
+  return na.some((n) => nb.includes(n));
 }
 
 export type Verdict = 'cheapest' | 'similar' | 'pricier' | 'rip-off';
@@ -236,6 +288,8 @@ export async function priceDuel(postId: string): Promise<PriceDuel | null> {
   for (const row of candidates) {
     const tokens = productTokens(row.title);
     if (!isSameProduct(myTokens, tokens)) continue;
+    // Размер/модел/разфасовка трябва да си съвпадат (иначе 60 табл. срещу 120).
+    if (!sizeCompatible(me.title, row.title)) continue;
     const dedupeKey = `${(row.place_name ?? '').trim().toLowerCase()}|${row.price}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
@@ -244,8 +298,20 @@ export async function priceDuel(postId: string): Promise<PriceDuel | null> {
   if (!others.length) return null;
 
   others.sort((a, b) => a.price - b.price);
-  const prices = others.map((o) => o.price);
-  const cheapest = others[0];
+  /**
+   * ⚠️ Присъда и флагове САМО при почти идентични заглавия (≥0.9).
+   *
+   * Защо: при „същата серия, друг вариант“ („Always Platinum ULTRA“ срещу
+   * „Always Platinum NORMAL“, „Astera Kids 6+“ срещу „0-6“) заглавията съвпадат
+   * на 80–90% и цената може да е съвсем друга. Да твърдим „83% по-евтино
+   * другаде“ на такава база е подвеждащо — затова тук такива оферти не влизат в
+   * сметката (остават в списъка „Същият продукт другаде“ без присъда).
+   */
+  const strongly = others.filter((o) => o.similarity >= 0.9);
+  if (!strongly.length) return null;
+
+  const prices = strongly.map((o) => o.price);
+  const cheapest = strongly[0];
   const avg = prices.reduce((s, p) => s + p, 0) / prices.length;
   // Положително = ние плащаме повече от най-евтината друга оферта.
   const saving = Number(Math.max(0, me.price - cheapest.price).toFixed(2));
@@ -253,19 +319,19 @@ export async function priceDuel(postId: string): Promise<PriceDuel | null> {
   const overAvgPct = avg > 0 ? Number((((me.price - avg) / avg) * 100).toFixed(1)) : 0;
 
   return {
-    twinCount: others.length,
+    twinCount: strongly.length,
     cheapestPrice: cheapest.price,
     cheapestPlace: cheapest.place,
     cheapestId: cheapest.id,
     saving,
     savingPct,
-    verdict: verdictFor(saving, savingPct, others.length),
+    verdict: verdictFor(saving, savingPct, strongly.length),
     myPrice: me.price,
     minPrice: Math.min(...prices, me.price),
     maxPrice: Math.max(...prices, me.price),
     avgPrice: Number(avg.toFixed(2)),
     overAvgPct,
-    others: others.slice(0, 12),
+    others: strongly.slice(0, 12),
   };
 }
 
@@ -304,13 +370,20 @@ export async function compareForPosts(
     // Един магазин + една цена = един конкурент (иначе дубликатните оферти от
     // един и същ магазин се броят няколко пъти и чипът лъже „5 места“).
     const seenTwin = new Set<string>();
-    const twins = withTokens.filter((c) => {
-      if (!isSameProduct(myTokens, c.tokens)) return false;
+    const twins: Array<{ row: CandidateRow; sim: number }> = [];
+    for (const c of withTokens) {
+      if (!isSameProduct(myTokens, c.tokens)) continue;
+      if (!sizeCompatible(row.title, c.row.title)) continue;
+      const sim = titleSimilarity(myTokens, c.tokens);
+      // В чипа в лентата влизат само почти идентични заглавия — иначе човекът
+      // вижда твърдение „по-скъпо с 80%“, което се отнася за друг вариант на
+      // продукта (същата серия, различен размер/вид).
+      if (sim < 0.9) continue;
       const dedupeKey = `${(c.row.place_name ?? '').trim().toLowerCase()}|${c.row.price}`;
-      if (seenTwin.has(dedupeKey)) return false;
+      if (seenTwin.has(dedupeKey)) continue;
       seenTwin.add(dedupeKey);
-      return true;
-    });
+      twins.push({ row: c.row, sim });
+    }
     if (!twins.length) continue;
 
     const cheapestTwin = twins.reduce((best, c) => (c.row.price < best.row.price ? c : best), twins[0]);
