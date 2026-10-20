@@ -379,20 +379,24 @@ export default function PostDetailScreen() {
             </View>
           ) : null}
 
-          {/* Същият продукт другаде — за да може човекът да сравни и избере
-              по-евтиното, вместо да вижда само една оферта. */}
+          {/* ⚠️ Само ПОДОБНИ оферти (без присъда!).
+              Този списък търси по думи в заглавието и затова може да хване друг
+              вариант — друг цвят, друг модел, друг пол. Затова тук НЯМА
+              „най-евтино“ и няма твърдения: само заглавие, магазин и цена, за
+              да провери човекът сам. Истинското сравнение е в „Ценова проверка“
+              горе (то иска същия модел, цвят, размер, пол и ДРУГ доставчик). */}
           {!duelCard && similar && similar.count > 0 ? (
             <View style={styles.similarBox}>
               <View style={styles.similarHeader}>
                 <Ionicons name="swap-horizontal" size={16} color={COLORS.accentCyan} />
-                <Text style={styles.similarTitle}>Същият продукт другаде ({similar.count})</Text>
+                <Text style={styles.similarTitle}>Подобни оферти ({similar.count})</Text>
               </View>
               <Text style={styles.similarHint}>
-                Другите цени за този продукт, от най-евтината нагоре. Натисни, за да отвориш офертата.
+                Приличат си по заглавие, но може да са друг вариант, цвят или модел — провери сам, преди да
+                сравняваш цени. Натисни, за да отвориш офертата.
               </Text>
-              {similar.items.slice(0, 8).map((s, index) => {
+              {similar.items.slice(0, 8).map((s) => {
                 const price = Number(s.price);
-                const isCheapest = index === 0 && price < post.pricePaid;
                 return (
                   <TouchableOpacity
                     key={s.id}
@@ -419,7 +423,6 @@ export default function PostDetailScreen() {
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={styles.similarPrice}>{price.toFixed(2)} €</Text>
-                      {isCheapest ? <Text style={styles.similarBest}>НАЙ-ЕВТИНО</Text> : null}
                     </View>
                   </TouchableOpacity>
                 );
