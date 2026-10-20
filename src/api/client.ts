@@ -8,6 +8,7 @@ import type {
   LeaderboardUser,
   PlatformTag,
   PostItem,
+  PriceDuel,
   PostPolarity,
   PriceAlertItem,
   ReactionKey,
@@ -222,8 +223,8 @@ export interface SimilarOffer {
  */
 export async function loadSimilarOffers(
   postId: string
-): Promise<{ key: string; count: number; items: SimilarOffer[] }> {
-  return rawRequest<{ key: string; count: number; items: SimilarOffer[] }>(
+): Promise<{ key: string; count: number; items: SimilarOffer[]; duel: PriceDuel | null }> {
+  return rawRequest<{ key: string; count: number; items: SimilarOffer[]; duel: PriceDuel | null }>(
     `/api/posts/${postId}/similar`
   );
 }
@@ -759,6 +760,8 @@ export interface FeedQuery {
   category?: string;
   city?: string;
   q?: string;
+  /** Таг на обект (слуг) — само офертите на този обект (място + град). */
+  place?: string;
   sort?: 'newest' | 'best_savings' | 'lowest_price' | 'highest_price' | 'most_helped';
   limit?: number;
   offset?: number;
@@ -890,6 +893,7 @@ export const api = {
     if (query.category && query.category !== 'all') params.set('category', query.category);
     if (query.city && query.city !== 'Всички градове') params.set('city', query.city);
     if (query.q?.trim()) params.set('q', query.q.trim());
+    if (query.place) params.set('place', query.place);
     if (query.sort) params.set('sort', query.sort);
     params.set('limit', String(query.limit ?? 60));
     params.set('offset', String(query.offset ?? 0));
@@ -909,6 +913,8 @@ export const api = {
       items: Array<{
         placeName: string;
         city: string;
+        /** Слуг на обекта — за да се отворят всички оферти с този таг. */
+        slug?: string;
         address?: string;
         score: number;
         reportsCount: number;

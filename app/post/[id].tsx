@@ -23,6 +23,7 @@ import { PublicPostPreview } from '@/components/PublicPostPreview';
 import { PriceHistoryCard } from '@/components/PriceHistoryCard';
 import { ObjectSignalsCard } from '@/components/ObjectSignalsCard';
 import { ShopPriceCompare } from '@/components/ShopPriceCompare';
+import { PriceDuelCard } from '@/components/PriceDuelCard';
 import { Avatar } from '@/components/Avatar';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
@@ -31,7 +32,7 @@ import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAt, formatPostedAtLong, formatRelativeTime } from '@/src/lib/format';
 import { api, loadSimilarOffers } from '@/src/api/client';
 import type { SimilarOffer } from '@/src/api/client';
-import type { PostItem } from '@/types';
+import type { PostItem, PriceDuel } from '@/types';
 
 
 export default function PostDetailScreen() {
@@ -58,12 +59,20 @@ export default function PostDetailScreen() {
   // най-изгодното, вместо да вижда само една оферта.
   const [similar, setSimilar] = useState<{ count: number; items: SimilarOffer[] } | null>(null);
 
+  /**
+   * ⚔️ Ценовата дуелна карта: същият продукт при други доставчици + присъдата
+   * за нашата цена (най-ниска / близка / по-скъпа / чист обир). Идва заедно с
+   * „същият продукт другаде“ — единствената разлика е, че тук има сметка.
+   */
+  const [duelCard, setDuelCard] = useState<PriceDuel | null>(null);
+
   useEffect(() => {
     let alive = true;
     if (!isAuthenticated || !id) return;
     loadSimilarOffers(String(id))
       .then((r) => {
         if (alive && r.count > 0) setSimilar({ count: r.count, items: r.items });
+        if (alive) setDuelCard(r.duel ?? null);
       })
       .catch(() => undefined);
     return () => {
@@ -333,9 +342,19 @@ export default function PostDetailScreen() {
 
           <Text style={styles.description}>{post.description}</Text>
 
+          {/* ⚔️ Умната ценова проверка: същият продукт при друг доставчик,
+              с колко е по-евтин/скъп и какво значи това за нашата цена. */}
+          {duelCard ? (
+            <PriceDuelCard
+              duel={duelCard}
+              myCurrency={post.currency}
+              onOpen={(twinId) => router.push(`/post/${twinId}`)}
+            />
+          ) : null}
+
           {/* Същият продукт другаде — за да може човекът да сравни и избере
               по-евтиното, вместо да вижда само една оферта. */}
-          {similar && similar.count > 0 ? (
+          {!duelCard && similar && similar.count > 0 ? (
             <View style={styles.similarBox}>
               <View style={styles.similarHeader}>
                 <Ionicons name="swap-horizontal" size={16} color={COLORS.accentCyan} />

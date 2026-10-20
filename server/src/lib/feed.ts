@@ -1,7 +1,13 @@
 import { many, one } from '../db.js';
+import { compareForPosts, type PriceCompareLight } from './priceDuel.js';
 import { mapPost, type CommentRow, type PostRow, type PriceHistoryRow, type ReceiptItemRow, type ReceiptRow } from './mappers.js';
 
 export type SortMode = 'newest' | 'best_savings' | 'lowest_price' | 'highest_price' | 'most_helped';
+
+/** Слуг на обект = md5(lower(trim(място)) || '|' || lower(trim(град))). Същият
+ *  израз се ползва и в `lib/objects.ts` (v_objects), затова е изнесен тук. */
+export const PLACE_SLUG_SQL = `md5(lower(btrim(coalesce(p.place_name,'')) || '|' || lower(btrim(coalesce(p.city,'')))))`;
+export const PLACE_SLUG_RE = /^[0-9a-f]{32}$/;
 
 export interface FeedFilters {
   postId?: string;
@@ -9,6 +15,15 @@ export interface FeedFilters {
   category?: string;
   city?: string;
   q?: string;
+  /**
+   * Таг на обект (слуг) — „всички оферти на този обект“.
+   *
+   * Защо и филтър по източник: класацията в Радара (черен списък / „Честно
+   * място“) е за ОБЕКТИ с гласове от хора, затова тук също махаме внесените
+   * стоки (scraper) и обявите (olx) — иначе при натискане на „Billa“ излизат
+   * стотици продукти от онлайн магазин вместо докладите на хората.
+   */
+  placeSlug?: string;
   sellerType?: 'business' | 'private';
   authorId?: string;
   bookmarkedBy?: string;
@@ -46,6 +61,13 @@ function buildWhere(filters: FeedFilters): Where {
   }
   if (filters.city && filters.city !== 'Всички градове') {
     clauses.push(`lower(p.city) = lower(${bind(filters.city)})`);
+  }
+
+  // Таг на обект: всички оферти на точно този обект (място + град) — както ги
+  // групира и класацията на Радара. Внесените стоки и обявите не са обекти.
+  if (filters.placeSlug && PLACE_SLUG_RE.test(filters.placeSlug)) {
+    clauses.push(`${PLACE_SLUG_SQL} = ${bind(filters.placeSlug)}`);
+    clauses.push(`coalesce(p.source, '') not in ('scraper', 'olx')`);
   }
   if (filters.authorId) clauses.push(`p.author_id = ${bind(filters.authorId)}`);
   if (filters.sellerType) clauses.push(`p.seller_type = ${bind(filters.sellerType)}`);
@@ -165,6 +187,15 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
   const ids = rows.map((r) => r.id);
   if (!ids.length) return [];
 
+  /**
+   * ⚔️ Ценова проверка за ВСИЧКИ оферти на страницата с една заявка.
+   *
+   * Питаме веднъж за цялата страница (не по карта), за да не се превръща
+   * лентата в 30 заявки. Ако проверката се провали, лентата пак работи —
+   * просто без чипа „същият продукт другаде“.
+   */
+  const compares = await compareForPosts(ids).catch(() => new Map());
+
   const [history, receipts, items, comments] = await Promise.all([
     many<PriceHistoryRow>(
       `select ph.*, pr.name as reporter_name
@@ -243,6 +274,7 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
 
   return rows.map((post) => {
     const receipt = receiptByPost.get(post.id) ?? null;
+    const cmp = compares.get(post.id) as (PriceCompareLight | undefined);
     return mapPost({
       post,
       priceHistory: historyByPost.get(post.id) ?? [],
@@ -253,6 +285,17 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
       userMarkedHelped: myHelped.has(post.id),
       isBookmarked: myBookmarks.has(post.id),
       userConfirmedValidToday: myConfirmed.has(post.id),
+      compare: cmp
+        ? {
+            twinCount: cmp.twinCount,
+            cheapestPrice: cmp.cheapestPrice,
+            cheapestPlace: cmp.cheapestPlace,
+            cheapestId: cmp.cheapestId,
+            saving: cmp.saving,
+            savingPct: cmp.savingPct,
+            verdict: cmp.verdict,
+          }
+        : null,
     });
   });
 }

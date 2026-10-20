@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CityPickerDropdown } from '@/components/CityPickerDropdown';
+import { useRouter } from 'expo-router';
 import { PostCard } from '@/components/PostCard';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
@@ -18,7 +19,23 @@ import { openInGoogleMaps } from '@/lib/locationService';
 import { api } from '@/src/api/client';
 import { CategoryId, PostItem } from '@/types';
 
+/**
+ * Един обект в класацията (черен списък / „Честно място“).
+ * `slug` идва от сървъра (md5 от място+град) и е тагът на обекта — с него се
+ * отварят ВСИЧКИ оферти на този обект.
+ */
+interface VenueItem {
+  placeName: string;
+  city: string;
+  address?: string;
+  score: number;
+  reportsCount: number;
+  hasReceipt: boolean;
+  slug?: string;
+}
+
 export default function RadarScreen() {
+  const router = useRouter();
   // От общото състояние ползваме само постовете за броячите по градове —
   // самата лента на радара се тегли отделно, филтрирана на сървъра.
   const { posts } = useApp();
@@ -38,17 +55,7 @@ export default function RadarScreen() {
   }, [posts]);
 
   const localVenues = useMemo(() => {
-    const map: Record<
-      string,
-      {
-        placeName: string;
-        city: string;
-        address?: string;
-        score: number;
-        reportsCount: number;
-        hasReceipt: boolean;
-      }
-    > = {};
+    const map: Record<string, VenueItem> = {};
 
     for (const p of posts) {
       if (radarMode === 'red_hall' && p.polarity !== 'red') continue;
@@ -91,7 +98,7 @@ export default function RadarScreen() {
    * изчезваха и черният списък показваше само 1 обект. Ако сървърът не отговори,
    * оставаме с местната сметка (по-добре нещо, отколкото нищо).
    */
-  const [serverVenues, setServerVenues] = useState<typeof localVenues | null>(null);
+  const [serverVenues, setServerVenues] = useState<VenueItem[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -120,6 +127,30 @@ export default function RadarScreen() {
   }, [radarMode, activeCategory, activeCity]);
 
   const rankedVenues = serverVenues ?? localVenues;
+
+  /**
+   * Натискане на обект → екран „всички оферти с този таг“.
+   *
+   * Преди тук само се пълнеше търсачката с името на обекта — човекът не
+   * виждаше „всички оферти на този обект“, а общ резултат от търсене по текст
+   * (можеше да хване и съвсем друг обект със същото име в описанието).
+   * Сега отиваме на екрана на обекта, който филтрира на СЪРВЪРА по тага
+   * (място + град). Ако сървърът не е дал слуг (стар кеш на списъка), падаме
+   * обратно на търсене по име, за да не остане бутонът „мъртъв“.
+   */
+  const openVenueOffers = useCallback(
+    (v: VenueItem) => {
+      if (v.slug) {
+        router.push(
+          `/place/${v.slug}?name=${encodeURIComponent(v.placeName)}&city=${encodeURIComponent(v.city)}` as never
+        );
+        return;
+      }
+      setSearchQuery(v.placeName);
+    },
+    [router]
+  );
+
 
   /**
    * СВОЯ лента, филтрирана на СЪРВЪРА (не в телефона!).
@@ -394,7 +425,7 @@ export default function RadarScreen() {
                   >
                     <TouchableOpacity
                       style={{ flex: 1 }}
-                      onPress={() => setSearchQuery(v.placeName)}
+                      onPress={() => openVenueOffers(v)}
                     >
                       <Text
                         style={{
@@ -417,6 +448,17 @@ export default function RadarScreen() {
                         📍 {v.city}
                         {v.address ? ` • ${v.address}` : ''} • {v.score}{' '}
                         {radarMode === 'red_hall' ? 'гласа „Обир!“' : 'гласа „Топ!“'}
+                      </Text>
+                      <Text
+                        style={{
+                          color: radarMode === 'red_hall' ? COLORS.redBright : COLORS.greenBright,
+                          fontSize: 10.5,
+                          fontWeight: '800',
+                          marginTop: 3,
+                        }}
+                        numberOfLines={1}
+                      >
+                        Виж всички оферти за този обект ›
                       </Text>
                     </TouchableOpacity>
 

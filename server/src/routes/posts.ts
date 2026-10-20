@@ -8,6 +8,7 @@ import { loadFullProfile } from '../lib/profile.js';
 import { getSetting } from '../lib/settings.js';
 import { checkFirstToComplete } from '../lib/sponsorRaffles.js';
 import { checkShopPrice } from '../lib/shopPrice.js';
+import { priceDuel } from '../lib/priceDuel.js';
 
 const CATEGORIES = [
   'restaurants',
@@ -85,6 +86,9 @@ const listQuerySchema = z.object({
   category: z.string().max(40).optional(),
   city: z.string().max(80).optional(),
   q: z.string().max(200).optional(),
+  // Таг на обект (слуг) — за екрана „всички оферти на този обект“, който се
+  // отваря при натискане на обект в черния списък / класацията на Радара.
+  place: z.string().trim().regex(/^[0-9a-f]{32}$/).optional(),
   sellerType: z.enum(['business', 'private']).optional(),
   sort: z.enum(['newest', 'best_savings', 'lowest_price', 'highest_price', 'most_helped']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
@@ -136,6 +140,7 @@ export default async function postRoutes(app: FastifyInstance) {
       category: q.category,
       city: q.city,
       q: q.q,
+      placeSlug: q.place,
       sellerType: q.sellerType,
       sort: q.sort as SortMode | undefined,
       limit: q.limit,
@@ -158,9 +163,14 @@ export default async function postRoutes(app: FastifyInstance) {
       score: number;
       reports_count: number;
       has_receipt: boolean;
+      slug: string | null;
     }>(
       `select btrim(coalesce(v.place_name, '')) as place_name,
               coalesce(v.city, '') as city,
+              -- Слугът на обекта: същият израз като в lib/objects.ts / v_objects.
+              -- Нужен е, за да отваря натискането на обект ВСИЧКИ оферти с този
+              -- таг (място + град).
+              md5(lower(btrim(coalesce(v.place_name, ''))) || '|' || lower(btrim(coalesce(v.city, '')))) as slug,
               min(nullif(btrim(coalesce(v.address, '')), '')) as address,
               count(*)::int as reports_count,
               sum(case when $1 = 'red'
@@ -192,6 +202,7 @@ export default async function postRoutes(app: FastifyInstance) {
       items: rows.map((r) => ({
         placeName: r.place_name,
         city: r.city,
+        slug: r.slug ?? undefined,
         address: r.address ?? undefined,
         score: Number(r.score) || 0,
         reportsCount: Number(r.reports_count) || 0,
@@ -775,12 +786,17 @@ export default async function postRoutes(app: FastifyInstance) {
   });
 
   /**
-   * „Същият продукт другаде“ — всички оферти за този продукт от други места.
+   * „Същият продукт другаде“ + ⚔️ ценова дуелна карта.
    *
    * Смисълът на приложението е да сравниш. Затова до една оферта показваме и
    * останалите цени за същия продукт, подредени от най-евтината — включително
    * внесените от онлайн магазини. Сравняваме по първите смислени думи от
    * заглавието, за да хващаме и „Олио 1 л“, и „Олио слънчогледово 1 л“.
+   *
+   * `duel` е умната част: за всяка конкурентна оферта — с колко € / % е
+   * по-евтина или по-скъпа от нашата, коя е най-евтината, каква е средната
+   * цена и каква е присъдата за НАШАТА цена (най-ниска / близка / по-скъпа /
+   * чист обир). Така на страницата се показва не списък, а сравнение.
    */
   app.get('/api/posts/:id/similar', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
@@ -815,6 +831,10 @@ export default async function postRoutes(app: FastifyInstance) {
       [id, first, second]
     );
 
-    return { key: `${first} ${second}`.trim(), count: items.length, items };
+    // Умната проверка (същият продукт + присъда). Ако се счупи, връщаме
+    // обикновения списък — страницата не бива да остава празна.
+    const duel = await priceDuel(id).catch(() => null);
+
+    return { key: `${first} ${second}`.trim(), count: items.length, items, duel };
   });
 }

@@ -101,6 +101,53 @@ export interface PriceAlertItem {
   isActive: boolean;
 }
 
+/**
+ * ⚔️ Ценова проверка: същият продукт при друг доставчик.
+ * Идва от сървъра заедно с офертата (един ред на картата в лентата).
+ */
+export interface PostPriceCompare {
+  /** Колко други оферти са за същия продукт. */
+  twinCount: number;
+  cheapestPrice: number;
+  cheapestPlace: string | null;
+  cheapestId: string | null;
+  /** Колко € по-скъп е нашият (0 = ние сме най-евтини). */
+  saving: number;
+  savingPct: number;
+  verdict: 'cheapest' | 'similar' | 'pricier' | 'rip-off';
+}
+
+/** Конкурентна оферта в дуелната карта (страница на оферта). */
+export interface TwinOffer {
+  id: string;
+  code: string | null;
+  title: string;
+  price: number;
+  place: string | null;
+  city: string | null;
+  source: string | null;
+  platformTag: string | null;
+  imageUrl: string | null;
+  createdAt: string | null;
+  address: string | null;
+  mapsUrl: string | null;
+  /** + = по-скъпо от нашата цена, − = по-евтино. */
+  delta: number;
+  deltaPct: number;
+  cheaper: boolean;
+  similarity: number;
+}
+
+/** Пълната дуелна карта. */
+export interface PriceDuel extends PostPriceCompare {
+  myPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  avgPrice: number;
+  overAvgPct: number;
+  others: TwinOffer[];
+}
+
 export interface PostItem {
   id: string;
   code: string; // Публичен ID на офертата (напр. SP-7K2M4Q) — по него се търси
@@ -169,6 +216,8 @@ export interface PostItem {
   userReaction?: ReactionKey;
   helpedCount: number; // Брой хора натиснали "Спести ми пари / Спаси ме от капан"
   signalCount?: number; // Брой независими сигнали за същата оферта (Facebook групи)
+  /** ⚔️ Същият продукт при друг доставчик — за чипа „по-евтино другаде“. */
+  compare?: PostPriceCompare;
   communitySavedBgn: number; // Общо спестени € на общността от този пост
   userMarkedHelped?: boolean;
   isBookmarked?: boolean;

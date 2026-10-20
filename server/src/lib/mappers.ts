@@ -3,6 +3,7 @@
  * вече очаква (types/index.ts). Така UI-ът и структурата остават непроменени —
  * сменя се само източникът на данни.
  */
+import type { PriceCompareLight } from './priceDuel.js';
 
 export const CURRENCY_LABEL: Record<string, string> = {
   BGN: 'лв.',
@@ -158,6 +159,8 @@ export function mapPost(params: {
   userMarkedHelped?: boolean;
   userConfirmedValidToday?: boolean;
   isBookmarked?: boolean;
+  /** ⚔️ Ценова проверка: същият продукт при друг доставчик (когато има). */
+  compare?: PriceCompareLight | null;
 }) {
   const {
     post,
@@ -169,6 +172,7 @@ export function mapPost(params: {
     userMarkedHelped = false,
     userConfirmedValidToday = false,
     isBookmarked = false,
+    compare = null,
   } = params;
 
   return {
@@ -239,6 +243,7 @@ export function mapPost(params: {
     userReaction: userReaction ?? undefined,
     helpedCount: post.helped_count,
     signalCount: post.signal_count ?? 1,
+    compare: compare ?? undefined,
     communitySavedBgn: post.community_saved_bgn,
     userMarkedHelped,
     isBookmarked,

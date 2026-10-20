@@ -405,6 +405,76 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
           </View>
         ) : null}
 
+        {/*
+          ⚔️ Ценова проверка върху самата карта: същият продукт при друг
+          доставчик. Човекът вижда още в лентата, че същата стока е по-евтина
+          другаде (или че ТОЗИ е най-евтиният) — без да влиза в офертата.
+          Натискането отваря най-изгодната конкурентна оферта.
+        */}
+        {post.compare && post.compare.twinCount > 0 ? (
+          (() => {
+            const c = post.compare!;
+            const isCheapest = c.verdict === 'cheapest';
+            const isSimilar = c.verdict === 'similar';
+            const chipColor = isCheapest
+              ? COLORS.greenBright
+              : isSimilar
+                ? COLORS.accentCyan
+                : COLORS.redBright;
+            const chipBg = isCheapest
+              ? COLORS.greenSoftBg
+              : isSimilar
+                ? 'rgba(34,211,238,0.12)'
+                : COLORS.redSoftBg;
+            const chipBorder = isCheapest
+              ? COLORS.greenBorder
+              : isSimilar
+                ? 'rgba(34,211,238,0.30)'
+                : COLORS.redBorder;
+            const where = c.cheapestPlace ? ` в ${c.cheapestPlace}` : '';
+            const label = isCheapest
+              ? `🏆 Най-ниската цена от ${c.twinCount} ${c.twinCount === 1 ? 'място' : 'места'} с този продукт`
+              : `${c.verdict === 'rip-off' ? '🚨 Много по-скъпо' : '🔴 +' + c.savingPct + '% по-скъпо'}: същото е ${c.cheapestPrice.toFixed(2)} ${post.currency}${where} — ${c.saving.toFixed(2)} ${post.currency} по-малко`;
+            return (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  if (!isCheapest && c.cheapestId) {
+                    router.push(`/post/${c.cheapestId}` as never);
+                  }
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  borderWidth: 1,
+                  borderColor: chipBorder,
+                  backgroundColor: chipBg,
+                  borderRadius: 12,
+                  paddingHorizontal: 10,
+                  paddingVertical: 8,
+                  marginTop: 10,
+                }}
+              >
+                <Ionicons
+                  name={isCheapest ? 'trophy-outline' : 'git-compare-outline'}
+                  size={13}
+                  color={chipColor}
+                />
+                <Text
+                  style={{ flex: 1, color: chipColor, fontSize: 11.5, fontWeight: '800' }}
+                  numberOfLines={2}
+                >
+                  {label}
+                </Text>
+                {!isCheapest && c.cheapestId ? (
+                  <Ionicons name="chevron-forward" size={14} color={chipColor} />
+                ) : null}
+              </TouchableOpacity>
+            );
+          })()
+        ) : null}
+
         {/* Снимка + Очакване vs Реалност + Бадж за Касова Бележка */}
         <View style={styles.imageContainer}>
           <Image
