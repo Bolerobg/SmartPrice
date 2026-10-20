@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -36,7 +36,12 @@ import type { PostItem, PriceDuel } from '@/types';
 
 
 export default function PostDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  /**
+   * `duel=1` идва от чипа „по-скъпо другаде“ в лентата: отваряме ТАЗИ оферта и
+   * веднага слизаме до дуелната карта, за да види човекът цялото сравнение, а не
+   * да го пращаме направо в друга оферта без контекст.
+   */
+  const { id, duel: duelParam } = useLocalSearchParams<{ id: string; duel?: string }>();
   const router = useRouter();
   const { isAuthenticated } = useAuth();
   const {
@@ -65,6 +70,11 @@ export default function PostDetailScreen() {
    * „същият продукт другаде“ — единствената разлика е, че тук има сметка.
    */
   const [duelCard, setDuelCard] = useState<PriceDuel | null>(null);
+
+  /** Позицията на дуелната карта в скрола (за автоматично слизане до нея). */
+  const scrollRef = useRef<ScrollView>(null);
+  const duelY = useRef(0);
+  const duelScrolled = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -279,6 +289,7 @@ export default function PostDetailScreen() {
         </View>
 
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -345,11 +356,27 @@ export default function PostDetailScreen() {
           {/* ⚔️ Умната ценова проверка: същият продукт при друг доставчик,
               с колко е по-евтин/скъп и какво значи това за нашата цена. */}
           {duelCard ? (
-            <PriceDuelCard
-              duel={duelCard}
-              myCurrency={post.currency}
-              onOpen={(twinId) => router.push(`/post/${twinId}`)}
-            />
+            <View
+              onLayout={(e) => {
+                duelY.current = e.nativeEvent.layout.y;
+                // Слизаме до картата само веднъж и само ако сме дошли от чипа.
+                if (duelParam === '1' && !duelScrolled.current) {
+                  duelScrolled.current = true;
+                  setTimeout(() => {
+                    scrollRef.current?.scrollTo({
+                      y: Math.max(0, duelY.current - 12),
+                      animated: true,
+                    });
+                  }, 320);
+                }
+              }}
+            >
+              <PriceDuelCard
+                duel={duelCard}
+                myCurrency={post.currency}
+                onOpen={(twinId) => router.push(`/post/${twinId}`)}
+              />
+            </View>
           ) : null}
 
           {/* Същият продукт другаде — за да може човекът да сравни и избере

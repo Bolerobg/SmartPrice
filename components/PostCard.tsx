@@ -434,14 +434,16 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
             const where = c.cheapestPlace ? ` в ${c.cheapestPlace}` : '';
             const label = isCheapest
               ? `🏆 Най-ниската цена от ${c.twinCount} ${c.twinCount === 1 ? 'място' : 'места'} с този продукт`
-              : `${c.verdict === 'rip-off' ? '🚨 Много по-скъпо' : '🔴 +' + c.savingPct + '% по-скъпо'}: същото е ${c.cheapestPrice.toFixed(2)} ${post.currency}${where} — ${c.saving.toFixed(2)} ${post.currency} по-малко`;
+              : `${c.verdict === 'rip-off' ? '🚨 Много по-скъпо' : '🔴 +' + c.savingPct + '% по-скъпо'}: същото е ${c.cheapestPrice.toFixed(2)} ${post.currency}${where} — ${c.saving.toFixed(2)} ${post.currency} по-малко · виж сравнението`;
             return (
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => {
-                  if (!isCheapest && c.cheapestId) {
-                    router.push(`/post/${c.cheapestId}` as never);
-                  }
+                  // Отваряме ТАЗИ оферта и слизаме до дуелната карта с пълното
+                  // сравнение (?duel=1) — човекът вижда и своята цена, и
+                  // конкуренцията на едно място, вместо да го хвърляме в друга
+                  // оферта без контекст.
+                  router.push(`/post/${post.id}?duel=1` as never);
                 }}
                 style={{
                   flexDirection: 'row',
@@ -468,7 +470,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
                   {label}
                 </Text>
                 {!isCheapest && c.cheapestId ? (
-                  <Ionicons name="chevron-forward" size={14} color={chipColor} />
+                  <Ionicons name="chevron-down" size={14} color={chipColor} />
                 ) : null}
               </TouchableOpacity>
             );
