@@ -228,10 +228,17 @@ export async function priceDuel(postId: string): Promise<PriceDuel | null> {
 
   const candidates = await loadCandidates([postId], myTokens);
 
+  // Един и същ продукт може да влезе два пъти от един магазин (различен адрес
+  // на същия артикул). За дуела това е шум: броим МАГАЗИН + ЦЕНА веднъж, иначе
+  // диаграмата показва три еднакви стълба и „3 конкурента“, които са един.
+  const seen = new Set<string>();
   const others: TwinOffer[] = [];
   for (const row of candidates) {
     const tokens = productTokens(row.title);
     if (!isSameProduct(myTokens, tokens)) continue;
+    const dedupeKey = `${(row.place_name ?? '').trim().toLowerCase()}|${row.price}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     others.push(toTwin(row, me.price, titleSimilarity(myTokens, tokens)));
   }
   if (!others.length) return null;
@@ -294,7 +301,16 @@ export async function compareForPosts(
   for (const row of mine) {
     const myTokens = tokensById.get(row.id) ?? [];
     if (!myTokens.length) continue;
-    const twins = withTokens.filter((c) => isSameProduct(myTokens, c.tokens));
+    // Един магазин + една цена = един конкурент (иначе дубликатните оферти от
+    // един и същ магазин се броят няколко пъти и чипът лъже „5 места“).
+    const seenTwin = new Set<string>();
+    const twins = withTokens.filter((c) => {
+      if (!isSameProduct(myTokens, c.tokens)) return false;
+      const dedupeKey = `${(c.row.place_name ?? '').trim().toLowerCase()}|${c.row.price}`;
+      if (seenTwin.has(dedupeKey)) return false;
+      seenTwin.add(dedupeKey);
+      return true;
+    });
     if (!twins.length) continue;
 
     const cheapestTwin = twins.reduce((best, c) => (c.row.price < best.row.price ? c : best), twins[0]);
