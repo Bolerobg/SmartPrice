@@ -115,6 +115,16 @@ function buildWhere(filters: FeedFilters): Where {
               or p.price_paid::text like ${p}
               or upper(replace(p.public_code, '-', '')) like upper(replace(${p}, '-', ''))
               or sp_fold(p.category) like ${p}
+              -- ЛАТИНСКИ ТЕКСТ (марки, домейни): sp_fold() сгъва кирилица, но НЕ
+              -- пипа латиницата, затова „ANSMANN“, „bauhaus“, „Deichmann“ не се
+              -- намираха (проверено 20.10.2026: q=ANSMANN → 0 резултата).
+              -- `ilike` работи за ASCII и в C колация — затова е отделен клон.
+              or p.title ilike ${p}
+              or p.place_name ilike ${p}
+              or p.description ilike ${p}
+              or p.custom_platform_label ilike ${p}
+              or p.custom_category_label ilike ${p}
+              or a.name ilike ${p}
               -- Етикетите на категориите са в клиента, затова ги въвеждаме тук,
               -- за да намериш „кафе“ или „хотел“, без да знаеш вътрешния id.
               -- Синонимите вече се редактират от админ панела (category_labels).

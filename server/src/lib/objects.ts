@@ -278,7 +278,27 @@ export async function searchObjects(params: {
   const args: unknown[] = [];
   if (q) {
     args.push('%' + q + '%');
-    where.push(`(place_name ilike $${args.length} or city ilike $${args.length} or coalesce(merchant_name,'') ilike $${args.length})`);
+    /**
+     * Търсене и ПО ПРОДУКТ, не само по име на магазин.
+     *
+     * Защо: човекът пише „ANSMANN“ или „Wera“ — това е марка на продукт, който
+     * магазинът продава. Преди търсенето хващаше само името/града и човекът
+     * получаваше 0 резултата, макар офертите да са в базата.
+     */
+    where.push(
+      `(place_name ilike $${args.length}
+        or city ilike $${args.length}
+        or coalesce(merchant_name,'') ilike $${args.length}
+        or exists (
+          select 1 from posts p2
+           where md5(lower(btrim(coalesce(p2.place_name,'')) || '|' || lower(btrim(coalesce(p2.city,'')))))
+                 = md5(lower(btrim(coalesce(place_name,'')) || '|' || lower(btrim(coalesce(city,'')))))
+             and p2.status = 'published'
+             and (p2.title ilike $${args.length}
+                  or sp_fold(p2.title) like lower($${args.length})
+                  or p2.description ilike $${args.length})
+        ))`
+    );
   }
   if (city) {
     args.push(city);
