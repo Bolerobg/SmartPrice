@@ -119,7 +119,6 @@ export default function ShopsScreen() {
                     🏷️ {item.categories.slice(0, 4).join(' · ')}
                   </Text>
                 ) : null}
-
                 {/* 🥇 Значките са ЧЕСТНИ: дават се само когато магазинът е поне
                     5 % под следващия в категорията (сметката е на сървъра). */}
                 {(badges[item.slug] ?? []).slice(0, 3).map((b) => (
@@ -268,6 +267,7 @@ const styles = StyleSheet.create({
   name: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '900' },
   meta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 3, fontWeight: '700' },
   cats: { color: COLORS.textMuted, fontSize: 11, marginTop: 4 },
+
   /* 🥇 Значка „най-изгодни цени в категорията“ — златна, за да се отличава. */
   badge: {
     marginTop: 6,

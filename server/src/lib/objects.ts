@@ -298,6 +298,7 @@ export async function searchObjects(params: {
     `select count(*)::text as n from v_objects ${clause}`,
     args
   );
+
   return {
     total: Number(total?.n ?? 0) || 0,
     items: rows.map((r) => ({ ...r, is_shop: isShopName(r.place_name) })),
