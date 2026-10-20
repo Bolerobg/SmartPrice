@@ -143,6 +143,86 @@ export function sizeCompatible(titleA: string, titleB: string): boolean {
   return na.some((n) => nb.includes(n));
 }
 
+/**
+ * Пол/възраст от заглавието: 'man' | 'woman' | 'child' | null.
+ *
+ * Защо е твърдо правило: „Слип-он маратонки Bench, тъмнозелени“ и „ДАМСКИ
+ * маратонки Bench, бели“ са различни продукти, макар марката и думите
+ * „маратонки Bench“ да съвпадат. Ако едното заглавие казва „мъжки“, а другото
+ * „дамски“ — не са същият продукт, край.
+ */
+export function genderOf(title: string): 'man' | 'woman' | 'child' | null {
+  const t = String(title ?? '').toLowerCase();
+  if (/дет|момч|момич|беб|хлап|kids?\b|junior/.test(t)) return 'child';
+  if (/мъж|men\b|male/.test(t)) return 'man';
+  if (/дам|женск|women\b|woman\b|female|ladies/.test(t)) return 'woman';
+  return null;
+}
+
+/** Основен цвят от заглавието (за да не се сравняват черни с тъмнозелени). */
+export function colorOf(title: string): string | null {
+  const t = String(title ?? '').toLowerCase();
+  const map: Array<[string, RegExp]> = [
+    ['black', /черн|black|schwarz/],
+    ['white', /бял|бел\b|бели|бело|white|weiss|weiß/],
+    ['green', /зелен|green|grun|grün/],
+    ['blue', /син\b|сини|синя|сино|светлосин|тъмносин|blue|blau/],
+    ['red', /червен|червон|red|rot/],
+    ['yellow', /жълт|yellow|gelb/],
+    ['purple', /лилав|purple|violett|lila/],
+    ['pink', /розов|pink|rosa/],
+    ['brown', /кафяв|тъмнокафяв|brown|braun/],
+    ['beige', /бежов|нюд|beige|nude/],
+    ['grey', /сив|grey|gray|grau/],
+    ['orange', /оранж|orange/],
+  ];
+  for (const [name, re] of map) {
+    if (re.test(t)) return name;
+  }
+  return null;
+}
+
+/** Съвместими ли са полът/възрастта и цветът на двете оферти. */
+export function attributesCompatible(titleA: string, titleB: string): boolean {
+  const ga = genderOf(titleA);
+  const gb = genderOf(titleB);
+  if (ga && gb && ga !== gb) return false;
+  const ca = colorOf(titleA);
+  const cb = colorOf(titleB);
+  if (ca && cb && ca !== cb) return false;
+  return true;
+}
+
+/** Идентификатор на артикула от адреса в магазина (напр. deichmann -15168). */
+function urlItemId(url?: string | null): string | null {
+  const m = String(url ?? '').match(/(\d{3,})(?=[^\d]*$)/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Същият магазин ли е (за да не се сравняват оферти на една и съща верига).
+ *
+ * Защо: „конкуренция“ значи ДРУГ доставчик. Ако и двете са от deichmann.com,
+ * това са варианти на каталога (друг цвят, друг модел) — и дори когато адресът
+ * е същият, цената е същата, тоест няма нищо за сравняване. Ако е същият
+ * магазин и артикулът в адреса е РАЗЛИЧЕН — категорично не е същият продукт.
+ */
+export function sameShopDifferentItem(
+  placeA: string | null | undefined,
+  urlA: string | null | undefined,
+  placeB: string | null | undefined,
+  urlB: string | null | undefined
+): boolean {
+  const shopA = String(placeA ?? '').trim().toLowerCase();
+  const shopB = String(placeB ?? '').trim().toLowerCase();
+  if (!shopA || shopA !== shopB) return false;
+  const idA = urlItemId(urlA);
+  const idB = urlItemId(urlB);
+  if (idA && idB) return idA !== idB;
+  // Същият магазин без разпознаваем артикул в адреса → не сравняваме изобщо.
+  return true;
+}
+
 export type Verdict = 'cheapest' | 'similar' | 'pricier' | 'rip-off';
 
 export interface TwinOffer {
@@ -202,11 +282,12 @@ interface CandidateRow {
   created_at: string | null;
   address: string | null;
   google_maps_url: string | null;
+  source_url: string | null;
 }
 
 const CANDIDATE_COLUMNS = `p.id, p.public_code, p.title, p.price_paid::float as price,
   p.place_name, p.city, p.source, p.platform_tag, p.image_url,
-  p.created_at::text as created_at, p.address, p.google_maps_url`;
+  p.created_at::text as created_at, p.address, p.google_maps_url, p.source_url`;
 
 function verdictFor(saving: number, savingPct: number, twinCount: number): Verdict {
   if (twinCount === 0) return 'cheapest';
@@ -267,8 +348,14 @@ function toTwin(row: CandidateRow, myPrice: number, similarity: number): TwinOff
  * по-добре нищо, отколкото празна карта).
  */
 export async function priceDuel(postId: string): Promise<PriceDuel | null> {
-  const mine = await many<{ id: string; title: string; price: number }>(
-    `select id, title, price_paid::float as price from posts
+  const mine = await many<{
+    id: string;
+    title: string;
+    price: number;
+    place_name: string | null;
+    source_url: string | null;
+  }>(
+    `select id, title, price_paid::float as price, place_name, source_url from posts
       where id = $1 and status = 'published'`,
     [postId]
   );
@@ -290,6 +377,10 @@ export async function priceDuel(postId: string): Promise<PriceDuel | null> {
     if (!isSameProduct(myTokens, tokens)) continue;
     // Размер/модел/разфасовка трябва да си съвпадат (иначе 60 табл. срещу 120).
     if (!sizeCompatible(me.title, row.title)) continue;
+    // Пол/възраст и цвят: „мъжки“ ≠ „дамски“, „тъмнозелени“ ≠ „черни“.
+    if (!attributesCompatible(me.title, row.title)) continue;
+    // Конкуренция = ДРУГ доставчик. Същата верига с друг артикул не се брои.
+    if (sameShopDifferentItem(me.place_name, me.source_url, row.place_name, row.source_url)) continue;
     const dedupeKey = `${(row.place_name ?? '').trim().toLowerCase()}|${row.price}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
@@ -346,8 +437,14 @@ export async function compareForPosts(
   const out = new Map<string, PriceCompareLight & { twinTitles: string[] }>();
   if (!ids.length) return out;
 
-  const mine = await many<{ id: string; title: string; price: number }>(
-    `select id, title, price_paid::float as price from posts
+  const mine = await many<{
+    id: string;
+    title: string;
+    price: number;
+    place_name: string | null;
+    source_url: string | null;
+  }>(
+    `select id, title, price_paid::float as price, place_name, source_url from posts
       where status = 'published' and id = any($1::uuid[])`,
     [ids]
   );
@@ -374,6 +471,10 @@ export async function compareForPosts(
     for (const c of withTokens) {
       if (!isSameProduct(myTokens, c.tokens)) continue;
       if (!sizeCompatible(row.title, c.row.title)) continue;
+      // Пол/възраст и цвят трябва да са съвместими (мъжки ≠ дамски).
+      if (!attributesCompatible(row.title, c.row.title)) continue;
+      // Същата верига с друг артикул не е конкурент.
+      if (sameShopDifferentItem(row.place_name, row.source_url, c.row.place_name, c.row.source_url)) continue;
       const sim = titleSimilarity(myTokens, c.tokens);
       // В чипа в лентата влизат само почти идентични заглавия — иначе човекът
       // вижда твърдение „по-скъпо с 80%“, което се отнася за друг вариант на
