@@ -1451,6 +1451,25 @@ export async function loadObjectForPost(postId: string): Promise<ObjectDetail> {
   return rawRequest<ObjectDetail>('/api/objects/by-post/' + encodeURIComponent(postId));
 }
 
+/**
+ * 🔎 Офертите на един обект/магазин — с търсене и страници.
+ *
+ * Защо не през loadObject: той връща само първите 80 оферти. В магазин с 200+
+ * продукта човекът не можеше да намери нищо, затова търсенето върви на сървъра.
+ */
+export async function loadObjectOffers(
+  slug: string,
+  query: { q?: string; limit?: number; offset?: number } = {}
+): Promise<{ total: number; items: ObjectSignal[] }> {
+  const params = new URLSearchParams();
+  if (query.q?.trim()) params.set('q', query.q.trim());
+  params.set('limit', String(query.limit ?? 30));
+  params.set('offset', String(query.offset ?? 0));
+  return rawRequest<{ total: number; items: ObjectSignal[] }>(
+    `/api/objects/${encodeURIComponent(slug)}/offers?${params.toString()}`
+  );
+}
+
 /** Търсене на обекти по име или град. */
 export async function searchObjects(
   query: string,

@@ -4,7 +4,13 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { loadObject, searchObjects, slugForPost, cheapestShopsByCategory } from '../lib/objects.js';
+import {
+  cheapestShopsByCategory,
+  loadObject,
+  searchObjectOffers,
+  searchObjects,
+  slugForPost,
+} from '../lib/objects.js';
 import { notFound } from '../lib/errors.js';
 
 export default async function objectRoutes(app: FastifyInstance): Promise<void> {
@@ -57,6 +63,26 @@ export default async function objectRoutes(app: FastifyInstance): Promise<void> 
   });
 
   /** Страница на един обект: статистика, история на цените, всички сигнали. */
+  /**
+   * 🔎 Офертите на един обект/магазин — с търсене и страници.
+   * Публичен, защото е част от разглеждането (същото като страницата на обекта).
+   */
+  app.get('/api/objects/:slug/offers', async (req) => {
+    const params = z
+      .object({
+        slug: z.string().trim().min(8).max(64),
+      })
+      .parse(req.params ?? {});
+    const input = z
+      .object({
+        q: z.string().trim().max(80).optional(),
+        limit: z.coerce.number().int().min(1).max(60).default(30),
+        offset: z.coerce.number().int().min(0).max(5000).default(0),
+      })
+      .parse(req.query ?? {});
+    return searchObjectOffers(params.slug, input);
+  });
+
   app.get('/api/objects/:slug', async (req) => {
     const params = z.object({ slug: z.string().trim().min(8).max(64) }).parse(req.params ?? {});
     const data = await loadObject(params.slug);

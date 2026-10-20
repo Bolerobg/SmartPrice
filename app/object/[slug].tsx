@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,7 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { formatMoney, formatRelativeTime, formatNumber, unitLabel } from '@/src/lib/format';
-import { loadObject, type ObjectDetail, type ObjectSignal } from '@/src/api/client';
+import { loadObject, loadObjectOffers, type ObjectDetail, type ObjectSignal } from '@/src/api/client';
 
 const CATEGORY_LABELS: Record<string, string> = {
   restaurants: 'Заведения',
@@ -89,6 +90,48 @@ export default function ObjectScreen() {
   const [error, setError] = useState('');
   /** Показваме работното време за всички дни, а не само за днес. */
   const [showWeek, setShowWeek] = useState(false);
+
+  /**
+   * 🔎 Търсене в офертите на ТОЗИ обект/магазин (сървърно, с пагинация).
+   *
+   * Защо не филтрираме в паметта: страницата получава само първите 80 оферти, а
+   * магазин като deichmann.com има 202 — търсенето в паметта щеше да пропуска
+   * продукти. Затова питаме сървъра и добавяме „Зареди още“.
+   */
+  const [offers, setOffers] = useState<ObjectSignal[]>([]);
+  const [offersTotal, setOffersTotal] = useState(0);
+  const [offersQ, setOffersQ] = useState('');
+  const [offersBusy, setOffersBusy] = useState(false);
+
+  const loadOffers = React.useCallback(
+    async (q: string, offset: number, append: boolean) => {
+      if (!slug) return;
+      setOffersBusy(true);
+      try {
+        const res = await loadObjectOffers(String(slug), { q, limit: 30, offset });
+        setOffers((prev) => {
+          if (!append) return res.items;
+          const seen = new Set(prev.map((o) => o.id));
+          return [...prev, ...res.items.filter((o) => !seen.has(o.id))];
+        });
+        if (!append) setOffersTotal(Number(res.total) || 0);
+      } catch {
+        if (!append) {
+          setOffers([]);
+          setOffersTotal(0);
+        }
+      } finally {
+        setOffersBusy(false);
+      }
+    },
+    [slug]
+  );
+
+  // Първо зареждане + търсене с изчакване, за да не питаме на всяка буква.
+  useEffect(() => {
+    const t = setTimeout(() => void loadOffers(offersQ.trim(), 0, false), offersQ ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [offersQ, loadOffers]);
 
   useEffect(() => {
     let alive = true;
@@ -434,11 +477,62 @@ export default function ObjectScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            🛒 Всички оферти ({formatNumber(o.signals_count)})
+            🛒 Всички оферти ({formatNumber(offersTotal || o.signals_count)})
           </Text>
-          {data.signals.map((s) => (
+
+          {/* 🔎 Търсачка В САМИЯ магазин: с 200+ продукта човекът не може да
+              намери нищо без нея. Търси на сървъра (заглавие, описание, код). */}
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={17} color={COLORS.textSecondary} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={data.is_shop ? 'Търси продукт в магазина (напр. Wera, батерия)…' : 'Търси в офертите на обекта…'}
+              placeholderTextColor={COLORS.textMuted}
+              value={offersQ}
+              onChangeText={setOffersQ}
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
+            {offersQ.length > 0 ? (
+              <TouchableOpacity onPress={() => setOffersQ('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={17} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {offersQ.trim() ? (
+            <Text style={styles.hint}>
+              Намерени {formatNumber(offersTotal)} {offersTotal === 1 ? 'оферта' : 'оферти'} за „{offersQ.trim()}“
+            </Text>
+          ) : null}
+
+          {offers.map((s) => (
             <SignalRow key={s.id} signal={s} onPress={() => router.push(`/post/${s.id}` as never)} />
           ))}
+
+          {offersBusy && offers.length === 0 ? (
+            <ActivityIndicator color={COLORS.greenBright} style={{ marginVertical: 18 }} />
+          ) : null}
+
+          {!offersBusy && offers.length === 0 ? (
+            <Text style={styles.hint}>
+              {offersQ.trim() ? 'Няма такава оферта в този магазин.' : 'Още няма публикувани оферти.'}
+            </Text>
+          ) : null}
+
+          {offers.length > 0 && offers.length < offersTotal ? (
+            <TouchableOpacity
+              style={styles.ghostBtnSmall}
+              activeOpacity={0.85}
+              onPress={() => void loadOffers(offersQ.trim(), offers.length, true)}
+            >
+              <Text style={styles.ghostBtnSmallText}>
+                {offersBusy
+                  ? 'Зареждам…'
+                  : `Зареди още оферти (показвам ${offers.length} от ${offersTotal})`}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <Text style={[styles.hint, { textAlign: 'center', marginBottom: 24 }]}>
@@ -522,6 +616,20 @@ const styles = StyleSheet.create({
   sub: { color: COLORS.textSecondary, fontSize: 13.5, marginTop: 4 },
   body: { color: COLORS.textPrimary, fontSize: 14.5, marginTop: 6 },
   cardTitle: { color: COLORS.textPrimary, fontSize: 15.5, fontWeight: '800', marginBottom: 8 },
+  /* 🔎 Търсачка в офертите на обекта/магазина (под заглавието на картата). */
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.bgCardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    gap: 8,
+    marginBottom: 10,
+  },
+  searchInput: { flex: 1, color: COLORS.textPrimary, fontSize: 16 },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   pill: {
     paddingHorizontal: 9,

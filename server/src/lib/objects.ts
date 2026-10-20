@@ -478,3 +478,61 @@ export async function slugForPost(postId: string): Promise<string | null> {
   );
   return row?.slug ?? null;
 }
+
+/**
+ * 🔎 Търсене в офертите на ЕДИН обект/магазин (с пагинация).
+ *
+ * Защо съществува: страницата на обект връщаше само първите 80 оферти и в
+ * магазин с 200+ продукта човекът не можеше да намери нищо (нямаше търсачка).
+ * Тук търсим на СЪРВЪРА по заглавие, описание и код на офертата и връщаме
+ * страница по страница.
+ *
+ * Латиницата (марки като ANSMANN, Wera, домейни) се хваща с `ilike`, който е
+ * ASCII-безопасен, а кирилицата — със `sp_fold` (в C колация `lower()` не сгъва
+ * кирилица, затова са нужни двете).
+ */
+export async function searchObjectOffers(
+  slug: string,
+  params: { q?: string; limit?: number; offset?: number }
+): Promise<{ total: number; items: ObjectSignal[] }> {
+  const key = String(slug ?? '').trim().slice(0, 64);
+  if (!/^[0-9a-f]{32}$/.test(key)) return { total: 0, items: [] };
+  const q = String(params.q ?? '').trim().slice(0, 80);
+  const limit = Math.max(1, Math.min(60, Number(params.limit ?? 30) || 30));
+  const offset = Math.max(0, Math.min(5000, Number(params.offset ?? 0) || 0));
+
+  const args: unknown[] = [key];
+  let search = '';
+  if (q) {
+    args.push(`%${q}%`);
+    const p = `$${args.length}`;
+    search = ` and (p.title ilike ${p}
+                 or sp_fold(p.title) like lower(${p})
+                 or p.description ilike ${p}
+                 or sp_fold(p.description) like lower(${p})
+                 or upper(replace(p.public_code, '-', '')) like upper(replace(${p}, '-', '')))`;
+  }
+  const where = `p.status = 'published'
+      and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1${search}`;
+
+  const items = await many<ObjectSignal>(
+    `select p.id::text, p.source, p.title, p.description, p.polarity, p.category, p.price_paid::float,
+            p.currency, p.image_url, p.created_at::text, p.helped_count,
+            p.unit_quantity::float, p.unit_type, p.price_per_unit::float,
+            p.is_fake_promo, p.is_shrinkflation, r.verified_by_ai,
+            nullif(btrim(coalesce(r.merchant_name,'')),'') as merchant_name,
+            nullif(btrim(coalesce(r.merchant_tax_id,'')),'') as merchant_tax_id
+       from posts p
+       left join receipts r on r.post_id = p.id
+      where ${where}
+      order by p.created_at desc
+      limit ${limit} offset ${offset}`,
+    [...args, limit, offset]
+  );
+
+  const total = await one<{ n: string }>(
+    `select count(*)::text as n from posts p where ${where}`,
+    args
+  );
+  return { total: Number(total?.n ?? 0) || 0, items };
+}
