@@ -274,6 +274,17 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     // бутона му (или директен адрес /assistant) хвърляше госта обратно в
     // потока и чатът изглеждаше „счупен“ — нищо не се отваряше.
     const isPublicAssistant = segments[0] === 'assistant';
+    /**
+     * Публични информационни екрани: обект/магазин (`/object/<slug>`),
+     * „всички оферти на обекта“ (`/place/<slug>`) и табът „Магазини“ (`/shops`).
+     *
+     * Защо: тези екрани показват само публична информация (цени, оферти) и са
+     * част от разглеждането — гостът трябва да може да ги отвори, без да го
+     * хвърляме на екрана за вход. Преди това линк към обект „не правеше нищо“.
+     */
+    const isPublicObject = segments[0] === 'object';
+    const isPublicPlace = segments[0] === 'place';
+    const isPublicShops = segments[0] === 'shops';
 
     // ПЪРВО ПУСКАНЕ / НОВА ВЕРСИЯ НА ОБЯСНЕНИЕТО: интерактивното обяснение
     // (13 екрана) излиза веднага след сплаша — и на гости, и на ВЛЕЗЛИ.
@@ -298,7 +309,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       !isPublicTour &&
       !isPublicPost &&
       !isPublicRaffle &&
-      !isPublicAssistant
+      !isPublicAssistant &&
+      !isPublicObject &&
+      !isPublicPlace &&
+      !isPublicShops
     ) {
       introShownRef.current = true;
       router.replace('/(auth)/onboarding');
@@ -312,6 +326,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         !isPublicTour &&
         !isPublicRaffle &&
         !isPublicAssistant &&
+        !isPublicObject &&
+        !isPublicPlace &&
+        !isPublicShops &&
         !isTabs
       ) {
         // Първото пускане води до обяснението, после директно в потока.

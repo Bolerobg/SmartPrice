@@ -1349,6 +1349,8 @@ export function storyCardUrl(params: {
 export interface ObjectSummary {
   slug: string;
   place_name: string;
+  /** Онлайн магазин ли е (тогава не се брои за обект в класациите). */
+  is_shop?: boolean;
   city: string;
   signals_count: number;
   reporters_count: number;
@@ -1415,6 +1417,17 @@ export interface ObjectDetail {
   object: ObjectSummary;
   /** Онлайн магазин ли е (тогава статистиката на цените няма смисъл). */
   is_shop?: boolean;
+  /**
+   * За онлайн магазин: статистика ПО КАТЕГОРИИ (смислената).
+   * „Инструменти: 12 оферти, 8–140 €“ вместо „средно 41 €“.
+   */
+  categories_stats?: Array<{
+    category: string;
+    posts: number;
+    min_price: number;
+    avg_price: number;
+    max_price: number;
+  }>;
   /** Google Maps: рейтинг, отзиви, работно време. Може да липсва. */
   place?: ObjectPlace | null;
   signals: ObjectSignal[];
@@ -1436,10 +1449,12 @@ export async function loadObjectForPost(postId: string): Promise<ObjectDetail> {
 export async function searchObjects(
   query: string,
   city?: string,
-  limit = 20
+  limit = 20,
+  kind?: 'shop' | 'place'
 ): Promise<{ total: number; items: ObjectSummary[] }> {
   const parts = ['limit=' + limit];
   if (query.trim()) parts.push('q=' + encodeURIComponent(query.trim()));
   if (city && city.trim()) parts.push('city=' + encodeURIComponent(city.trim()));
+  if (kind) parts.push('kind=' + kind);
   return rawRequest<{ total: number; items: ObjectSummary[] }>('/api/objects?' + parts.join('&'));
 }

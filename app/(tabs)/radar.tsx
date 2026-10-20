@@ -514,6 +514,31 @@ export default function RadarScreen() {
                   </Text>
                 </View>
 
+                {/* 🛒 Онлайн магазините са ОТДЕЛНО: там са цели каталози (крушка
+                    за 0.35 € и машина за 1240 €), а тук са обекти с гласове от
+                    хора. Затова водят в своя списък, а не се смесват с класацията. */}
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => router.push('/shops' as never)}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    borderWidth: 1,
+                    borderColor: 'rgba(34,211,238,0.30)',
+                    backgroundColor: 'rgba(34,211,238,0.10)',
+                    borderRadius: 11,
+                    paddingHorizontal: 10,
+                    paddingVertical: 7,
+                  }}
+                >
+                  <Ionicons name="storefront-outline" size={13} color={COLORS.accentCyan} />
+                  <Text style={{ color: COLORS.accentCyan, fontSize: 11, fontWeight: '800' }}>
+                    🛒 Онлайн магазини — виж всички
+                  </Text>
+                  <Ionicons name="chevron-forward" size={13} color={COLORS.accentCyan} />
+                </TouchableOpacity>
+
                 {rankedVenues.map((v, idx) => (
                   <View
                     key={`${v.placeName}-${idx}`}

@@ -189,6 +189,10 @@ export default async function postRoutes(app: FastifyInstance) {
           -- пълнеше с онлайн магазини (sopharmacy.bg „206 доклада“), а черният
           -- списък — с „deichmann.com“.
           and coalesce(p.source, '') not in ('scraper', 'olx')
+          -- Онлайн магазините НЕ са обекти: Bazar.bg влизаше в класацията с
+          -- десетки оферти и изтласкваше истинските обекти. Те живеят в
+          -- отделния таб „Магазини“ (в приложението).
+          and v.place_name !~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'
           and btrim(coalesce(v.place_name, '')) <> ''
           and ($2::text is null or v.category = $2)
           and ($3::text is null or v.city = $3)

@@ -28,6 +28,8 @@ export interface ObjectPlace {
 export interface ObjectRow {
   slug: string;
   place_name: string;
+  /** Онлайн магазин ли е (не се брои за обект в класациите). */
+  is_shop?: boolean;
   city: string;
   signals_count: number;
   reporters_count: number;
@@ -83,6 +85,29 @@ export interface ObjectMonth {
   posts: number;
 }
 
+export interface ObjectCategoryStat {
+  category: string;
+  posts: number;
+  min_price: number;
+  avg_price: number;
+  max_price: number;
+}
+
+/**
+ * Онлайн магазин ли е това име?
+ *
+ * Защо е нужно: обект = място + град и е замислен за ЗАВЕДЕНИЕ, където се
+ * сравнява едно и също нещо. Когато скраперът внесе цял онлайн магазин, в един
+ * „обект“ влизат крушка за 0.35 € и машина за 1240 €. Такива магазини НЕ се
+ * броят за обекти в класациите (черен списък / „Честно място“) — показваме ги
+ * в отделен таб „Магазини“ със статистика ПО КАТЕГОРИИ.
+ */
+export function isShopName(placeName: string | null | undefined): boolean {
+  return /^[a-z0-9][a-z0-9.-]*\.(bg|com|net|org|eu|de|gr|ro|info|shop)$/i.test(
+    String(placeName ?? '').trim()
+  );
+}
+
 const OBJECT_COLUMNS = `
   slug, place_name, city, signals_count, reporters_count, green_count, red_count,
   min_price, max_price, avg_price, last_seen::text, first_seen::text, helped_total,
@@ -94,6 +119,8 @@ export async function searchObjects(params: {
   q?: string;
   city?: string;
   sort?: 'signals' | 'recent' | 'price';
+  /** 'shop' = само онлайн магазини, 'place' = само обекти на място. */
+  kind?: 'shop' | 'place';
   limit?: number;
   offset?: number;
 }): Promise<{ total: number; items: ObjectRow[] }> {
@@ -102,6 +129,7 @@ export async function searchObjects(params: {
   const limit = Math.max(1, Math.min(60, Number(params.limit ?? 20) || 20));
   const offset = Math.max(0, Math.min(5000, Number(params.offset ?? 0) || 0));
   const sort = params.sort === 'recent' ? 'recent' : params.sort === 'price' ? 'price' : 'signals';
+  const kind = params.kind === 'shop' || params.kind === 'place' ? params.kind : undefined;
   const order =
     sort === 'recent'
       ? 'last_seen desc'
@@ -119,6 +147,10 @@ export async function searchObjects(params: {
     args.push(city);
     where.push(`city ilike $${args.length}`);
   }
+  // Онлайн магазините и обектите на място се показват в РАЗЛИЧНИ списъци:
+  // в „Черен списък“/„Честни места“ няма място за каталог на магазин.
+  if (kind === 'shop') where.push(`place_name ~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'`);
+  if (kind === 'place') where.push(`place_name !~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'`);
   const clause = where.length ? 'where ' + where.join(' and ') : '';
 
   const rows = await many<ObjectRow>(
@@ -129,7 +161,10 @@ export async function searchObjects(params: {
     `select count(*)::text as n from v_objects ${clause}`,
     args
   );
-  return { total: Number(total?.n ?? 0) || 0, items: rows };
+  return {
+    total: Number(total?.n ?? 0) || 0,
+    items: rows.map((r) => ({ ...r, is_shop: isShopName(r.place_name) })),
+  };
 }
 
 /** Пълен профил на един обект: статистика, история на цените и всички сигнали. */
@@ -140,6 +175,8 @@ export async function loadObject(slug: string): Promise<{
   months: ObjectMonth[];
   /** Онлайн магазин ли е (тогава статистиката за цени няма смисъл). */
   is_shop: boolean;
+  /** Статистика ПО КАТЕГОРИИ — смислената статистика за онлайн магазин. */
+  categories_stats: ObjectCategoryStat[];
   /** Google Maps: рейтинг, отзиви, работно време. null, ако още не е обогатен. */
   place: ObjectPlace | null;
 } | null> {
@@ -215,10 +252,40 @@ export async function loadObject(slug: string): Promise<{
    * офертите идват от скрапера.
    */
   const isShop =
-    /^[a-z0-9][a-z0-9.-]*\.(bg|com|net|org|eu|de|gr|ro)$/i.test(String(object.place_name ?? '').trim()) ||
+    isShopName(object.place_name) ||
     (signals.length > 0 && signals.every((s) => s.source === 'scraper'));
 
-  return { object, signals, history, months, is_shop: isShop, place: place ?? null };
+  /**
+   * За онлайн магазин „средна цена 41.86 €“ е безсмислица (крушка + машина).
+   * Смисленото е ПО КАТЕГОРИИ: „Инструменти: 12 оферти, 8–140 €“.
+   */
+  const categoriesStats = isShop
+    ? await many<ObjectCategoryStat>(
+        `select p.category,
+                count(*)::int as posts,
+                min(p.price_paid)::float as min_price,
+                avg(p.price_paid)::float as avg_price,
+                max(p.price_paid)::float as max_price
+           from posts p
+          where p.status = 'published'
+            and p.price_paid > 0
+            and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1
+          group by 1
+          order by 2 desc
+          limit 12`,
+        [key]
+      )
+    : [];
+
+  return {
+    object,
+    signals,
+    history,
+    months,
+    is_shop: isShop,
+    categories_stats: categoriesStats,
+    place: place ?? null,
+  };
 }
 
 /** Слугът на обекта, към който принадлежи даден пост (за бутона в офертата). */

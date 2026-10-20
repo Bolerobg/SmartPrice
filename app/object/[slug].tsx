@@ -188,12 +188,26 @@ export default function ObjectScreen() {
             За заведение/магазин на място статистиката си остава полезна.
           */}
           {data.is_shop ? (
-            <View style={styles.stat}>
-              <Text style={styles.statLabel}>Онлайн магазин · цени по каталога</Text>
+            <View>
+              <Text style={styles.statLabel}>Онлайн магазин · цени по категории</Text>
               <Text style={styles.hint}>
-                Тук са офертите от целия каталог на магазина — от евтини до скъпи, затова не показваме
-                „средна“ и „най-висока“ цена (няма как да се сравни крушка с машина). Виж офертите долу.
+                Един онлайн магазин продава крушка за 0.35 € и машина за 1240 € — затова обща „средна
+                цена“ не значи нищо. Ето истинската картина: по категории.
               </Text>
+              {(data.categories_stats ?? []).map((c) => (
+                <View key={c.category} style={styles.stat}>
+                  <Text style={styles.statValue} numberOfLines={1}>
+                    {CATEGORY_LABELS[c.category] || c.category}
+                  </Text>
+                  <Text style={styles.hint}>
+                    {c.posts} оферти · от {Number(c.min_price).toFixed(2)} € до{' '}
+                    {Number(c.max_price).toFixed(2)} € · средно {Number(c.avg_price).toFixed(2)} €
+                  </Text>
+                </View>
+              ))}
+              {(data.categories_stats ?? []).length === 0 ? (
+                <Text style={styles.hint}>Още няма внесени оферти с цени.</Text>
+              ) : null}
             </View>
           ) : (
             <View style={styles.statsRow}>

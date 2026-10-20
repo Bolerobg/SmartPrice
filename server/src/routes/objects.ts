@@ -15,12 +15,20 @@ export default async function objectRoutes(app: FastifyInstance): Promise<void> 
         q: z.string().trim().max(80).optional(),
         city: z.string().trim().max(80).optional(),
         sort: z.enum(['signals', 'recent', 'price']).optional(),
+        // 'shop' = онлайн магазини (таб „Магазини“), 'place' = обекти на място.
+        kind: z.enum(['shop', 'place']).optional(),
         limit: z.coerce.number().int().min(1).max(60).default(20),
         offset: z.coerce.number().int().min(0).max(5000).default(0),
       })
       .parse(req.query ?? {});
     const res = await searchObjects(input);
-    return { ...res, query: input.q ?? '', city: input.city ?? '', sort: input.sort ?? 'signals' };
+    return {
+      ...res,
+      query: input.q ?? '',
+      city: input.city ?? '',
+      sort: input.sort ?? 'signals',
+      kind: input.kind ?? 'place',
+    };
   });
 
   /** Страница на един обект: статистика, история на цените, всички сигнали. */
