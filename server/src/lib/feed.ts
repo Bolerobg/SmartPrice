@@ -118,7 +118,7 @@ function buildWhere(filters: FeedFilters): Where {
               -- ЛАТИНСКИ ТЕКСТ (марки, домейни): sp_fold() сгъва кирилица, но НЕ
               -- пипа латиницата, затова „ANSMANN“, „bauhaus“, „Deichmann“ не се
               -- намираха (проверено 20.10.2026: q=ANSMANN → 0 резултата).
-              -- `ilike` работи за ASCII и в C колация — затова е отделен клон.
+              -- ilike работи за ASCII и в C колация — затова е отделен клон.
               or p.title ilike ${p}
               or p.place_name ilike ${p}
               or p.description ilike ${p}
