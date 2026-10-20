@@ -527,7 +527,7 @@ export async function searchObjectOffers(
       where ${where}
       order by p.created_at desc
       limit ${limit} offset ${offset}`,
-    [...args, limit, offset]
+    args
   );
 
   const total = await one<{ n: string }>(
