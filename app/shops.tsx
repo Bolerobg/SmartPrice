@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -12,9 +12,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { goBack } from '@/src/lib/navigation';
-import { COLORS } from '@/constants/theme';
-import { searchObjects } from '@/src/api/client';
-import type { ObjectSummary } from '@/src/api/client';
+import { CATEGORIES, COLORS } from '@/constants/theme';
+import { bestValueCategories, searchObjects } from '@/src/api/client';
+import type { BestValueCategory, ObjectSummary } from '@/src/api/client';
+
+/** Кратките имена на категориите — същите, които виждаш в радара. */
+const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  CATEGORIES.map((c) => [c.id, c.shortLabel])
+);
 
 /**
  * 🛒 „Онлайн магазини“ — отделен списък от обектите на място.
@@ -25,13 +30,20 @@ import type { ObjectSummary } from '@/src/api/client';
  * в един „обект“ влизат крушка за 0.35 € и машина за 1240 € — такива магазини
  * НЕ бива да стоят в „Черен списък“ и „Честни места“.
  *
- * Тук са магазините, подредени по брой оферти, с диапазон на цените. Натискането
- * отваря страницата на магазина, където статистиката е ПО КАТЕГОРИИ (смислената).
+ * Тук са магазините, подредени по брой оферти, с диапазон на цените и — когато
+ * е ЧЕСТНО — значка 🥇 „най-изгодни цени“ за категорията. Натискането отваря
+ * страницата на магазина, където статистиката е ПО КАТЕГОРИИ (смислената).
  */
 export default function ShopsScreen() {
   const router = useRouter();
   const [items, setItems] = useState<ObjectSummary[]>([]);
   const [total, setTotal] = useState(0);
+  /**
+   * 🥇 Кой магазин е най-изгоден в коя категория (сметката е на сървъра).
+   * Значката не се дава „за всеки“: иска ≥3 оферти с цена в категорията, поне
+   * 2 магазина за сравнение и ≥5 % по-ниска ТИПИЧНА цена от следващия магазин.
+   */
+  const [badges, setBadges] = useState<Record<string, BestValueCategory[]>>({});
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -39,13 +51,24 @@ export default function ShopsScreen() {
   const load = useCallback(async (q: string) => {
     setLoading(true);
     try {
-      const res = await searchObjects(q, undefined, 60, 'shop');
+      const [res, best] = await Promise.all([
+        searchObjects(q, undefined, 60, 'shop'),
+        // Значките са бонус — ако този endpoint се провали, списъкът пак се показва.
+        bestValueCategories().catch(() => ({ items: [] as BestValueCategory[] })),
+      ]);
       setItems(res.items ?? []);
       setTotal(Number(res.total) || 0);
+      const map: Record<string, BestValueCategory[]> = {};
+      for (const b of best.items ?? []) {
+        if (!map[b.slug]) map[b.slug] = [];
+        map[b.slug].push(b);
+      }
+      setBadges(map);
       setError('');
     } catch {
       setItems([]);
       setTotal(0);
+      setBadges({});
       setError('Не успях да заредя магазините. Провери връзката.');
     } finally {
       setLoading(false);
@@ -57,6 +80,12 @@ export default function ShopsScreen() {
     const t = setTimeout(() => void load(query.trim()), 350);
     return () => clearTimeout(t);
   }, [query, load]);
+
+  /** Колко значки 🥇 има в показания списък (за реда „N значки в момента“). */
+  const badgeCount = useMemo(
+    () => items.reduce((n, it) => n + (badges[it.slug]?.length ?? 0), 0),
+    [items, badges]
+  );
 
   return (
     <SafeAreaView style={styles.root}>
@@ -90,6 +119,18 @@ export default function ShopsScreen() {
                     🏷️ {item.categories.slice(0, 4).join(' · ')}
                   </Text>
                 ) : null}
+
+                {/* 🥇 Значките са ЧЕСТНИ: дават се само когато магазинът е поне
+                    5 % под следващия в категорията (сметката е на сървъра). */}
+                {(badges[item.slug] ?? []).slice(0, 3).map((b) => (
+                  <View key={b.category} style={styles.badge}>
+                    <Text style={styles.badgeText} numberOfLines={2}>
+                      🥇 Най-изгодни цени: {CATEGORY_LABELS[b.category] || b.category} · −
+                      {b.saving_pct}% под{b.next_place_name ? ` ${b.next_place_name}` : ' следващия'} (
+                      {b.posts} оферти, {b.shops_compared} магазина сравнени)
+                    </Text>
+                  </View>
+                ))}
               </View>
               <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
             </View>
@@ -124,6 +165,19 @@ export default function ShopsScreen() {
               списък“ и „Честни места“ — там са местата, за които хората сигнализират (заведения,
               магазини на място), а тук са целите каталози.
             </Text>
+
+            {/* Прозрачност: кажи КАК се дава значката 🥇, за да няма „защо този, а не онзи“. */}
+            <View style={styles.ruleBox}>
+              <Text style={styles.ruleText}>
+                🥇 „Най-изгодни цени“ = по-ниска ТИПИЧНА (медианна) цена от следващия магазин в
+                същата категория с поне 5 %, при поне 5 оферти на победителя, поне 3 оферти на
+                останалите и поне 2 магазина за сравнение. Сравняваме по категория, не по целия
+                каталог (крушка ≠ машина).
+              </Text>
+              {badgeCount > 0 ? (
+                <Text style={styles.ruleCount}>{badgeCount} значки в момента</Text>
+              ) : null}
+            </View>
 
             <View style={styles.searchBar}>
               <Ionicons name="search" size={18} color={COLORS.textSecondary} />
@@ -165,6 +219,19 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: COLORS.textPrimary, fontSize: 19, fontWeight: '900' },
   subtitle: { color: COLORS.textSecondary, fontSize: 12.5, lineHeight: 18, marginBottom: 12 },
+  /* Прозрачност: как се дава 🥇 — за да няма „защо този магазин, а не онзи“. */
+  ruleBox: {
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    backgroundColor: COLORS.goldSoftBg,
+    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    gap: 5,
+    marginBottom: 12,
+  },
+  ruleText: { color: COLORS.textSecondary, fontSize: 11, lineHeight: 16 },
+  ruleCount: { color: COLORS.goldBright, fontSize: 11, fontWeight: '900' },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -201,6 +268,18 @@ const styles = StyleSheet.create({
   name: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '900' },
   meta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 3, fontWeight: '700' },
   cats: { color: COLORS.textMuted, fontSize: 11, marginTop: 4 },
+  /* 🥇 Значка „най-изгодни цени в категорията“ — златна, за да се отличава. */
+  badge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    backgroundColor: COLORS.goldSoftBg,
+    borderRadius: 9,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  badgeText: { color: COLORS.goldBright, fontSize: 10.5, fontWeight: '800' },
   empty: {
     alignItems: 'center',
     gap: 10,

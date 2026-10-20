@@ -91,6 +91,12 @@ export interface ObjectCategoryStat {
   min_price: number;
   avg_price: number;
   max_price: number;
+  /** 🥇 Този магазин е най-изгодният в категорията (виж cheapestShopsByCategory). */
+  best_value?: boolean;
+  /** С колко % е под следващия магазин в категорията. */
+  saving_pct?: number;
+  /** Колко магазина се сравняват в категорията. */
+  shops_compared?: number;
 }
 
 /**
@@ -106,6 +112,137 @@ export function isShopName(placeName: string | null | undefined): boolean {
   return /^[a-z0-9][a-z0-9.-]*\.(bg|com|net|org|eu|de|gr|ro|info|shop)$/i.test(
     String(placeName ?? '').trim()
   );
+}
+
+/**
+ * Името изглежда ли като домейн (онлайн магазин) — същата проверка, но в SQL.
+ *
+ * Един източник на истина: ако някой ден сменим списъка с домейни, тук се пипа
+ * веднъж, а не на три места (иначе „Магазини“ и класацията започват да спорят).
+ */
+const SHOP_NAME_SQL = `place_name ~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'`;
+const PLACE_NAME_SQL = `place_name !~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'`;
+
+/**
+ * 🥇 Магазин, който е НАЙ-ИЗГОДЕН в дадена категория.
+ *
+ * Как се смята (и защо така): сравняваме магазините в ЕДНА категория по
+ * ТИПИЧНАТА им цена (медианата на офертите), не по „най-евтината оферта“ —
+ * иначе един евтин артикул прави целия магазин „най-изгоден“.
+ *
+ * Изисквания, за да има значка (честност):
+ *   • всеки магазин има поне `minPosts` оферти с цена в категорията (иначе 2
+ *     артикула решават класация на каталог от 500);
+ *   • ПОБЕДИТЕЛЯТ има поне `minWinnerPosts` оферти — с 3 артикула медианата е
+ *     случайна (проверено на живо: iskambg.com „печелеше“ с 3 оферти пред
+ *     каталог от 45);
+ *   • в категорията има поне 2 магазина за сравнение (сам в категорията не е
+ *     „най-изгоден“ — просто няма с кого да се сравни);
+ *   • медианата му е поне `minSavingPct` % под медианата на СЛЕДВАЩИЯ магазин
+ *     (разлика от 1 стотинка не е „най-изгоден“).
+ */
+export interface BestValueCategory {
+  category: string;
+  slug: string;
+  place_name: string;
+  /** Колко оферти с цена има този магазин в категорията. */
+  posts: number;
+  min_price: number;
+  max_price: number;
+  avg_price: number;
+  median_price: number;
+  /** Колко магазина се сравняват в тази категория. */
+  shops_compared: number;
+  /** С колко % типичната му цена е под следващия магазин. */
+  saving_pct: number;
+  /** Кой е следващият магазин (за да е ясно спрямо кого е разликата). */
+  next_place_name: string | null;
+  next_median: number | null;
+}
+
+export async function cheapestShopsByCategory(options?: {
+  minPosts?: number;
+  minWinnerPosts?: number;
+  minSavingPct?: number;
+  limit?: number;
+}): Promise<BestValueCategory[]> {
+  const minPosts = Math.max(2, Math.min(50, Number(options?.minPosts ?? 3) || 3));
+  const minWinnerPosts = Math.max(
+    minPosts,
+    Math.min(100, Number(options?.minWinnerPosts ?? 5) || 5)
+  );
+  const minSaving = Math.max(1, Math.min(50, Number(options?.minSavingPct ?? 5) || 5));
+  const limit = Math.max(1, Math.min(200, Number(options?.limit ?? 60) || 60));
+
+  const rows = await many<{
+    category: string;
+    slug: string;
+    place_name: string;
+    posts: number;
+    min_price: number;
+    max_price: number;
+    avg_price: number;
+    median_price: number;
+    shops_compared: number;
+    next_median: number | null;
+    next_place_name: string | null;
+  }>(
+    `with shop_posts as (
+       select md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) as slug,
+              p.place_name, p.category, p.price_paid::float as price
+         from posts p
+        where p.status = 'published' and p.price_paid > 0
+          and ${SHOP_NAME_SQL}
+     ),
+     per_shop as (
+       select slug, max(place_name) as place_name, category,
+              count(*)::int as posts,
+              min(price)::float as min_price,
+              max(price)::float as max_price,
+              avg(price)::float as avg_price,
+              percentile_cont(0.5) within group (order by price)::float as median_price
+         from shop_posts
+        group by slug, category
+       having count(*) >= $1
+     ),
+     ranked as (
+       select *,
+              count(*) over (partition by category)::int as shops_compared,
+              row_number() over (partition by category order by median_price asc, avg_price asc) as rn,
+              lead(median_price) over (partition by category order by median_price asc, avg_price asc) as next_median,
+              lead(place_name) over (partition by category order by median_price asc, avg_price asc) as next_place_name
+         from per_shop
+     )
+     select category, slug, place_name, posts, min_price, max_price, avg_price,
+            median_price, shops_compared, next_median, next_place_name
+       from ranked
+      where rn = 1
+        and shops_compared >= 2
+        and median_price > 0
+        and posts >= $4
+        and (next_median is null or median_price <= next_median * (1 - $2::float / 100.0))
+      order by shops_compared desc, category asc
+      limit $3`,
+    [minPosts, minSaving, limit, minWinnerPosts]
+  );
+
+  return rows.map((r) => ({
+    category: r.category,
+    slug: r.slug,
+    place_name: r.place_name,
+    posts: r.posts,
+    min_price: r.min_price,
+    max_price: r.max_price,
+    avg_price: r.avg_price,
+    median_price: r.median_price,
+    shops_compared: r.shops_compared,
+    next_place_name: r.next_place_name ?? null,
+    next_median: r.next_median ?? null,
+    saving_pct:
+      r.next_median && r.next_median > 0
+        ? Math.round((1 - r.median_price / r.next_median) * 100)
+        : 0,
+  }));
 }
 
 const OBJECT_COLUMNS = `
@@ -149,8 +286,8 @@ export async function searchObjects(params: {
   }
   // Онлайн магазините и обектите на място се показват в РАЗЛИЧНИ списъци:
   // в „Черен списък“/„Честни места“ няма място за каталог на магазин.
-  if (kind === 'shop') where.push(`place_name ~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'`);
-  if (kind === 'place') where.push(`place_name !~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'`);
+  if (kind === 'shop') where.push(SHOP_NAME_SQL);
+  if (kind === 'place') where.push(PLACE_NAME_SQL);
   const clause = where.length ? 'where ' + where.join(' and ') : '';
 
   const rows = await many<ObjectRow>(
@@ -277,13 +414,36 @@ export async function loadObject(slug: string): Promise<{
       )
     : [];
 
+  /**
+   * 🥇 „Най-изгодни цени“ — значката до категория.
+   *
+   * Смята се на едно място (`cheapestShopsByCategory`) и за списъка „Магазини“, и
+   * тук, за да не може екранът и списъкът да показват различни победители.
+   * Ако заявката се провали, страницата пак работи — просто без значка.
+   */
+  let categoriesWithBadges = categoriesStats;
+  if (isShop && categoriesStats.length > 0) {
+    try {
+      const winners = await cheapestShopsByCategory();
+      const mine = new Map(winners.filter((w) => w.slug === key).map((w) => [w.category, w]));
+      categoriesWithBadges = categoriesStats.map((c) => {
+        const w = mine.get(c.category);
+        return w
+          ? { ...c, best_value: true, saving_pct: w.saving_pct, shops_compared: w.shops_compared }
+          : c;
+      });
+    } catch {
+      categoriesWithBadges = categoriesStats;
+    }
+  }
+
   return {
     object,
     signals,
     history,
     months,
     is_shop: isShop,
-    categories_stats: categoriesStats,
+    categories_stats: categoriesWithBadges,
     place: place ?? null,
   };
 }

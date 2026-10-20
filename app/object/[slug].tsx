@@ -203,6 +203,16 @@ export default function ObjectScreen() {
                     {c.posts} оферти · от {Number(c.min_price).toFixed(2)} € до{' '}
                     {Number(c.max_price).toFixed(2)} € · средно {Number(c.avg_price).toFixed(2)} €
                   </Text>
+                  {/* 🥇 Значката идва от сървъра и се дава само при честни условия
+                      (≥3 оферти, ≥2 магазина за сравнение, ≥5 % по-ниска медиана). */}
+                  {c.best_value ? (
+                    <View style={styles.bestValueBadge}>
+                      <Text style={styles.bestValueText} numberOfLines={2}>
+                        🥇 Най-изгодни цени в категорията · −{c.saving_pct}% под следващия
+                        {c.shops_compared ? ` (${c.shops_compared} магазина сравнени)` : ''}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               ))}
               {(data.categories_stats ?? []).length === 0 ? (
@@ -539,6 +549,18 @@ const styles = StyleSheet.create({
   statLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600' },
   statValue: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800', marginTop: 3 },
   hint: { color: COLORS.textMuted, fontSize: 12, marginTop: 8 },
+  /* 🥇 „Най-изгодни цени в категорията“ — значката за онлайн магазин. */
+  bestValueBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: COLORS.goldBorder,
+    backgroundColor: COLORS.goldSoftBg,
+    borderRadius: 9,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  bestValueText: { color: COLORS.goldBright, fontSize: 10.5, fontWeight: '800' },
   chart: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 100, marginTop: 6 },
   barWrap: { flex: 1, justifyContent: 'flex-end' },
   bar: { borderTopLeftRadius: 3, borderTopRightRadius: 3, width: '100%' },

@@ -4,7 +4,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { loadObject, searchObjects, slugForPost } from '../lib/objects.js';
+import { loadObject, searchObjects, slugForPost, cheapestShopsByCategory } from '../lib/objects.js';
 import { notFound } from '../lib/errors.js';
 
 export default async function objectRoutes(app: FastifyInstance): Promise<void> {
@@ -28,6 +28,31 @@ export default async function objectRoutes(app: FastifyInstance): Promise<void> 
       city: input.city ?? '',
       sort: input.sort ?? 'signals',
       kind: input.kind ?? 'place',
+    };
+  });
+
+  /**
+   * 🥇 Кой магазин е най-изгоден в коя категория.
+   *
+   * ⚠️ ТРЯБВА да е ПРЕДИ `/api/objects/:slug`, иначе заявката влиза в маршрута с
+   * параметър и „best-value“ се търси като слуг (404).
+   *
+   * Значката се дава само при честни условия (виж `cheapestShopsByCategory`):
+   * ≥3 оферти с цена в категорията, поне 2 магазина за сравнение и поне 5 %
+   * по-ниска ТИПИЧНА (медианна) цена от следващия магазин.
+   */
+  app.get('/api/objects/best-value', async () => {
+    const items = await cheapestShopsByCategory();
+    return {
+      items,
+      /** Как се смята — показва се в приложението, за да не е загадка. */
+      rule: {
+        min_posts: 3,
+        min_winner_posts: 5,
+        min_shops_compared: 2,
+        min_saving_pct: 5,
+        metric: 'median_price',
+      },
     };
   });
 

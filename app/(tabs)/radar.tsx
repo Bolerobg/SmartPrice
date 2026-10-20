@@ -458,6 +458,31 @@ export default function RadarScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Третата голяма карта: 🛒 Онлайн магазините. Те са ОТДЕЛНО, защото са
+                цели каталози (крушка за 0.35 € и машина за 1240 €), а в другите две
+                карти са места с гласове от хора. Затова тази карта води в своя
+                екран, а не сменя лентата — но е същата голяма карта, не чипче. */}
+            <TouchableOpacity
+              style={[styles.modeCard, styles.modeCardShops]}
+              onPress={() => router.push('/shops' as never)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.modeHeader}>
+                <Ionicons name="storefront" size={20} color={COLORS.accentCyan} />
+                <Text style={[styles.modeCount, { color: COLORS.accentCyan }]}>КАТАЛОЗИ</Text>
+              </View>
+              <View style={styles.shopCardRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modeTitle}>Онлайн магазини</Text>
+                  <Text style={styles.modeDesc}>
+                    bauhaus, sopharmacy, praktis… Целият каталог с цени ПО КАТЕГОРИИ и значки 🥇
+                    „най-изгодни цени“.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.accentCyan} />
+              </View>
+            </TouchableOpacity>
+
             {/* 🏆 КЛАСАЦИЯ НА ОБЕКТИТЕ: Черен Списък vs Сертификат за Честно Място */}
             {rankedVenues.length > 0 && (
               <View
@@ -514,30 +539,8 @@ export default function RadarScreen() {
                   </Text>
                 </View>
 
-                {/* 🛒 Онлайн магазините са ОТДЕЛНО: там са цели каталози (крушка
-                    за 0.35 € и машина за 1240 €), а тук са обекти с гласове от
-                    хора. Затова водят в своя списък, а не се смесват с класацията. */}
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => router.push('/shops' as never)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    borderWidth: 1,
-                    borderColor: 'rgba(34,211,238,0.30)',
-                    backgroundColor: 'rgba(34,211,238,0.10)',
-                    borderRadius: 11,
-                    paddingHorizontal: 10,
-                    paddingVertical: 7,
-                  }}
-                >
-                  <Ionicons name="storefront-outline" size={13} color={COLORS.accentCyan} />
-                  <Text style={{ color: COLORS.accentCyan, fontSize: 11, fontWeight: '800' }}>
-                    🛒 Онлайн магазини — виж всички
-                  </Text>
-                  <Ionicons name="chevron-forward" size={13} color={COLORS.accentCyan} />
-                </TouchableOpacity>
+                {/* 🛒 Онлайн магазините имат своя голяма карта горе („Онлайн магазини“) —
+                    тук не повтаряме същото като чипче. */}
 
                 {rankedVenues.map((v, idx) => (
                   <View
@@ -795,7 +798,7 @@ const styles = StyleSheet.create({
   modeCardsRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   modeCard: {
     flex: 1,
@@ -805,6 +808,13 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 15,
   },
+  /* Третата голяма карта (онлайн магазините) — цялата ширина, циан акцент. */
+  modeCardShops: {
+    marginBottom: 14,
+    backgroundColor: COLORS.accentCyanSoftBg,
+    borderColor: COLORS.accentCyanBorder,
+  },
+  shopCardRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   modeCardRedActive: {
     backgroundColor: COLORS.redSoftBg,
     borderColor: COLORS.redBorder,

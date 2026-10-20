@@ -1427,6 +1427,12 @@ export interface ObjectDetail {
     min_price: number;
     avg_price: number;
     max_price: number;
+    /** 🥇 Най-изгодният магазин в тази категория ли е този. */
+    best_value?: boolean;
+    /** С колко % типичната му цена е под следващия магазин. */
+    saving_pct?: number;
+    /** Колко магазина се сравняват в категорията. */
+    shops_compared?: number;
   }>;
   /** Google Maps: рейтинг, отзиви, работно време. Може да липсва. */
   place?: ObjectPlace | null;
@@ -1457,4 +1463,48 @@ export async function searchObjects(
   if (city && city.trim()) parts.push('city=' + encodeURIComponent(city.trim()));
   if (kind) parts.push('kind=' + kind);
   return rawRequest<{ total: number; items: ObjectSummary[] }>('/api/objects?' + parts.join('&'));
+}
+
+/* ================= 🥇 „Най-изгодни цени“ по категории ================= */
+
+/**
+ * Магазин, който е най-изгоден в дадена категория.
+ *
+ * Смята се на сървъра по ТИПИЧНАТА (медианна) цена на офертите в категорията, а
+ * не по най-ниската единична оферта — иначе един евтин артикул „прави“ целия
+ * магазин най-изгоден. Значка се дава само при ≥3 оферти, ≥2 магазина за
+ * сравнение и ≥5 % по-ниска медиана от следващия.
+ */
+export interface BestValueCategory {
+  category: string;
+  slug: string;
+  place_name: string;
+  posts: number;
+  min_price: number;
+  max_price: number;
+  avg_price: number;
+  median_price: number;
+  shops_compared: number;
+  saving_pct: number;
+  /** Кой е следващият магазин в категорията (спрямо него е разликата). */
+  next_place_name: string | null;
+  next_median: number | null;
+}
+
+/** Правилото, по което се дава значката 🥇 (идва от сървъра — не се хардкодва в UI). */
+export interface BestValueRule {
+  min_posts: number;
+  min_winner_posts: number;
+  min_shops_compared: number;
+  min_saving_pct: number;
+  metric: string;
+}
+
+export async function bestValueCategories(): Promise<{
+  items: BestValueCategory[];
+  rule?: BestValueRule;
+}> {
+  return rawRequest<{ items: BestValueCategory[]; rule?: BestValueRule }>(
+    '/api/objects/best-value'
+  );
 }
