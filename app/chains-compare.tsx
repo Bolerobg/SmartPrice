@@ -69,7 +69,7 @@ export default function ChainsCompareScreen() {
                   {item.category}
                 </Text>
                 <Text style={styles.meta} numberOfLines={1}>
-                  {item.chains_compared} вериги сравнени · {item.cheapest_posts} оферти
+                  {item.matched_products} еднакви продукта в двете вериги · {item.chains_compared} вериги
                 </Text>
               </View>
               <View style={styles.diffPill}>
@@ -78,20 +78,20 @@ export default function ChainsCompareScreen() {
             </View>
 
             <View style={styles.row}>
-              <Text style={styles.rowLabel}>Най-евтино</Text>
+              <Text style={styles.rowLabel}>По-евтино</Text>
               <Text style={styles.rowValue} numberOfLines={1}>
                 {item.cheapest_chain} · {item.cheapest_median.toFixed(2)} €
               </Text>
             </View>
             <View style={styles.row}>
-              <Text style={styles.rowLabel}>Най-скъпо</Text>
+              <Text style={styles.rowLabel}>По-скъпо</Text>
               <Text style={[styles.rowValue, { color: COLORS.redBright }]} numberOfLines={1}>
                 {item.priciest_chain} · {item.priciest_median.toFixed(2)} €
               </Text>
             </View>
             <Text style={styles.diffLine}>
-              Разлика {item.diff_eur.toFixed(2)} € на същия продукт — {item.diff_pct}% по-скъпо в
-              най-скъпата верига
+              Същите {item.matched_products} продукта излизат с {item.diff_eur.toFixed(2)} € (
+              {item.diff_pct}%) повече в {item.priciest_chain}
             </Text>
           </View>
         )}
@@ -121,9 +121,9 @@ export default function ChainsCompareScreen() {
             </View>
 
             <Text style={styles.subtitle}>
-              По категории: къде е най-евтино и колко по-скъпо е на друго място. Сравняваме
-              ТИПИЧНАТА цена на всяка верига в категорията (не най-евтината оферта), затова
-              числата не са „промоции“, а какво плаща човек всеки ден.
+              Сравняваме САМО продуктите, които ги има и в двете вериги (един и същ продукт), и
+              показваме колко излизат те — не „средна цена на категорията“, където едната верига
+              продава шампоан, а другата парфюм. Затова числата са реални, не рекламни.
             </Text>
 
             <CityPickerDropdown

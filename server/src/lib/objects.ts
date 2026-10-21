@@ -288,8 +288,10 @@ export async function cheapestShopsByCategory(options?: {
 export interface ChainDifference {
   category: string;
   cheapest_chain: string;
+  /** Колко струват ОБЩИТЕ продукти в по-евтината верига (не „медиана на категорията“). */
   cheapest_median: number;
-  cheapest_posts: number;
+  /** Колко ОБЩИ продукта има в двете вериги (за честност: сравняваме едно и също). */
+  matched_products: number;
   priciest_chain: string;
   priciest_median: number;
   diff_eur: number;
@@ -306,64 +308,84 @@ export async function chainDifferences(options?: {
   const limit = Math.max(1, Math.min(60, Number(options?.limit ?? 24) || 24));
   const minPosts = Math.max(2, Math.min(50, Number(options?.minPosts ?? 5) || 5));
 
+  /**
+   * ⚠️ Защо НЕ сравняваме „медианата на категорията“ между вериги: категорията е
+   * широка („Хигиена и козметика“), а асортиментите се различават — Лидл продава
+   * шампоан за 1.10 €, Douglas парфюм за 19.94 € и излизаше „−94%“, което е
+   * безсмислица и подвежда. Затова сравняваме САМО продуктите, които ги има и в
+   * двете вериги (един и същ продукт = един и същ canonical адрес), и казваме
+   * колко общи продукта са.
+   */
   const rows = await many<{
     category: string;
-    cheapest_chain: string;
-    cheapest_median: number;
-    cheapest_posts: number;
-    priciest_chain: string;
-    priciest_median: number;
+    a_chain: string;
+    b_chain: string;
+    matched: number;
+    a_total: number;
+    b_total: number;
+    a_posts: number;
+    b_posts: number;
     chains_compared: number;
   }>(
     `with cp as (
        select coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) as category,
               btrim(p.place_name) as chain,
-              percentile_cont(0.5) within group (order by p.price_paid)::float as median,
-              count(*)::int as posts
+              p.source_url as product,
+              min(p.price_paid)::float as price
          from posts p
         where p.status = 'published'
           and p.price_paid > 0
           and p.platform_tag = '${CHAIN_PLATFORM_TAG}'
+          and p.source_url is not null
           and ($1::text is null or lower(p.city) = lower($1))
-        group by 1, 2
+        group by 1, 2, 3
+     ),
+     pairs as (
+       select a.category,
+              a.chain as a_chain,
+              b.chain as b_chain,
+              count(*)::int as matched,
+              sum(a.price)::float as a_total,
+              sum(b.price)::float as b_total
+         from cp a
+         join cp b on b.category = a.category and b.product = a.product and b.chain > a.chain
+        group by 1, 2, 3
        having count(*) >= $3
      ),
-     ranked as (
-       select *,
-              row_number() over (partition by category order by median asc) as rn_cheap,
-              row_number() over (partition by category order by median desc) as rn_dear,
-              count(*) over (partition by category)::int as chains
-         from cp
+     best as (
+       select *, row_number() over (partition by category order by matched desc) as rn
+         from pairs
      )
-     select c.category,
-            c.chain as cheapest_chain,
-            c.median as cheapest_median,
-            c.posts as cheapest_posts,
-            d.chain as priciest_chain,
-            d.median as priciest_median,
-            c.chains as chains_compared
-       from ranked c
-       join ranked d on d.category = c.category and d.rn_dear = 1
-      where c.rn_cheap = 1
-        and c.chains >= 3
-        and c.median > 0
-        and d.median > c.median
-      order by (d.median / c.median) desc, c.category asc
+     select b.category, b.a_chain, b.b_chain, b.matched, b.a_total, b.b_total,
+            (select count(*)::int from cp where cp.category = b.category and cp.chain = b.a_chain) as a_posts,
+            (select count(*)::int from cp where cp.category = b.category and cp.chain = b.b_chain) as b_posts,
+            (select count(distinct chain)::int from cp where cp.category = b.category) as chains_compared
+       from best b
+      where b.rn = 1
+      order by abs(b.a_total - b.b_total) desc
       limit $2`,
     [city, limit, minPosts]
   );
 
-  return rows.map((r) => ({
-    category: r.category,
-    cheapest_chain: r.cheapest_chain,
-    cheapest_median: r.cheapest_median,
-    cheapest_posts: r.cheapest_posts,
-    priciest_chain: r.priciest_chain,
-    priciest_median: r.priciest_median,
-    diff_eur: Number((r.priciest_median - r.cheapest_median).toFixed(2)),
-    diff_pct: Math.round((1 - r.cheapest_median / r.priciest_median) * 100),
-    chains_compared: r.chains_compared,
-  }));
+  return rows.map((r) => {
+    // По-евтината верига от двойката — тя е „най-евтино“, а другата е „най-скъпо“.
+    const aCheaper = r.a_total <= r.b_total;
+    const cheapChain = aCheaper ? r.a_chain : r.b_chain;
+    const dearChain = aCheaper ? r.b_chain : r.a_chain;
+    const cheapTotal = aCheaper ? r.a_total : r.b_total;
+    const dearTotal = aCheaper ? r.b_total : r.a_total;
+    return {
+      category: r.category,
+      cheapest_chain: cheapChain,
+      cheapest_median: Number(cheapTotal.toFixed(2)),
+      matched_products: Number(r.matched) || 0,
+      priciest_chain: dearChain,
+      priciest_median: Number(dearTotal.toFixed(2)),
+      diff_eur: Number((dearTotal - cheapTotal).toFixed(2)),
+      diff_pct: dearTotal > 0 ? Math.round((1 - cheapTotal / dearTotal) * 100) : 0,
+      chains_compared: Number(r.chains_compared) || 0,
+    };
+  });
 }
 
 const OBJECT_COLUMNS = `

@@ -438,7 +438,8 @@ export interface ChainDifference {
   category: string;
   cheapest_chain: string;
   cheapest_median: number;
-  cheapest_posts: number;
+  /** Колко еднакви продукта има в двете сравнявани вериги. */
+  matched_products: number;
   priciest_chain: string;
   priciest_median: number;
   diff_eur: number;
