@@ -124,6 +124,29 @@ const SHOP_NAME_SQL = `place_name ~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|or
 const PLACE_NAME_SQL = `place_name !~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*\\.(bg|com|net|org|eu|de|gr|ro|info|shop)$'`;
 
 /**
+ * 🛒 Вериги за супермаркети — внесени от импорта на SupermarketBG.
+ *
+ * Опознават се по ТАГ, а не по име: имената им са истинските („Кауфланд
+ * България“, „Метро България“, „СБА“…), не домейни, затова проверката за
+ * онлайн магазин (`isShopName`) не ги хваща. А поведението им трябва да е
+ * СЪЩОТО като на онлайн магазин: един обект „Кауфланд“ съдържа хиляди
+ * оферти — средна цена между мляко и пералня не значи нищо, а списък „всички
+ * цени в тази верига по категории“ е точно това, което човек иска да види.
+ *
+ * Затова: влизат в таб „Магазини“ (kind='shop'), НЕ влизат в списъка с обекти
+ * на място (kind='place') и се сравняват в „най-изгоден в категорията“.
+ */
+export const CHAIN_TAG = 'supermarketbg.eu';
+/** За заявки върху posts p — верига ли е този ред. */
+const CHAIN_SQL = `tags @> array['${CHAIN_TAG}']`;
+/** За заявки върху v_objects v — има ли тази (място, град) оферти от верига. */
+const CHAIN_EXISTS_V = `exists (select 1 from posts _ch
+       where _ch.status = 'published'
+         and _ch.tags @> array['${CHAIN_TAG}']
+         and _ch.place_name = v.place_name
+         and _ch.city = v.city)`;
+
+/**
  * 🥇 Магазин, който е НАЙ-ИЗГОДЕН в дадена категория.
  *
  * Как се смята (и защо така): сравняваме магазините в ЕДНА категория по
@@ -192,7 +215,10 @@ export async function cheapestShopsByCategory(options?: {
               p.place_name, p.category, p.price_paid::float as price
          from posts p
         where p.status = 'published' and p.price_paid > 0
-          and ${SHOP_NAME_SQL}
+          -- Онлайн магазини И вериги за супермаркети: сравняваме типичната цена
+          -- на магазин/верига в една категория (иначе „най-изгоден“ се решаваше
+          -- само между 3-4 онлайн магазина).
+          and (${SHOP_NAME_SQL} or ${CHAIN_SQL})
      ),
      per_shop as (
        select slug, max(place_name) as place_name, category,
@@ -306,8 +332,10 @@ export async function searchObjects(params: {
   }
   // Онлайн магазините и обектите на място се показват в РАЗЛИЧНИ списъци:
   // в „Черен списък“/„Честни места“ няма място за каталог на магазин.
-  if (kind === 'shop') where.push(SHOP_NAME_SQL);
-  if (kind === 'place') where.push(PLACE_NAME_SQL);
+  // „Магазини“ = онлайн магазини + вериги за супермаркети (и двете са каталози,
+  // не места, за които някой е гласувал).
+  if (kind === 'shop') where.push(`(${SHOP_NAME_SQL} or ${CHAIN_EXISTS_V})`);
+  if (kind === 'place') where.push(`(${PLACE_NAME_SQL} and not (${CHAIN_EXISTS_V}))`);
   const clause = where.length ? 'where ' + where.join(' and ') : '';
 
   const rows = await many<ObjectRow>(
@@ -321,7 +349,12 @@ export async function searchObjects(params: {
 
   return {
     total: Number(total?.n ?? 0) || 0,
-    items: rows.map((r) => ({ ...r, is_shop: isShopName(r.place_name) })),
+    items: rows.map((r) => ({
+      ...r,
+      // true = каталог (домейн или верига) → приложението показва цени ПО
+      // КАТЕГОРИИ, вместо безсмислена „средна цена“ на целия обект.
+      is_shop: isShopName(r.place_name) || kind === 'shop',
+    })),
   };
 }
 
