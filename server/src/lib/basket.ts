@@ -131,7 +131,15 @@ export async function compareBasket(
     // По верига пазим НАЙ-ЕВТИНОТО съвпадение (иначе една скъпа марка вдига сметката).
     const perChain = new Map<string, BasketMatch>();
     for (const c of withTokens) {
-      if (!isSameProduct(tokens, c.tokens)) continue;
+      /**
+       * ⚠️ Еднословните продукти („яйца“, „олио“, „банани“) не минават през
+       * `isSameProduct` — той иска поне ДВЕ общи думи, за да не сбърка различни
+       * стоки. За тях искаме просто думата да е в името на офертата, иначе
+       * човекът вижда „няма“ за най-обикновени неща.
+       */
+      const matchOk =
+        tokens.length >= 2 ? isSameProduct(tokens, c.tokens) : c.tokens.includes(tokens[0]!);
+      if (!matchOk) continue;
       const match: BasketMatch = {
         chain: c.row.chain,
         price: c.row.price,
