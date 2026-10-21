@@ -186,7 +186,14 @@ function buildWhere(filters: FeedFilters): Where {
    */
   let rank: string | undefined;
   if (filters.q && filters.q.trim()) {
-    const phrase = bind('%' + filters.q.trim().toLowerCase() + '%');
+    /**
+     * ⚠️ Фразата влиза в SQL като ТЕКСТ, не като параметър — иначе `countPosts`
+     * (който строи същите условия, но брои без `order by`) получаваше неизползван
+     * параметър и Postgres връщаше 500 при всяко търсене. Кавичките се удвояват
+     * (валидно за SQL низ), за да не може заявката да „избяга“ от низа.
+     */
+    const phraseText = filters.q.trim().toLowerCase().replace(/'/g, "''");
+    const phrase = `'%${phraseText}%'`;
     rank = `case
               when sp_fold(p.title) like ${phrase} then 0
               when sp_fold(coalesce(p.custom_category_label, '')) like ${phrase}
