@@ -237,7 +237,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
               <Ionicons name="location" size={12} color={accentColor} />
               <Text style={styles.placeNameText} numberOfLines={1}>
                 {/* За онлайн оферти НЕ показваме името на сайта — само „Онлайн магазин“. */}
-                {post.sourceUrl ? 'Онлайн магазин' : `${post.placeName} • ${post.city}`}
+                {post.shopUrl ? 'Онлайн магазин' : `${post.placeName} • ${post.city}`}
               </Text>
               {/* Онлайн или физически магазин — ясно, преди човек да тръгне натам.
                   За онлайн показваме и сайта; за физически — адреса. */}
@@ -789,10 +789,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
             }}
           >
             {post.userConfirmedValidToday
-              ? post.sourceUrl
+              ? post.shopUrl
                 ? `Проверена в сайта днес (${post.verifiedValidTodayCount || 1})`
                 : `Потвърдена днес (${post.verifiedValidTodayCount || 1})`
-              : post.sourceUrl
+              : post.shopUrl
                 ? `Вярна ли е цената в сайта? (${post.verifiedValidTodayCount || 1})`
                 : `Валидна днес? (${post.verifiedValidTodayCount || 1})`}
           </Text>

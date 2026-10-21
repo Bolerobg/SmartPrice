@@ -38,14 +38,14 @@ export function postVerdict(post: PostItem): string {
 
 export function buildShareTitle(post: PostItem): string {
   // За онлайн оферти не показваме името на сайта — само „Онлайн магазин“.
-  return `${postVerdict(post)} · ${post.sourceUrl ? 'Онлайн магазин' : post.placeName}`;
+  return `${postVerdict(post)} · ${post.shopUrl ? 'Онлайн магазин' : post.placeName}`;
 }
 
 /** Кратък, четим текст за споделяне. */
 export function buildShareText(post: PostItem): string {
   const lines = [
     `${postVerdict(post)} в SmartPrice`,
-    post.sourceUrl ? '📍 Онлайн магазин' : `📍 ${post.placeName} (${post.city})`,
+    post.shopUrl ? '📍 Онлайн магазин' : `📍 ${post.placeName} (${post.city})`,
     `💬 ${post.title}`,
     `💳 Платено: ${post.pricePaid.toFixed(2)} ${post.currency}`,
   ];

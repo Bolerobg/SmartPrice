@@ -132,6 +132,15 @@ export default function PostDetailScreen() {
 
   const post = posts.find((p) => p.id === id) ?? remotePost;
 
+  /**
+   * Има ли ИСТИНСКИ линк към продукта в онлайн магазина.
+   * При цените, внесени от агрегатор (supermarketbg.eu), сървърът връща shopUrl=null —
+   * тогава не показваме бутон за външния сайт, защото линкът води до чуждия каталог,
+   * а не до продукта в магазина.
+   */
+  const hasShopLink = Boolean(post?.shopUrl);
+  const isCatalogImport = Boolean(post?.sourceUrl) && !hasShopLink;
+
   // Още теглим от сървъра — не показваме „не е намерена“ преждевременно.
   if (!post && !remoteTried) {
     return (
@@ -504,7 +513,7 @@ export default function PostDetailScreen() {
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name={post.sourceUrl ? 'cart' : 'location'} size={20} color="#60A5FA" />
+                <Ionicons name={hasShopLink ? 'cart' : 'location'} size={20} color="#60A5FA" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text
@@ -515,7 +524,11 @@ export default function PostDetailScreen() {
                     letterSpacing: 0.4,
                   }}
                 >
-                  {post.sourceUrl ? 'ОНЛАЙН МАГАЗИН' : 'МЕСТОПОЛОЖЕНИЕ НА ОБЕКТА • GOOGLE MAPS'}
+                  {hasShopLink
+                    ? 'ОНЛАЙН МАГАЗИН'
+                    : isCatalogImport
+                      ? 'ВЕРИГА • ГРАД'
+                      : 'МЕСТОПОЛОЖЕНИЕ НА ОБЕКТА • GOOGLE MAPS'}
                 </Text>
                 <Text
                   style={{
@@ -525,11 +538,11 @@ export default function PostDetailScreen() {
                     marginTop: 1,
                   }}
                 >
-                  {post.sourceUrl ? 'Продукт в онлайн магазин' : post.placeName}
+                  {hasShopLink ? 'Продукт в онлайн магазин' : post.placeName}
                 </Text>
                 {/* Само за физически обекти: адресът. За онлайн не показваме сайта —
                     по желание на потребителя (името на магазина не се показва в UI). */}
-                {!post.sourceUrl ? (
+                {!post.sourceUrl || isCatalogImport ? (
                   <Text
                     style={{
                       color: COLORS.textSecondary,
@@ -537,7 +550,9 @@ export default function PostDetailScreen() {
                       marginTop: 2,
                     }}
                   >
-                    {`📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`}
+                    {isCatalogImport
+                      ? `📍 ${post.placeName} • гр. ${post.city}`
+                      : `📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`}
                   </Text>
                 ) : null}
                 {post.locationAutoDetected && (
@@ -560,12 +575,17 @@ export default function PostDetailScreen() {
               <ShopPriceCompare postId={post.id} ourPriceEur={post.pricePaid} />
             ) : null}
 
+            {/* Бутонът за външен линк съществува САМО при истински линк към продукта.
+                При внесени от агрегатор цени (supermarketbg.eu) няма как да дадем
+                линк към конкретния магазин, затова по-добре без бутон, отколкото
+                бутон, който изхвърля човека в чуждия сайт. */}
+            {!hasShopLink && post.sourceUrl ? null : (
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => {
                 // Има линк към продукта → отваряме магазина. Иначе → картата с локацията.
-                if (post.sourceUrl) {
-                  Linking.openURL(post.sourceUrl).catch(() =>
+                if (hasShopLink && post.shopUrl) {
+                  Linking.openURL(post.shopUrl).catch(() =>
                     openInGoogleMaps({
                       placeName: post.placeName,
                       address: post.address,
@@ -599,7 +619,7 @@ export default function PostDetailScreen() {
                 gap: 8,
               }}
             >
-              <Ionicons name={post.sourceUrl ? 'cart-outline' : 'map'} size={17} color="#60A5FA" />
+              <Ionicons name={hasShopLink ? 'cart-outline' : 'map'} size={17} color="#60A5FA" />
               <Text
                 style={{
                   color: '#60A5FA',
@@ -607,10 +627,11 @@ export default function PostDetailScreen() {
                   fontWeight: '800',
                 }}
               >
-                {post.sourceUrl ? 'Отвори продукта в магазина' : 'Отвори адреса в Google Maps'}
+                {hasShopLink ? 'Отвори продукта в магазина' : 'Отвори адреса в Google Maps'}
               </Text>
               <Ionicons name="open-outline" size={15} color="#60A5FA" />
             </TouchableOpacity>
+            )}
           </View>
 
           {/* История на цената + „Беше ли на място?“ */}

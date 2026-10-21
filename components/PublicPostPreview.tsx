@@ -129,9 +129,9 @@ export const PublicPostPreview: React.FC<Props> = ({ id, onLogin }) => {
         <Text style={styles.title}>{post.title}</Text>
 
         <View style={styles.metaRow}>
-          <Ionicons name={post.sourceUrl ? 'cart-outline' : 'location'} size={13} color={accent} />
+          <Ionicons name={post.shopUrl ? 'cart-outline' : 'location'} size={13} color={accent} />
           <Text style={styles.metaText}>
-            {post.sourceUrl ? 'Онлайн магазин' : `${post.placeName} · ${post.city}`}
+            {post.shopUrl ? 'Онлайн магазин' : `${post.placeName} · ${post.city}`}
           </Text>
         </View>
         <View style={styles.postedAtRow}>
@@ -180,7 +180,8 @@ export const PublicPostPreview: React.FC<Props> = ({ id, onLogin }) => {
           />
         ) : null}
 
-        {post.sourceUrl ? (
+        {/* Само при истински линк към продукта — при агрегаторни цени няма бутон. */}
+        {post.shopUrl ? (
           <TouchableOpacity
             style={styles.mapRow}
             onPress={goRegister}

@@ -14,6 +14,22 @@ export function currencyLabel(code: string): string {
   return CURRENCY_LABEL[code] ?? code;
 }
 
+/**
+ * Домейни, от които само ВНАСЯМЕ цени (агрегатори на каталози). Техен линк НЕ води
+ * до продукта в конкретния магазин, затова не се показва като „Отвори продукта в
+ * магазина“: по-добре без линк, отколкото подвеждащ линк към чуждия сайт.
+ */
+const AGGREGATOR_SOURCE_HOSTS = ['supermarketbg.eu', 'www.supermarketbg.eu'];
+
+export function isAggregatorSourceUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    return AGGREGATOR_SOURCE_HOSTS.includes(new URL(url).host.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 export interface ReceiptRow {
   id: string;
   post_id: string;
@@ -183,6 +199,10 @@ export function mapPost(params: {
     sourceNote: post.source_note ?? null,
     // Линк към продукта (само при оферти от онлайн магазин).
     sourceUrl: post.source_url ?? null,
+    // Същият линк, но само когато е ИСТИНСКИ линк към продукт в магазин.
+    // При внасяне от агрегатор (supermarketbg.eu) линкът води до чуждия сайт,
+    // затова е null — UI-ът тогава не показва бутон „Отвори продукта в магазина“.
+    shopUrl: isAggregatorSourceUrl(post.source_url) ? null : (post.source_url ?? null),
     polarity: post.polarity,
     category: post.category,
     customCategoryLabel: post.custom_category_label ?? undefined,

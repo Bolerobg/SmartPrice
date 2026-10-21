@@ -174,6 +174,11 @@ export interface PostItem {
   sourceNote?: string | null;
   /** Линк към продукта в онлайн магазина (при оферти от скрапер). */
   sourceUrl?: string | null;
+  /**
+   * Същият линк, но само когато е истински линк към продукт в конкретен магазин.
+   * При цени, внесени от агрегатор, е null → не се показва бутон за външния сайт.
+   */
+  shopUrl?: string | null;
   pricePaid: number;
   referencePrice?: number; // Очаквана/нормална цена за сравнение (колко е спестено или надвзето)
   currency: string;
