@@ -171,8 +171,21 @@ export async function compareBasket(
     const strictHits = withTokens.filter((c) => passes(c, true));
     const chosen = strictHits.length ? strictHits : withTokens.filter((c) => passes(c, false));
 
+    /**
+     * Трети филтър по ПРЕДПОЧИТАНЕ: ако има оферти, чието ИМЕ ЗАПОЧВА с думата
+     * („БАНАНИ …“), тях броим пред тези, в които думата е по средата
+     * („Био плодово пюре банани и ябълки“). Иначе „банани“ се „купуваше“ като
+     * бебешко пюре. Ако началото не съвпада при никоя оферта, ползваме всички.
+     */
+    const startsWithWord = (title: string) => {
+      const t = title.toLowerCase();
+      return tokens.some((w) => w.length >= 3 && t.startsWith(w.slice(0, Math.min(6, w.length))));
+    };
+    const exactStart = chosen.filter((c) => startsWithWord(c.row.title));
+    const used = exactStart.length ? exactStart : chosen;
+
     const perChain = new Map<string, BasketMatch>();
-    for (const c of chosen) {
+    for (const c of used) {
       const match: BasketMatch = {
         chain: c.row.chain,
         price: c.row.price,
