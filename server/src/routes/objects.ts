@@ -76,6 +76,8 @@ export default async function objectRoutes(app: FastifyInstance): Promise<void> 
     const input = z
       .object({
         q: z.string().trim().max(80).optional(),
+        /** 🏷️ Само офертите в една категория (докосване на категория на обекта). */
+        category: z.string().trim().max(80).optional(),
         limit: z.coerce.number().int().min(1).max(60).default(30),
         offset: z.coerce.number().int().min(0).max(5000).default(0),
       })

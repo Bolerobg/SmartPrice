@@ -535,7 +535,19 @@ export async function slugForPost(postId: string): Promise<string | null> {
  */
 export async function searchObjectOffers(
   slug: string,
-  params: { q?: string; limit?: number; offset?: number }
+  params: {
+    q?: string;
+    /**
+     * 🏷️ Само офертите в една категория („Сирене“).
+     *
+     * Защо: на страницата на магазин/верига статистиката „цени по категории“
+     * изглежда като бутони, но досега не отваряше нищо — човекът докосва
+     * „Сирене · 81 оферти“ и очаква да види точно тези 81 оферти. Сега ги вижда.
+     */
+    category?: string;
+    limit?: number;
+    offset?: number;
+  }
 ): Promise<{ total: number; items: ObjectSignal[] }> {
   const key = String(slug ?? '').trim().slice(0, 64);
   if (!/^[0-9a-f]{32}$/.test(key)) return { total: 0, items: [] };
@@ -545,6 +557,13 @@ export async function searchObjectOffers(
 
   const args: unknown[] = [key];
   let search = '';
+  const category = String(params.category ?? '').trim().slice(0, 80);
+  if (category) {
+    // Категорията на реда: истинската категория на продукта, ако я има
+    // (внесените цени от веригите я носят), иначе общата категория.
+    args.push(category);
+    search += ` and coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) = $${args.length}`;
+  }
   if (q) {
     args.push(`%${q}%`);
     const p = `$${args.length}`;

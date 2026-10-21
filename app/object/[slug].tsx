@@ -102,6 +102,16 @@ export default function ObjectScreen() {
   const [offersTotal, setOffersTotal] = useState(0);
   const [offersQ, setOffersQ] = useState('');
   const [offersBusy, setOffersBusy] = useState(false);
+  /**
+   * 🏷️ Избрана категория от блока „цени по категории“.
+   *
+   * Защо: категориите изглеждаха като бутони, но не правеха нищо — човекът
+   * докосва „Сирене · 81 оферти“ и остава с усещането, че е счупено. Сега
+   * докосването филтрира офертите точно по тази категория и екранът слиза до тях.
+   */
+  const [offersCategory, setOffersCategory] = useState<string | null>(null);
+  /** Къде е картата с офертите — за да скочим до нея при докосване на категория. */
+  const [offersCardY, setOffersCardY] = useState(0);
 
   /**
    * ↑ „Обратно най-горе“ — същото поведение като в „Поток“ и „Радар“.
@@ -149,7 +159,12 @@ export default function ObjectScreen() {
       if (!slug) return;
       setOffersBusy(true);
       try {
-        const res = await loadObjectOffers(String(slug), { q, limit: 30, offset });
+        const res = await loadObjectOffers(String(slug), {
+        q,
+        category: offersCategory ?? undefined,
+        limit: 30,
+        offset,
+      });
         setOffers((prev) => {
           if (!append) return res.items;
           const seen = new Set(prev.map((o) => o.id));
@@ -165,7 +180,7 @@ export default function ObjectScreen() {
         setOffersBusy(false);
       }
     },
-    [slug]
+    [slug, offersCategory]
   );
 
   // Първо зареждане + търсене с изчакване, за да не питаме на всяка буква.
@@ -226,6 +241,22 @@ export default function ObjectScreen() {
   const todayH = hoursForToday(place?.hours);
   const openNow = openNowFromToday(todayH);
 
+  /**
+   * 🏷️ Докосване на категория: филтрираме офертите по нея и слизаме до списъка.
+   * Второ докосване маха филтъра („показани ✕“).
+   */
+  const pickCategory = (category: string) => {
+    setOffersCategory((prev) => (prev === category ? null : category));
+    setOffersQ('');
+    setTimeout(() => {
+      try {
+        scrollRef.current?.scrollTo({ y: Math.max(0, offersCardY - 12), animated: true });
+      } catch {
+        /* екранът още не е готов */
+      }
+    }, 150);
+  };
+
   return (
     <SafeAreaView style={styles.root}>
       <ScrollView
@@ -283,32 +314,44 @@ export default function ObjectScreen() {
           */}
           {data.is_shop ? (
             <View>
-              <Text style={styles.statLabel}>Онлайн магазин · цени по категории</Text>
+              <Text style={styles.statLabel}>Цени по категории</Text>
               <Text style={styles.hint}>
-                Един онлайн магазин продава крушка за 0.35 € и машина за 1240 € — затова обща „средна
-                цена“ не значи нищо. Ето истинската картина: по категории.
+                Обща „средна цена“ тук не значи нищо (крушка и машина в един магазин). Докосни
+                категория, за да видиш офертите само в нея.
               </Text>
-              {(data.categories_stats ?? []).map((c) => (
-                <View key={c.category} style={styles.stat}>
-                  <Text style={styles.statValue} numberOfLines={1}>
-                    {CATEGORY_LABELS[c.category] || c.category}
-                  </Text>
-                  <Text style={styles.hint}>
-                    {c.posts} оферти · от {Number(c.min_price).toFixed(2)} € до{' '}
-                    {Number(c.max_price).toFixed(2)} € · средно {Number(c.avg_price).toFixed(2)} €
-                  </Text>
-                  {/* 🥇 Значката идва от сървъра и се дава само при честни условия
-                      (≥3 оферти, ≥2 магазина за сравнение, ≥5 % по-ниска медиана). */}
-                  {c.best_value ? (
-                    <View style={styles.bestValueBadge}>
-                      <Text style={styles.bestValueText} numberOfLines={2}>
-                        🥇 Най-изгодни цени в категорията · −{c.saving_pct}% под следващия
-                        {c.shops_compared ? ` (${c.shops_compared} магазина сравнени)` : ''}
+              {(data.categories_stats ?? []).map((c) => {
+                const active = offersCategory === c.category;
+                return (
+                  <TouchableOpacity
+                    key={c.category}
+                    style={[styles.stat, active && styles.statActive]}
+                    activeOpacity={0.85}
+                    onPress={() => pickCategory(c.category)}
+                    accessibilityLabel={`Виж офертите: ${c.category}`}
+                  >
+                    <View style={styles.statRow}>
+                      <Text style={styles.statValue} numberOfLines={1}>
+                        {CATEGORY_LABELS[c.category] || c.category}
                       </Text>
+                      <Text style={styles.statAction}>{active ? 'показани ✕' : 'виж ›'}</Text>
                     </View>
-                  ) : null}
-                </View>
-              ))}
+                    <Text style={styles.hint}>
+                      {c.posts} оферти · от {Number(c.min_price).toFixed(2)} € до{' '}
+                      {Number(c.max_price).toFixed(2)} € · средно {Number(c.avg_price).toFixed(2)} €
+                    </Text>
+                    {/* 🥇 Значката идва от сървъра и се дава само при честни условия
+                        (≥3 оферти, ≥2 магазина за сравнение, ≥5 % по-ниска медиана). */}
+                    {c.best_value ? (
+                      <View style={styles.bestValueBadge}>
+                        <Text style={styles.bestValueText} numberOfLines={2}>
+                          🥇 Най-изгодни цени в категорията · −{c.saving_pct}% под следващия
+                          {c.shops_compared ? ` (${c.shops_compared} магазина сравнени)` : ''}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
               {(data.categories_stats ?? []).length === 0 ? (
                 <Text style={styles.hint}>Още няма внесени оферти с цени.</Text>
               ) : null}
@@ -526,7 +569,7 @@ export default function ObjectScreen() {
         </View>
         )}
 
-        <View style={styles.card}>
+        <View style={styles.card} onLayout={(e) => setOffersCardY(e.nativeEvent.layout.y)}>
           <Text style={styles.cardTitle}>
             🛒 Всички оферти ({formatNumber(offersTotal || o.signals_count)})
           </Text>
@@ -550,6 +593,21 @@ export default function ObjectScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
+
+          {/* 🏷️ Активен филтър по категория — с едно докосване се маха. */}
+          {offersCategory ? (
+            <TouchableOpacity
+              style={styles.categoryFilterChip}
+              activeOpacity={0.85}
+              onPress={() => setOffersCategory(null)}
+            >
+              <Ionicons name="pricetag" size={12} color={COLORS.accentCyan} />
+              <Text style={styles.categoryFilterText}>
+                Само „{offersCategory}“ · {formatNumber(offersTotal)}
+              </Text>
+              <Ionicons name="close-circle" size={14} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          ) : null}
 
           {offersQ.trim() ? (
             <Text style={styles.hint}>
@@ -744,6 +802,27 @@ const styles = StyleSheet.create({
   },
   statLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600' },
   statValue: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800', marginTop: 3 },
+  /* Категорията е БУТОН — изглежда като такъв и се оцветява, когато е избрана. */
+  statRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statAction: { color: COLORS.accentCyan, fontSize: 11.5, fontWeight: '800', marginTop: 3 },
+  statActive: {
+    borderColor: COLORS.accentCyan,
+    backgroundColor: 'rgba(34,211,238,0.12)',
+  },
+  categoryFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.45)',
+    backgroundColor: 'rgba(34,211,238,0.12)',
+  },
+  categoryFilterText: { color: COLORS.textPrimary, fontSize: 12, fontWeight: '800' },
   hint: { color: COLORS.textMuted, fontSize: 12, marginTop: 8 },
   /* 🥇 „Най-изгодни цени в категорията“ — значката за онлайн магазин. */
   bestValueBadge: {

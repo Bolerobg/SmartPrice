@@ -1477,10 +1477,11 @@ export async function loadObjectForPost(postId: string): Promise<ObjectDetail> {
  */
 export async function loadObjectOffers(
   slug: string,
-  query: { q?: string; limit?: number; offset?: number } = {}
+  query: { q?: string; /** 🏷️ Само офертите в една категория („Сирене“). */ category?: string; limit?: number; offset?: number } = {}
 ): Promise<{ total: number; items: ObjectSignal[] }> {
   const params = new URLSearchParams();
   if (query.q?.trim()) params.set('q', query.q.trim());
+  if (query.category?.trim()) params.set('category', query.category.trim());
   params.set('limit', String(query.limit ?? 30));
   params.set('offset', String(query.offset ?? 0));
   return rawRequest<{ total: number; items: ObjectSignal[] }>(

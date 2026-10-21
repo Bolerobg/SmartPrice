@@ -252,12 +252,16 @@ export default async function postRoutes(app: FastifyInstance) {
      * 42 вериги“) — това е силата на приложението и е честно да се вижда.
      * Питаме с една заявка, заедно с чиповете (не искаме втора заявка от app-а).
      */
+    // Броячът уважава избрания град: избере ли човек „Пловдив“, вижда
+    // „13 206 цени от 38 вериги“ за Пловдив, а не общите за страната.
     const totals = await one<{ offers: string; chains: string; cities: string }>(
       `select count(*)::text as offers,
               count(distinct place_name)::text as chains,
               count(distinct city)::text as cities
          from posts
-        where status = 'published' and platform_tag = 'Супермаркет'`
+        where status = 'published' and platform_tag = 'Супермаркет'
+          and ($1::text is null or lower(city) = lower($1))`,
+      [q.city ?? null]
     );
     return {
       stats: {
