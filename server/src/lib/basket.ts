@@ -73,6 +73,16 @@ interface CandidateRow {
   title: string;
   price: number;
   chain: string;
+  /** Истинската категория на продукта („Олио и оцет“, „Хигиена и козметика“…). */
+  category: string | null;
+}
+
+/**
+ * Числата от името („400“, „1“, „10“) — за да не сравняваме 200 мл шампоан с
+ * 1 л олио. Идват като нормализирани низове, за да се сравняват лесно.
+ */
+function numbersOf(title: string): string[] {
+  return (String(title).match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => n.replace(',', '.'));
 }
 
 /** Взима всички внесени цени в един град по думите от списъка. */
@@ -81,7 +91,8 @@ async function loadChainOffers(city: string | null, words: string[]): Promise<Ca
   if (!clean.length) return [];
   const patterns = clean.map((w) => `%${w}%`);
   return many<CandidateRow>(
-    `select p.id::text as id, p.title, p.price_paid::float as price, p.place_name as chain
+    `select p.id::text as id, p.title, p.price_paid::float as price, p.place_name as chain,
+            coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) as category
        from posts p
       where p.status = 'published'
         and p.price_paid > 0
@@ -128,18 +139,40 @@ export async function compareBasket(
       rows.push({ ...item, cheapest: null, perChain: [] });
       continue;
     }
-    // По верига пазим НАЙ-ЕВТИНОТО съвпадение (иначе една скъпа марка вдига сметката).
-    const perChain = new Map<string, BasketMatch>();
-    for (const c of withTokens) {
-      /**
-       * ⚠️ Еднословните продукти („яйца“, „олио“, „банани“) не минават през
-       * `isSameProduct` — той иска поне ДВЕ общи думи, за да не сбърка различни
-       * стоки. За тях искаме просто думата да е в името на офертата, иначе
-       * човекът вижда „няма“ за най-обикновени неща.
-       */
-      const matchOk =
+    /**
+     * Мачване в ДВА етапа (за честност):
+     *
+     * 1. СТРИКТНО: името пасва И категорията на продукта съдържа дума от
+     *    списъка („олио“ → категория „Олио и оцет“). Така 200 мл бадемово олио
+     *    от дрогерия не се брои за „олио 1л“ (проверено на живо: преди ДМ
+     *    „печелеше“ с 0.50 € за олио).
+     * 2. АКО НЯМА нито едно стриктно — отпускаме само по име, за да не остане
+     *    човекът с „няма съвпадение“ за най-обикновени неща.
+     *
+     * Вътре в етапа предпочитаме офертите с ЕДНАКВО число в името (1 л = 1 л),
+     * а по верига пазим най-евтиното съвпадение.
+     */
+    const itemNumbers = numbersOf(item.title);
+    const passes = (c: { row: CandidateRow; tokens: string[] }, strict: boolean) => {
+      // Еднословните продукти („яйца“, „олио“, „банани“) не минават през
+      // isSameProduct — той иска поне ДВЕ общи думи, за да не сбърка стоки.
+      const byName =
         tokens.length >= 2 ? isSameProduct(tokens, c.tokens) : c.tokens.includes(tokens[0]!);
-      if (!matchOk) continue;
+      if (!byName) return false;
+      if (itemNumbers.length && numbersOf(c.row.title).length) {
+        const shared = itemNumbers.some((n) => numbersOf(c.row.title).includes(n));
+        if (!shared) return false;
+      }
+      if (!strict) return true;
+      const cat = (c.row.category ?? '').toLowerCase();
+      return cat.length > 0 && tokens.some((t) => t.length >= 3 && cat.includes(t));
+    };
+
+    const strictHits = withTokens.filter((c) => passes(c, true));
+    const chosen = strictHits.length ? strictHits : withTokens.filter((c) => passes(c, false));
+
+    const perChain = new Map<string, BasketMatch>();
+    for (const c of chosen) {
       const match: BasketMatch = {
         chain: c.row.chain,
         price: c.row.price,
@@ -176,15 +209,21 @@ export async function compareBasket(
     });
   }
 
-  // Подредба: първо по покритие (да не печели верига с 1 продукт), после по цена.
-  const chains = Array.from(totals.values()).sort(
-    (a, b) => b.found - a.found || a.total - b.total
+  /**
+   * Подредбата трябва да съвпада с това, което човекът вижда: първо веригите,
+   * които покриват списъка (поне 60 %), подредени по ЦЕНА — защото „къде да
+   * пазарувам“ се решава по цена. Веригите с по-малко от половината продукти
+   * отиват най-отдолу (не могат да покрият списъка, значи не са отговор).
+   */
+  const all = Array.from(totals.values());
+  const minCoverage = Math.max(
+    1,
+    Math.min(rows.length, Number(opts?.minCoverage ?? Math.ceil(rows.length * 0.6)) || 1)
   );
-  const minCoverage = Math.max(1, Math.min(rows.length, Number(opts?.minCoverage ?? Math.ceil(rows.length * 0.6)) || 1));
-  const eligible = chains.filter((c) => c.found >= minCoverage);
-  const best =
-    (eligible.length ? eligible.slice().sort((a, b) => a.total - b.total) : chains.slice().sort((a, b) => a.total - b.total))[0] ??
-    null;
+  const eligible = all.filter((c) => c.found >= minCoverage).sort((a, b) => a.total - b.total);
+  const rest = all.filter((c) => c.found < minCoverage).sort((a, b) => b.found - a.found || a.total - b.total);
+  const chains = [...eligible, ...rest];
+  const best = eligible[0] ?? null;
 
   // Най-изгодна ДВОЙКА: за всеки продукт взимаме по-евтиното от двете вериги.
   let bestPair: BasketPairTotal | null = null;
