@@ -157,16 +157,27 @@ export const EasyPostCard: React.FC<{ post: PostItem; onOpenHint?: string }> = (
           </View>
         ) : null}
 
+        {/* Отварянето е с думи, а не със стрелка без обяснение. Стои ПО-ГОРЕ,
+            защото долу вдясно „виси“ бутонът „↑ Нагоре“ и застъпваше надписа. */}
+        <TouchableOpacity activeOpacity={0.85} onPress={open} style={styles.moreBtn}>
+          <Text style={styles.moreText}>Виж подробности</Text>
+          <Ionicons name="chevron-forward" size={20} color={COLORS.accentCyan} />
+        </TouchableOpacity>
+
         {/* ------------------------------------------------------- Бутоните */}
+        {/* Бутоните са ПОДРЕДЕНИ ЕДИН ПОД ДРУГ (не рамо до рамо): в два
+            половинчати бутона надписът се съкращаваше („Спестих пари“ →
+            „Спести…“), а за човек, който не разбира, съкратен надпис е
+            неразбираем. Така всеки бутон е по цялата ширина и се чете цял. */}
         <View style={styles.buttons}>
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={onHelped}
             style={[styles.button, styles.buttonPrimary, isGreen ? null : styles.buttonRed]}
           >
-            <Ionicons name="happy-outline" size={24} color={COLORS.white} />
+            <Ionicons name="happy-outline" size={26} color={COLORS.white} />
             <Text style={styles.buttonText} numberOfLines={1}>
-              {isGreen ? 'Спестих пари' : 'Спаси ме'}
+              {isGreen ? 'Спестих пари' : 'Спаси ме от капан'}
               {helped > 0 ? ` (${helped})` : ''}
             </Text>
           </TouchableOpacity>
@@ -178,20 +189,15 @@ export const EasyPostCard: React.FC<{ post: PostItem; onOpenHint?: string }> = (
           >
             <Ionicons
               name={saved ? 'bookmark' : 'bookmark-outline'}
-              size={24}
+              size={26}
               color={saved ? COLORS.goldBright : COLORS.textPrimary}
             />
             <Text style={[styles.buttonText, styles.buttonGhostText]}>
-              {saved ? 'Запазена' : 'Запази'}
+              {saved ? 'Запазена в любими' : 'Запази в любими'}
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Отварянето е с думи, а не със стрелка без обяснение. */}
-        <TouchableOpacity activeOpacity={0.85} onPress={open} style={styles.moreBtn}>
-          <Text style={styles.moreText}>Виж подробности</Text>
-          <Ionicons name="chevron-forward" size={20} color={COLORS.accentCyan} />
-        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
@@ -252,7 +258,7 @@ const styles = StyleSheet.create({
   trustRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: EASY.space.xs },
   trustText: { flex: 1, color: COLORS.greenBright, fontSize: EASY.font.label, fontWeight: '700' },
 
-  buttons: { flexDirection: 'row', gap: EASY.space.sm, marginTop: EASY.space.sm },
+  buttons: { flexDirection: 'column', gap: EASY.space.sm, marginTop: EASY.space.sm },
   button: {
     flex: 1,
     minHeight: EASY.touch.button,
@@ -270,6 +276,8 @@ const styles = StyleSheet.create({
   buttonText: { color: COLORS.white, fontSize: EASY.font.button, fontWeight: '900' },
   buttonGhostText: { color: COLORS.textPrimary },
 
+  /* „Виж подробности“ стои ПО-ГОРЕ в картата (под спестеното), а не най-долу:
+     долу вдясно „виси“ бутонът „↑ Нагоре“ и застъпваше надписа. */
   moreBtn: {
     flexDirection: 'row',
     alignItems: 'center',
