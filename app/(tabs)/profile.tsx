@@ -18,7 +18,6 @@ import {
 } from '@/components/AddToHomeScreenModal';
 import { InviteCard } from '@/components/InviteCard';
 import { PushNotificationsCard } from '@/components/PushNotificationsCard';
-import { EasyModeSwitch } from '@/components/EasyModeSwitch';
 import { StoryCardModal } from '@/components/StoryCardModal';
 import { COLORS } from '@/constants/theme';
 import { storyCardUrl } from '@/src/api/client';
@@ -296,10 +295,6 @@ export default function ProfileScreen() {
           </View>
 
           <PushNotificationsCard />
-
-          {/* 🧓 Едрият дизайн: човек може да го изключи, ако иска стария
-              (по-подробен) изглед. Изборът се помни на устройството. */}
-          <EasyModeSwitch />
 
           <View style={styles.monetizationActions}>
             <TouchableOpacity
