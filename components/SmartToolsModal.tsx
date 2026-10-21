@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,6 +17,7 @@ import { CityPickerDropdown } from '@/components/CityPickerDropdown';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { matchesUniversalSearch } from '@/lib/smartSearch';
+import { api, type BasketComparison } from '@/src/api/client';
 
 export type SmartToolTab = 'basket' | 'shrinkflation' | 'alerts';
 
@@ -66,6 +68,18 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
   const [customBasketName, setCustomBasketName] = useState('');
   const [customBasketPrice, setCustomBasketPrice] = useState('');
 
+  /**
+   * 🏪 Сравнение на ЦЕЛИЯ списък по вериги (внесените цени от Кауфланд, Метро…).
+   *
+   * Защо не се смята тук, в паметта: заредената лента е 60 оферти, а в базата
+   * има 53 000 цени от вериги — сравнението трябва да пита сървъра. Човекът
+   * вижда „този списък струва 42.30 € в Метро“, „45.10 € в Кауфланд“ и
+   * „най-евтина комбинация: Метро + Билла = 39.80 €“.
+   */
+  const [chainCompare, setChainCompare] = useState<BasketComparison | null>(null);
+  const [chainCompareBusy, setChainCompareBusy] = useState(false);
+  const [basketCity, setBasketCity] = useState('Всички градове');
+
   // Състояния за Таб 2: Шринкфлация & Цена за 1 кг/л
   const [pkgAWeight, setPkgAWeight] = useState('400');
   const [pkgAPrice, setPkgAPrice] = useState('8.90');
@@ -86,6 +100,42 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
       setActiveTab(initialTab);
     }
   }, [visible, initialTab]);
+
+  // Питаме сървъра за сравнението по вериги (само когато табът е отворен).
+  const basketKey = basketItems
+    .filter((i) => i.selected)
+    .map((i) => i.name)
+    .join('|');
+  React.useEffect(() => {
+    if (!visible || activeTab !== 'basket') return;
+    const titles = basketItems.filter((i) => i.selected).map((i) => i.name.trim()).filter(Boolean);
+    if (!titles.length) {
+      setChainCompare(null);
+      return;
+    }
+    let alive = true;
+    setChainCompareBusy(true);
+    const timer = setTimeout(() => {
+      api
+        .basketCompare({
+          items: titles.map((title) => ({ title })),
+          city: basketCity !== 'Всички градове' ? basketCity : undefined,
+        })
+        .then((res) => {
+          if (alive) setChainCompare(res);
+        })
+        .catch(() => {
+          if (alive) setChainCompare(null);
+        })
+        .finally(() => {
+          if (alive) setChainCompareBusy(false);
+        });
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [visible, activeTab, basketKey, basketCity, basketItems]);
 
   // Сравнение с РЕАЛНИТЕ цени от публикациите на общността
   const basketComparison = useMemo(() => {
@@ -348,6 +398,71 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                       </Text>
                     )}
                   </View>
+                </View>
+
+                {/* 🏪 Сравнение на ЦЕЛИЯ списък по вериги — с реалните внесени цени
+                    (Метро, Кауфланд, Билла…). Смята се на сървъра, защото работи
+                    върху всички 53 000 цени, не само върху заредената лента. */}
+                <View style={styles.chainCard}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="storefront" size={15} color={COLORS.accentCyan} />
+                    <Text style={styles.chainCardTitle}>Колко струва списъкът във веригите</Text>
+                  </View>
+                  <CityPickerDropdown
+                    selectedCity={basketCity}
+                    onSelectCity={setBasketCity}
+                    includeAllOption
+                    label="Град за сравнението"
+                  />
+
+                  {chainCompareBusy ? (
+                    <ActivityIndicator color={COLORS.accentCyan} style={{ marginVertical: 10 }} />
+                  ) : null}
+
+                  {!chainCompareBusy && chainCompare && chainCompare.chains.length > 0 ? (
+                    <>
+                      {chainCompare.chains.slice(0, 6).map((c) => {
+                        const isBest = chainCompare.best?.chain === c.chain;
+                        return (
+                          <View key={c.chain} style={[styles.chainRow, isBest && styles.chainRowBest]}>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={styles.chainName} numberOfLines={1}>
+                                {c.chain}
+                                {isBest ? ' · най-евтино' : ''}
+                              </Text>
+                              <Text style={styles.chainMeta}>
+                                {c.found} от {chainCompare.itemsTotal} продукта
+                                {c.missing ? ` · ${c.missing} липсват` : ''}
+                              </Text>
+                            </View>
+                            <Text style={[styles.chainTotal, isBest && { color: COLORS.greenBright }]}>
+                              {c.total.toFixed(2)} €
+                            </Text>
+                          </View>
+                        );
+                      })}
+
+                      {chainCompare.bestPair && chainCompare.pairSaving ? (
+                        <Text style={styles.chainPairLine}>
+                          🛒 Най-добра комбинация: {chainCompare.bestPair.chains[0]} +{' '}
+                          {chainCompare.bestPair.chains[1]} = {chainCompare.bestPair.total.toFixed(2)} €
+                          {' '}(спестяваш {chainCompare.pairSaving.toFixed(2)} €)
+                        </Text>
+                      ) : null}
+
+                      <Text style={styles.chainNote}>
+                        Липсващите продукти не влизат в сметката — виждаш колко от списъка има във
+                        всяка верига. Цените са от реалните импорти на веригите, само в избрания град.
+                      </Text>
+                    </>
+                  ) : null}
+
+                  {!chainCompareBusy && (!chainCompare || chainCompare.chains.length === 0) ? (
+                    <Text style={styles.chainNote}>
+                      Не намирам тези продукти във веригите. Пробвай по-просто име — например
+                      „прясно мляко“ вместо „мляко 3.6% 1л“.
+                    </Text>
+                  ) : null}
                 </View>
 
                 <View style={styles.infoBox}>
@@ -1035,6 +1150,41 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 2,
   },
+  /* 🏪 Сравнение на списъка по вериги (внесените цени от Кауфланд, Метро…). */
+  chainCard: {
+    backgroundColor: 'rgba(34,211,238,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.35)',
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
+  },
+  chainCardTitle: { color: COLORS.accentCyan, fontSize: 13, fontWeight: '800' },
+  chainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  chainRowBest: {
+    borderColor: COLORS.greenPrimary,
+    backgroundColor: COLORS.greenSoftBg,
+  },
+  chainName: { color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '800' },
+  chainMeta: { color: COLORS.textMuted, fontSize: 11, marginTop: 1 },
+  chainTotal: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '900' },
+  chainPairLine: {
+    color: COLORS.textPrimary,
+    fontSize: 12.5,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  chainNote: { color: COLORS.textMuted, fontSize: 11, lineHeight: 15 },
   infoBox: {
     backgroundColor: COLORS.goldSoftBg,
     borderWidth: 1,

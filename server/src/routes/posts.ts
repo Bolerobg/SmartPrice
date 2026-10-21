@@ -9,6 +9,7 @@ import { getSetting } from '../lib/settings.js';
 import { checkFirstToComplete } from '../lib/sponsorRaffles.js';
 import { checkShopPrice } from '../lib/shopPrice.js';
 import { priceDuel } from '../lib/priceDuel.js';
+import { compareBasket } from '../lib/basket.js';
 
 const CATEGORIES = [
   'restaurants',
@@ -219,6 +220,31 @@ export default async function postRoutes(app: FastifyInstance) {
   });
 
   /**
+   * 🛒 Сравнение на ЦЯЛ списък за покупки по вериги.
+   *
+   * Публичен е (без вход): гостът също иска да види дали в Метро е по-евтино от
+   * Кауфланд, преди да си направи профил. Смята се на сървъра, защото работи
+   * върху ВСИЧКИ внесени цени, а не само върху заредената лента.
+   */
+  app.post('/api/basket/compare', async (req) => {
+    const input = z
+      .object({
+        items: z
+          .array(
+            z.object({
+              title: z.string().trim().min(2).max(120),
+              quantity: z.coerce.number().min(1).max(99).optional(),
+            })
+          )
+          .min(1)
+          .max(40),
+        city: z.string().trim().max(80).optional(),
+      })
+      .parse(req.body ?? {});
+    return compareBasket(input.items, input.city?.trim() || null);
+  });
+
+  /**
    * 🛒 Кои вериги има в базата (за чиповете над потока).
    *
    * Защо отделен маршрут: чиповете трябва да са истински — само вериги, в които
@@ -254,10 +280,13 @@ export default async function postRoutes(app: FastifyInstance) {
      */
     // Броячът уважава избрания град: избере ли човек „Пловдив“, вижда
     // „13 206 цени от 38 вериги“ за Пловдив, а не общите за страната.
-    const totals = await one<{ offers: string; chains: string; cities: string }>(
+    const totals = await one<{ offers: string; chains: string; cities: string; products: string }>(
       `select count(*)::text as offers,
               count(distinct place_name)::text as chains,
-              count(distinct city)::text as cities
+              count(distinct city)::text as cities,
+              -- Различните ПРОДУКТИ (заглавия) — „53 367 цени от 42 вериги“ и
+              -- „15 626 продукта“ не са едно и също число и човекът иска да знае и двете.
+              count(distinct title)::text as products
          from posts
         where status = 'published' and platform_tag = 'Супермаркет'
           and ($1::text is null or lower(city) = lower($1))`,
@@ -268,6 +297,7 @@ export default async function postRoutes(app: FastifyInstance) {
         offers: Number(totals?.offers ?? 0) || 0,
         chains: Number(totals?.chains ?? 0) || 0,
         cities: Number(totals?.cities ?? 0) || 0,
+        products: Number(totals?.products ?? 0) || 0,
       },
       items: rows.map((r) => ({
         name: r.name,

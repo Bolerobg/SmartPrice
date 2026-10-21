@@ -221,6 +221,8 @@ export default function FeedScreen() {
     offers: number;
     chains: number;
     cities: number;
+    /** Различните продукти (не са същото като офертите: един продукт = много вериги). */
+    products: number;
   } | null>(null);
 
   // 0) Кои вериги има в базата — за чиповете. Сменя ли се градът, питаме пак
@@ -977,7 +979,7 @@ export default function FeedScreen() {
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.chainStatsTitle} numberOfLines={1}>
-              {formatNumber(chainStats.offers)} цени от {chainStats.chains} вериги
+              {formatNumber(chainStats.products)} продукта · {formatNumber(chainStats.offers)} цени
               {/* Избран град → казваме кой е, вместо да броим „1 града“. */}
               {selectedCityFilter !== 'Всички градове' ? ` в ${selectedCityFilter}` : ''}
             </Text>

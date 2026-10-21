@@ -434,6 +434,21 @@ export interface ForgotPasswordResponse {
   devCode?: string;
 }
 
+export interface BasketComparison {
+  city: string | null;
+  itemsTotal: number;
+  best: { chain: string; total: number; found: number; missing: number } | null;
+  bestPair: { chains: [string, string]; total: number; found: number; missing: number } | null;
+  pairSaving: number | null;
+  chains: Array<{ chain: string; total: number; found: number; missing: number }>;
+  rows: Array<{
+    title: string;
+    quantity: number;
+    cheapest: { chain: string; price: number; offerTitle: string; postId: string } | null;
+    perChain: Array<{ chain: string; price: number; offerTitle: string; postId: string }>;
+  }>;
+}
+
 export interface FeedResponse {
   items: PostItem[];
   total: number;
@@ -909,6 +924,17 @@ export const api = {
    * не само върху заредените (иначе черният списък показваше 1 обект).
    */
   /**
+   * 🛒 Колко би струвал ЦЯЛ списък за покупки по вериги.
+   *
+   * Смята се на сървъра върху ВСИЧКИ внесени цени (не само върху заредената
+   * лента) — за всеки продукт от списъка намира най-евтиното съвпадение във
+   * всяка верига и после сумира: по верига, най-евтината една верига и
+   * най-евтината ДВОЙКА вериги.
+   */
+  basketCompare: (body: { items: Array<{ title: string; quantity?: number }>; city?: string }) =>
+    rawRequest<BasketComparison>('/api/basket/compare', { method: 'POST', body, auth: false }),
+
+  /**
    * 🛒 Кои вериги за супермаркети има в базата (за чиповете над потока).
    * Връща само вериги, в които НАИСТИНА има внесени оферти, с техния брой.
    */
@@ -917,7 +943,7 @@ export const api = {
     if (city && city !== 'Всички градове') params.set('city', city);
     return rawRequest<{
       /** 📊 Обобщение за видимия брояч в потока: колко цени, от колко вериги, в колко града. */
-      stats: { offers: number; chains: number; cities: number };
+      stats: { offers: number; chains: number; cities: number; products: number };
       items: Array<{ name: string; offers: number; minPrice: number | null }>;
     }>(`/api/posts/chains${params.toString() ? `?${params.toString()}` : ''}`);
   },
