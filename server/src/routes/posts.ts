@@ -152,7 +152,24 @@ export default async function postRoutes(app: FastifyInstance) {
       limit: q.limit,
       offset: q.offset,
     };
-    const [items, total] = await Promise.all([loadPosts(filters, userId), countPosts(filters)]);
+    /**
+     * 🔎 Търсене на два етапа (за скорост, без да губим попадения):
+     *   1) само по ИНДЕКСИРАНИТЕ полета — име на продукт, верига/магазин,
+     *      категория, код на оферта, автор, етикети → под половин секунда;
+     *   2) само ако първото не върне НИЩО (или сме на по-далечна страница) —
+     *      пълното търсене, което влиза и в описанията, касовите бележки и
+     *      коментарите. Така човекът чака секунди само когато търси нещо, което
+     *      го няма по име (напр. дума от бележка).
+     */
+    const isText = Boolean(filters.q && filters.q.trim());
+    let scan = isText ? { ...filters, searchDepth: 'primary' as const } : filters;
+    let [items, total] = await Promise.all([loadPosts(scan, userId), countPosts(scan)]);
+
+    if (isText && items.length === 0 && filters.offset === 0) {
+      scan = { ...filters, searchDepth: 'full' as const };
+      [items, total] = await Promise.all([loadPosts(scan, userId), countPosts(scan)]);
+    }
+
     return { items, total, limit: q.limit, offset: q.offset, hasMore: q.offset + items.length < total };
   });
 

@@ -30,6 +30,15 @@ export interface FeedFilters {
    * Ползва се от чиповете „Всички вериги / Кауфланд / …“ над потока.
    */
   chain?: string;
+  /**
+   * 🔎 Колко дълбоко да търсим при текст:
+   *   'primary' = само по име на продукт, верига/магазин, категория, код на
+   *               оферта, автор и етикети (всичко ИНДЕКСИРАНО → под 0.5 s);
+   *   'full'    = + описание, адрес, бележка, касови бележки и коментари.
+   * Маршрутът първо пита 'primary' и само ако НЯМА нищо — пита 'full', за да не
+   * чака човекът секунди за нещо, което и без това намира по име.
+   */
+  searchDepth?: 'primary' | 'full';
   authorId?: string;
   bookmarkedBy?: string;
   sort?: SortMode;
@@ -113,6 +122,8 @@ function buildWhere(filters: FeedFilters): Where {
         .filter(Boolean)
         .slice(0, 6); // таван, за да не се строят огромни заявки
 
+      // 🔎 „дълбоко“ търсене = и в описания/адреси/бележки/касови бележки/коментари.
+      const deep = filters.searchDepth !== 'primary';
       for (const word of words) {
             // sp_fold() вместо ilike: базата е с C колация и вградената lower() не
             // сгъва кирилица, затова ilike не намираше „София“ по „софия“.
@@ -122,13 +133,13 @@ function buildWhere(filters: FeedFilters): Where {
               -- триграм индекс — вместо sp_fold(...), който планировчикът разгъва и
               -- индексът не се хващаше (търсенето отговаряше 10–12 секунди).
               p.title_fold like ${p}
-              or p.description_fold like ${p}
               or p.place_name_fold like ${p}
               or p.city_fold like ${p}
-              or p.address_fold like ${p}
               or p.platform_tag_fold like ${p}
               or p.platform_label_fold like ${p}
               or p.category_label_fold like ${p}
+              ${deep ? `or p.description_fold like ${p}` : ''}
+              ${deep ? `or p.address_fold like ${p}` : ''}
               -- Етикети: търсим във всеки таг поотделно. НЕ ползваме
               -- array_to_string в индексируема колона (функцията е STABLE и не
               -- може да е генерирана колона).
@@ -151,7 +162,7 @@ function buildWhere(filters: FeedFilters): Where {
               -- Етикетите на категориите са в клиента; търсим и по истинския
               -- етикет на продукта (category_label_fold) — за да намериш „сирене“,
               -- без да знаеш вътрешния id.
-              or p.seller_note_fold like ${p}
+              ${deep ? `or p.seller_note_fold like ${p}` : ''}
               -- Смислови синоними: „капан“ намира всички червени флагове.
               or (p.polarity = 'green'
                   and 'оферта находка евтино изгодно намаление промоция топ'
@@ -159,21 +170,21 @@ function buildWhere(filters: FeedFilters): Where {
               or (p.polarity = 'red'
                   and 'червен флаг капан скъпо измама обир такса шринкфлация'
                       like ${p})
-              or exists (
+              ${deep ? `or exists (
                 select 1 from receipts rc
                 join receipt_items ri on ri.receipt_id = rc.id
                 where rc.post_id = p.id
                   and (ri.name_fold like ${p} or ri.highlight_reason_fold like ${p})
-              )
-              or exists (
+              )` : ''}
+              ${deep ? `or exists (
                 select 1 from receipts rc
                 where rc.post_id = p.id and rc.merchant_name_fold like ${p}
-              )
-              or exists (
+              )` : ''}
+              ${deep ? `or exists (
                 select 1 from comments c
                 where c.post_id = p.id and c.status = 'published'
                   and c.body_fold like ${p}
-              )
+              )` : ''}
             )`);
           }
     }

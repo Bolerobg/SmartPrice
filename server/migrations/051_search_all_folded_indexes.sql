@@ -17,8 +17,10 @@ alter table posts add column if not exists address_fold text
   generated always as (sp_fold(coalesce(address, ''))) stored;
 alter table posts add column if not exists category_fold text
   generated always as (sp_fold(coalesce(category, ''))) stored;
-alter table posts add column if not exists category_synonyms_fold text
-  generated always as (sp_fold(sp_category_synonyms(category))) stored;
+-- ⚠️ Синонимите на категорията НЕ могат да са генерирана колона:
+-- `sp_category_synonyms()` не е IMMUTABLE (чете таблица) → Postgres отказва.
+-- Затова търсенето по синоними остана с функция (не се индексира) — важното е,
+-- че всички останали полета са индексирани и OR-ът вече дава индексен план.
 alter table posts add column if not exists category_label_fold text
   generated always as (sp_fold(coalesce(custom_category_label, ''))) stored;
 alter table posts add column if not exists platform_tag_fold text
@@ -32,7 +34,6 @@ create index if not exists posts_place_fold_trgm on posts using gin (place_name_
 create index if not exists posts_city_fold_trgm on posts using gin (city_fold gin_trgm_ops);
 create index if not exists posts_address_fold_trgm on posts using gin (address_fold gin_trgm_ops);
 create index if not exists posts_category_fold_trgm on posts using gin (category_fold gin_trgm_ops);
-create index if not exists posts_category_syn_fold_trgm on posts using gin (category_synonyms_fold gin_trgm_ops);
 create index if not exists posts_category_label_fold_trgm on posts using gin (category_label_fold gin_trgm_ops);
 create index if not exists posts_platform_tag_fold_trgm on posts using gin (platform_tag_fold gin_trgm_ops);
 create index if not exists posts_platform_label_fold_trgm on posts using gin (platform_label_fold gin_trgm_ops);
