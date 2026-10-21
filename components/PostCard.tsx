@@ -43,7 +43,7 @@ interface PostCardProps {
   distanceKm?: number;
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
+const PostCardInner: React.FC<PostCardProps> = ({ post, distanceKm }) => {
   const router = useRouter();
   const {
     toggleReaction,
@@ -1375,3 +1375,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+/**
+ * 🐎 Запомнена карта (memo).
+ *
+ * Защо: лентата показва 60 тежки карти. Без memo всяко местене на пръста
+ * пречертаваше всичките 60 наново — на телефон това се усеща като заковаване
+ * („забива“), защото JS нишката не смогва да обработи жестовете, докато рисува.
+ * С memo се пречертава само картата, чиито данни наистина са се променили
+ * (напр. след гласуване или отбелязване в „Любими“).
+ *
+ * Сравняваме по id и по референцията на обекта: сървърът връща нов обект само
+ * когато има промяна, така че сравнението е коректно и евтино.
+ */
+export const PostCard = React.memo(PostCardInner);

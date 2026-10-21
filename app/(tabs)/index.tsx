@@ -195,6 +195,9 @@ export default function FeedScreen() {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [serverResults, setServerResults] = useState<PostItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  /** Има ли още страници в сървърното търсене (верига/текст) и теглим ли в момента. */
+  const [searchHasMore, setSearchHasMore] = useState(false);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [isQuickPhotoOpen, setIsQuickPhotoOpen] = useState(false);
   const [quickInitialPhoto, setQuickInitialPhoto] = useState<string | null>(null);
@@ -258,6 +261,7 @@ export default function FeedScreen() {
     if (!debouncedQuery && !selectedChain) {
       setServerResults(null);
       setIsSearching(false);
+      setSearchHasMore(false);
       return;
     }
     let cancelled = false;
@@ -272,7 +276,11 @@ export default function FeedScreen() {
         limit: 60,
       })
       .then((res) => {
-        if (!cancelled) setServerResults(res.items);
+        if (cancelled) return;
+        setServerResults(res.items);
+        // Има ли още страници? Без това скролването спираше след първите 60
+        // оферти на избраната верига и екранът изглеждаше „закован“.
+        setSearchHasMore(Boolean(res.hasMore));
       })
       .catch(() => {
         if (!cancelled) setServerResults([]);
@@ -284,6 +292,48 @@ export default function FeedScreen() {
       cancelled = true;
     };
   }, [debouncedQuery, selectedChain, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter]);
+
+  /**
+   * 🔎 Още резултати от сървърното търсене (за верига без текст).
+   *
+   * Защо е нужно: при избрана верига лентата показва сървърните резултати, а
+   * „дръпни за още“ пълнеше стария локален списък — тоест на екрана не се
+   * появяваше нищо ново и след 60-те оферти екранът оставаше празен. Сега
+   * искаме следващата страница от сървъра и я добавяме към същия списък.
+   */
+  const loadMoreSearch = useCallback(async () => {
+    if (searchLoadingMore || !searchHasMore || serverResults === null) return;
+    setSearchLoadingMore(true);
+    try {
+      const res = await api.feed({
+        q: debouncedQuery || undefined,
+        chain: selectedChain ?? undefined,
+        city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
+        polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
+        category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
+        limit: 60,
+        offset: serverResults.length,
+      });
+      setServerResults((prev) => {
+        const seen = new Set((prev ?? []).map((p) => p.id));
+        return [...(prev ?? []), ...res.items.filter((p) => !seen.has(p.id))];
+      });
+      setSearchHasMore(Boolean(res.hasMore));
+    } catch {
+      // тихо: следващата страница може и да не дойде — не чупим екрана
+    } finally {
+      setSearchLoadingMore(false);
+    }
+  }, [
+    searchLoadingMore,
+    searchHasMore,
+    serverResults,
+    debouncedQuery,
+    selectedChain,
+    selectedCityFilter,
+    selectedPolarityFilter,
+    selectedCategoryFilter,
+  ]);
 
   const handleToggleNearby = async () => {
     if (nearbySorted) {
@@ -1282,14 +1332,32 @@ export default function FeedScreen() {
           keyboardShouldPersistTaps="handled"
           refreshing={isRefreshing}
           onRefresh={() => void refreshAll()}
+          /* 🐎 Телефонни настройки на списъка: картите са високи и различни
+             по височина, а Android по подразбиране „изрязва“ извън екрана
+             (removeClippedSubviews) — при бързо плъзгане това оставя празни
+             места и изглежда като заковаване. Затова рисуваме по няколко
+             карти на парче и изрязването е изключено. */
+          initialNumToRender={4}
+          maxToRenderPerBatch={5}
+          updateCellsBatchingPeriod={50}
+          windowSize={5}
+          removeClippedSubviews={false}
           onEndReached={() => {
-            if (!debouncedQuery && hasMorePosts) {
-              void loadMorePosts();
+            // 1) Търсене по ТЕКСТ: сървърът вече върна най-добрите 60 —
+            //    повече страници не носим, за да остане бързо.
+            if (debouncedQuery) return;
+            // 2) Само ВЕРИГА (без текст): още резултати от сървъра. Преди тук
+            //    нищо не се теглеше и след 60-те оферти екранът оставаше празен.
+            if (selectedChain) {
+              void loadMoreSearch();
+              return;
             }
+            // 3) Обикновена лента (с град/категория/полярност): следваща страница.
+            if (hasMorePosts) void loadMorePosts();
           }}
-          onEndReachedThreshold={0.4}
+          onEndReachedThreshold={0.5}
           ListFooterComponent={
-            isLoadingMore ? (
+            isLoadingMore || searchLoadingMore ? (
               <View style={{ paddingVertical: 18, alignItems: 'center' }}>
                 <ActivityIndicator size="small" color={COLORS.greenBright} />
               </View>
