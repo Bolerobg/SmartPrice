@@ -269,6 +269,9 @@ export interface PriceDuel extends PriceCompareLight {
   others: TwinOffer[];
 }
 
+/** ⚡ true = намерен по адрес на продукта (същият продукт, не „подобно име“). */
+type CandidateWithUrl = CandidateRow & { same_product_url?: boolean };
+
 interface CandidateRow {
   id: string;
   public_code: string | null;
@@ -302,6 +305,32 @@ function verdictFor(saving: number, savingPct: number, twinCount: number): Verdi
  * в чието заглавие има някоя от смислените думи на търсените оферти, и после
  * смятаме съвпадението в Node (точно, а не приблизително).
  */
+/**
+ * ⚡ Кандидати по ЕДИН И СЪЩ продукт (canonical адрес).
+ *
+ * Защо: внесените цени от веригите носят `source_url` = адресът на продукта, а
+ * един и същ продукт в различните вериги има СЪЩИЯ адрес. Търсенето по думи
+ * (`title ilike any(...)`) сканира целия каталог и струваше 1–2 секунди на
+ * страница; по адрес е точно попадение с индекс — и е по-вярно, защото това е
+ * буквално същият продукт, не „подобно име“.
+ */
+async function loadCandidatesByUrl(urls: string[], excludeIds: string[]): Promise<CandidateRow[]> {
+  const clean = Array.from(new Set(urls.filter(Boolean))).slice(0, 200);
+  if (!clean.length) return [];
+  const rows = await many<CandidateRow>(
+    `select ${CANDIDATE_COLUMNS}
+       from posts p
+      where p.status = 'published'
+        and p.price_paid > 0
+        and not (p.id = any($2::uuid[]))
+        and p.source_url = any($1::text[])
+      order by p.price_paid asc
+      limit 800`,
+    [clean, excludeIds]
+  );
+  return rows.map((r) => ({ ...r, same_product_url: true }));
+}
+
 async function loadCandidates(excludeIds: string[], words: string[]): Promise<CandidateRow[]> {
   const clean = Array.from(new Set(words.filter((w) => w.length >= 4))).slice(0, 60);
   if (!clean.length) return [];
@@ -463,8 +492,30 @@ export async function compareForPosts(
     allWords.push(...t.slice(0, 2));
   }
 
-  const candidates = await loadCandidates(ids, allWords);
-  const withTokens = candidates.map((row) => ({ row, tokens: productTokens(row.title) }));
+  /**
+   * Два вида кандидати, за да е едновременно ТОЧНО и бързо:
+   *   • по адрес на продукта — за внесените цени от веригите (същият продукт);
+   *   • по думи от името — само за оферти БЕЗ адрес (оферти на хора), иначе
+   *     заявката по думи сканира целия каталог и струва секунда-две.
+   */
+  const urlMine = mine.filter((r) => r.source_url);
+  const wordMine = mine.filter((r) => !r.source_url);
+  const [byUrl, byWords] = await Promise.all([
+    urlMine.length ? loadCandidatesByUrl(urlMine.map((r) => r.source_url as string), ids) : [],
+    wordMine.length ? loadCandidates(ids, wordMine.flatMap((r) => productTokens(r.title).slice(0, 2))) : [],
+  ]);
+  const seenCandidate = new Set<string>();
+  const candidates = [...byUrl, ...byWords].filter((c) => {
+    if (seenCandidate.has(c.id)) return false;
+    seenCandidate.add(c.id);
+    return true;
+  });
+  const withTokens = candidates.map((row) => ({
+    row,
+    tokens: productTokens(row.title),
+    /** ⚡ Намерен по адрес → същият продукт, без евристики по име. */
+    byUrl: Boolean((row as CandidateWithUrl).same_product_url),
+  }));
 
   for (const row of mine) {
     const myTokens = tokensById.get(row.id) ?? [];
@@ -474,13 +525,15 @@ export async function compareForPosts(
     const seenTwin = new Set<string>();
     const twins: Array<{ row: CandidateRow; sim: number }> = [];
     for (const c of withTokens) {
-      if (!isSameProduct(myTokens, c.tokens)) continue;
-      if (!sizeCompatible(row.title, c.row.title)) continue;
+      // ⚡ Същият адрес на продукта = същият продукт → не пускаме евристиките по
+      // име (те са за оферти на хора, където адрес няма).
+      if (!c.byUrl && !isSameProduct(myTokens, c.tokens)) continue;
+      if (!c.byUrl && !sizeCompatible(row.title, c.row.title)) continue;
       // Пол/възраст и цвят трябва да са съвместими (мъжки ≠ дамски).
       if (!attributesCompatible(row.title, c.row.title)) continue;
       // Същата верига с друг артикул не е конкурент.
       if (sameShopDifferentItem(row.place_name, row.source_url, c.row.place_name, c.row.source_url)) continue;
-      const sim = titleSimilarity(myTokens, c.tokens);
+      const sim = c.byUrl ? 1 : titleSimilarity(myTokens, c.tokens);
       // В чипа в лентата влизат само почти идентични заглавия — иначе човекът
       // вижда твърдение „по-скъпо с 80%“, което се отнася за друг вариант на
       // продукта (същата серия, различен размер/вид).

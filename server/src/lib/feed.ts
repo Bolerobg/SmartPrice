@@ -250,25 +250,82 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
    * и чак после обогатяваме точно тези 15 реда от изгледа. CTE-то е MATERIALIZED,
    * за да не го „разплете“ планировчикът пак в скъпия вариант.
    */
+  /**
+   * 🔴 `v_posts_full` НЕ се ползва в лентата (проверено 21.10.2026).
+   *
+   * Защо: изгледът прави `HashAggregate` върху ВСИЧКИ публикувани оферти (56 011
+   * реда — реакции, коментари, отличия) и чак после се съединява с нашите 15.
+   * Планировчикът не подтиска филтъра вътре в агрегацията (пробвано и с
+   * `join lateral`) → лентата отговаряше 4–6 секунди, тоест на телефона „зарежда
+   * няколко стоки и увисва“.
+   *
+   * Затова: взимаме само 15-те оферти, автора им (една дребна подзаявка за
+   * отличието) и после — с още две кратки заявки по id — реакциите и броя
+   * коментари. Същите данни, само че за 15 реда, не за 56 000.
+   */
   const rows = await many<PostRow>(
     `with page as materialized (
-       select p.id
+       select p.*
          from posts p
          join profiles a on a.id = p.author_id
         where ${where.clauses.join(' and ')}
         order by ${orderSql}
         limit ${limitLiteral} offset ${offsetLiteral}
      )
-     select v.*, p.signal_count::int as signal_count, p.source, p.source_note, p.source_url
-       from page
-       join v_posts_full v on v.id = page.id
-       join posts p on p.id = page.id
-       join profiles a on a.id = v.author_id`,
+     select p.*,
+            p.signal_count::int as signal_count,
+            jsonb_build_object(
+              'id', a.id,
+              'name', a.name,
+              'handle', a.handle,
+              'avatar', a.avatar_url,
+              'isSupporter', a.is_supporter,
+              'badgeTitle', coalesce((
+                select b.title from profile_badges pb
+                  join badges b on b.id = pb.badge_id
+                 where pb.profile_id = a.id and pb.unlocked_at is not null
+                 order by b.sort_order limit 1
+              ), 'Нов в общността')
+            ) as author
+       from page p
+       join profiles a on a.id = p.author_id`,
     where.values
   );
 
   const ids = rows.map((r) => r.id);
   if (!ids.length) return [];
+
+  /**
+   * Реакциите и броят коментари за СТРАНИЦАТА (преди идваха от тежката изгледа).
+   * Две кратки заявки вместо агрегация на целия каталог.
+   */
+  const [reactionRows, commentCountRows] = await Promise.all([
+    many<{ post_id: string; reaction_key: string; cnt: number }>(
+      `select post_id, reaction_key, count(*)::int as cnt
+         from post_reactions
+        where post_id = any($1::uuid[])
+        group by 1, 2`,
+      [ids]
+    ),
+    many<{ post_id: string; n: number }>(
+      `select post_id, count(*)::int as n
+         from comments
+        where post_id = any($1::uuid[]) and status = 'published'
+        group by 1`,
+      [ids]
+    ),
+  ]);
+  const reactionsByPost = new Map<string, Record<string, number>>();
+  for (const r of reactionRows) {
+    const bucket = reactionsByPost.get(r.post_id) ?? {};
+    bucket[r.reaction_key] = Number(r.cnt) || 0;
+    reactionsByPost.set(r.post_id, bucket);
+  }
+  const commentsCountByPost = new Map(commentCountRows.map((c) => [c.post_id, Number(c.n) || 0]));
+  for (const row of rows) {
+    row.reactions = reactionsByPost.get(row.id) ?? {};
+    row.comments_count = commentsCountByPost.get(row.id) ?? 0;
+  }
 
   /**
    * ⚔️ Ценова проверка за ВСИЧКИ оферти на страницата с една заявка.
