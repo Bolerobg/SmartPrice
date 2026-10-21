@@ -34,6 +34,7 @@ import {
   getCoordinatesForPost,
 } from '@/lib/locationService';
 import { matchesUniversalSearch, SortMode, sortPostsSmart } from '@/lib/smartSearch';
+import { formatNumber } from '@/src/lib/format';
 import type { PostItem } from '@/types';
 
 /** Колко да изчакаме, преди да питаме сървъра (за да не удряме на всяка буква) */
@@ -212,6 +213,15 @@ export default function FeedScreen() {
    */
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
   const [chainChips, setChainChips] = useState<Array<{ name: string; offers: number }>>([]);
+  /**
+   * 📊 Колко цени от вериги има изобщо — показва се горе в потока.
+   * Идва заедно с чиповете (същата заявка), не искаме втора.
+   */
+  const [chainStats, setChainStats] = useState<{
+    offers: number;
+    chains: number;
+    cities: number;
+  } | null>(null);
 
   // 0) Кои вериги има в базата — за чиповете. Сменя ли се градът, питаме пак
   // (различните градове имат различни вериги с цени).
@@ -220,7 +230,9 @@ export default function FeedScreen() {
     api
       .chains(selectedCityFilter)
       .then((res) => {
-        if (alive) setChainChips((res.items ?? []).slice(0, 24));
+        if (!alive) return;
+        setChainChips((res.items ?? []).slice(0, 24));
+        if (res.stats) setChainStats(res.stats);
       })
       .catch(() => undefined);
     return () => {
@@ -946,6 +958,35 @@ export default function FeedScreen() {
           </View>
         </View>
       )}
+
+      {/*
+        📊 „53 367 цени от 42 вериги“ — на ВИДНО място, защото това е силата на
+        приложението: не само находките на хората, а и цените на веригите, с
+        които се сравняват. Докосване → таб „Магазини“ (там са веригите с цени
+        по категории).
+      */}
+      {chainStats && chainStats.offers > 0 ? (
+        <TouchableOpacity
+          style={styles.chainStatsCard}
+          activeOpacity={0.85}
+          onPress={() => router.push('/shops' as never)}
+          accessibilityLabel="Цени от веригите — виж магазините"
+        >
+          <View style={styles.chainStatsIcon}>
+            <Ionicons name="cart" size={16} color={COLORS.accentCyan} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.chainStatsTitle} numberOfLines={1}>
+              {formatNumber(chainStats.offers)} цени от {chainStats.chains} вериги
+            </Text>
+            <Text style={styles.chainStatsSub} numberOfLines={2}>
+              Кауфланд, Метро, Билла… в {chainStats.cities} града — сверяваме ги с находките на
+              хората
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      ) : null}
 
       {/* ПАДАЩО МЕНЮ ЗА ВСИЧКИ ГРАДОВЕ В БЪЛГАРИЯ */}
       <CityPickerDropdown
@@ -1699,6 +1740,39 @@ const styles = StyleSheet.create({
   chainChipSuggested: {
     borderColor: COLORS.accentCyan,
     backgroundColor: 'rgba(34,211,238,0.14)',
+  },
+  /* 📊 Брояч на внесените цени от веригите — горе в потока, на видно място. */
+  chainStatsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(34,211,238,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.35)',
+  },
+  chainStatsIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(34,211,238,0.16)',
+  },
+  chainStatsTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+  },
+  chainStatsSub: {
+    color: COLORS.textSecondary,
+    fontSize: 11.5,
+    lineHeight: 16,
+    marginTop: 2,
   },
   categoryChipText: {
     color: COLORS.textSecondary,

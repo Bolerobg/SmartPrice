@@ -915,9 +915,11 @@ export const api = {
   chains: (city?: string) => {
     const params = new URLSearchParams();
     if (city && city !== 'Всички градове') params.set('city', city);
-    return rawRequest<{ items: Array<{ name: string; offers: number; minPrice: number | null }> }>(
-      `/api/posts/chains${params.toString() ? `?${params.toString()}` : ''}`
-    );
+    return rawRequest<{
+      /** 📊 Обобщение за видимия брояч в потока: колко цени, от колко вериги, в колко града. */
+      stats: { offers: number; chains: number; cities: number };
+      items: Array<{ name: string; offers: number; minPrice: number | null }>;
+    }>(`/api/posts/chains${params.toString() ? `?${params.toString()}` : ''}`);
   },
 
   venueRanking: (query: { polarity: 'red' | 'green'; category?: string; city?: string; limit?: number }) => {

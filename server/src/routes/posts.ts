@@ -246,7 +246,25 @@ export default async function postRoutes(app: FastifyInstance) {
         limit $2`,
       [q.city ?? null, q.limit]
     );
+    /**
+     * 📊 Обобщението за потребителя: колко цени от вериги има, от колко вериги
+     * и в колко града. Показва се на видно място в потока („🛒 53 367 цени от
+     * 42 вериги“) — това е силата на приложението и е честно да се вижда.
+     * Питаме с една заявка, заедно с чиповете (не искаме втора заявка от app-а).
+     */
+    const totals = await one<{ offers: string; chains: string; cities: string }>(
+      `select count(*)::text as offers,
+              count(distinct place_name)::text as chains,
+              count(distinct city)::text as cities
+         from posts
+        where status = 'published' and platform_tag = 'Супермаркет'`
+    );
     return {
+      stats: {
+        offers: Number(totals?.offers ?? 0) || 0,
+        chains: Number(totals?.chains ?? 0) || 0,
+        cities: Number(totals?.cities ?? 0) || 0,
+      },
       items: rows.map((r) => ({
         name: r.name,
         offers: Number(r.offers) || 0,
