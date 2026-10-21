@@ -978,10 +978,13 @@ export default function FeedScreen() {
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.chainStatsTitle} numberOfLines={1}>
               {formatNumber(chainStats.offers)} цени от {chainStats.chains} вериги
+              {/* Избран град → казваме кой е, вместо да броим „1 града“. */}
+              {selectedCityFilter !== 'Всички градове' ? ` в ${selectedCityFilter}` : ''}
             </Text>
             <Text style={styles.chainStatsSub} numberOfLines={2}>
-              Кауфланд, Метро, Билла… в {chainStats.cities} града — сверяваме ги с находките на
-              хората
+              Кауфланд, Метро, Билла…{' '}
+              {chainStats.cities > 1 ? `в ${chainStats.cities} града` : 'тук'} — сверяваме ги с
+              находките на хората
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
