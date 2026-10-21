@@ -434,6 +434,18 @@ export interface ForgotPasswordResponse {
   devCode?: string;
 }
 
+export interface ChainDifference {
+  category: string;
+  cheapest_chain: string;
+  cheapest_median: number;
+  cheapest_posts: number;
+  priciest_chain: string;
+  priciest_median: number;
+  diff_eur: number;
+  diff_pct: number;
+  chains_compared: number;
+}
+
 export interface BasketComparison {
   city: string | null;
   itemsTotal: number;
@@ -923,6 +935,18 @@ export const api = {
    * Класация на обектите за „Радар“ — смята се в базата върху ВСИЧКИ постове,
    * не само върху заредените (иначе черният списък показваше 1 обект).
    */
+  /**
+   * ⚖️ „Разлики между веригите“ — по категории: най-евтината и най-скъпата
+   * верига и колко се различават (сметката е на сървъра, по ТИПИЧНА цена).
+   */
+  chainDifferences: (city?: string) => {
+    const params = new URLSearchParams();
+    if (city && city !== 'Всички градове') params.set('city', city);
+    return rawRequest<{ items: ChainDifference[] }>(
+      `/api/chains/differences${params.toString() ? `?${params.toString()}` : ''}`
+    );
+  },
+
   /**
    * 🛒 Колко би струвал ЦЯЛ списък за покупки по вериги.
    *

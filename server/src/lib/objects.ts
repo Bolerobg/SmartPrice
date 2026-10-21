@@ -277,6 +277,95 @@ export async function cheapestShopsByCategory(options?: {
   }));
 }
 
+/**
+ * ⚖️ „Разлики между веригите“ — къде е най-евтино и колко се различава.
+ *
+ * Как се смята (честно): за всяка категория сравняваме веригите по ТИПИЧНАТА им
+ * цена в категорията (медианата на офертите), не по „най-евтината оферта“.
+ * Изискване: поне 5 оферти на верига (иначе 2 артикула решават класация) и поне
+ * 3 вериги за сравнение. Показваме най-евтината и най-скъпата + разликата в € и %.
+ */
+export interface ChainDifference {
+  category: string;
+  cheapest_chain: string;
+  cheapest_median: number;
+  cheapest_posts: number;
+  priciest_chain: string;
+  priciest_median: number;
+  diff_eur: number;
+  diff_pct: number;
+  chains_compared: number;
+}
+
+export async function chainDifferences(options?: {
+  city?: string | null;
+  limit?: number;
+  minPosts?: number;
+}): Promise<ChainDifference[]> {
+  const city = options?.city?.trim() || null;
+  const limit = Math.max(1, Math.min(60, Number(options?.limit ?? 24) || 24));
+  const minPosts = Math.max(2, Math.min(50, Number(options?.minPosts ?? 5) || 5));
+
+  const rows = await many<{
+    category: string;
+    cheapest_chain: string;
+    cheapest_median: number;
+    cheapest_posts: number;
+    priciest_chain: string;
+    priciest_median: number;
+    chains_compared: number;
+  }>(
+    `with cp as (
+       select coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) as category,
+              btrim(p.place_name) as chain,
+              percentile_cont(0.5) within group (order by p.price_paid)::float as median,
+              count(*)::int as posts
+         from posts p
+        where p.status = 'published'
+          and p.price_paid > 0
+          and p.platform_tag = '${CHAIN_PLATFORM_TAG}'
+          and ($1::text is null or lower(p.city) = lower($1))
+        group by 1, 2
+       having count(*) >= $3
+     ),
+     ranked as (
+       select *,
+              row_number() over (partition by category order by median asc) as rn_cheap,
+              row_number() over (partition by category order by median desc) as rn_dear,
+              count(*) over (partition by category)::int as chains
+         from cp
+     )
+     select c.category,
+            c.chain as cheapest_chain,
+            c.median as cheapest_median,
+            c.posts as cheapest_posts,
+            d.chain as priciest_chain,
+            d.median as priciest_median,
+            c.chains as chains_compared
+       from ranked c
+       join ranked d on d.category = c.category and d.rn_dear = 1
+      where c.rn_cheap = 1
+        and c.chains >= 3
+        and c.median > 0
+        and d.median > c.median
+      order by (d.median / c.median) desc, c.category asc
+      limit $2`,
+    [city, limit, minPosts]
+  );
+
+  return rows.map((r) => ({
+    category: r.category,
+    cheapest_chain: r.cheapest_chain,
+    cheapest_median: r.cheapest_median,
+    cheapest_posts: r.cheapest_posts,
+    priciest_chain: r.priciest_chain,
+    priciest_median: r.priciest_median,
+    diff_eur: Number((r.priciest_median - r.cheapest_median).toFixed(2)),
+    diff_pct: Math.round((1 - r.cheapest_median / r.priciest_median) * 100),
+    chains_compared: r.chains_compared,
+  }));
+}
+
 const OBJECT_COLUMNS = `
   slug, place_name, city, signals_count, reporters_count, green_count, red_count,
   min_price, max_price, avg_price, last_seen::text, first_seen::text, helped_total,

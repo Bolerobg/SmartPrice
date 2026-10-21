@@ -11,6 +11,7 @@ import { checkShopPrice } from '../lib/shopPrice.js';
 import { isAggregatorSourceUrl } from '../lib/mappers.js';
 import { priceDuel } from '../lib/priceDuel.js';
 import { compareBasket } from '../lib/basket.js';
+import { chainDifferences } from '../lib/objects.js';
 
 const CATEGORIES = [
   'restaurants',
@@ -218,6 +219,21 @@ export default async function postRoutes(app: FastifyInstance) {
         hasReceipt: Boolean(r.has_receipt),
       })),
     };
+  });
+
+  /**
+   * ⚖️ „Разлики между веригите“ — по категории: къде е най-евтино и колко
+   * се различава от най-скъпата верига. Публичен (без вход) — това е най-ясната
+   * картина на ползата от приложението.
+   */
+  app.get('/api/chains/differences', async (req) => {
+    const q = z
+      .object({
+        city: z.string().trim().max(80).optional(),
+        limit: z.coerce.number().int().min(1).max(60).default(24),
+      })
+      .parse(req.query ?? {});
+    return { items: await chainDifferences({ city: q.city ?? null, limit: q.limit }) };
   });
 
   /**

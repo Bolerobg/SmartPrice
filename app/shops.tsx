@@ -195,6 +195,17 @@ export default function ShopsScreen() {
               ) : null}
             </View>
 
+            <TouchableOpacity
+              style={styles.ruleBox}
+              activeOpacity={0.85}
+              onPress={() => router.push('/chains-compare' as never)}
+            >
+              <Text style={styles.ruleText}>
+                ⚖️ Искаш ли да видиш къде е най-евтино По категории между веригите? Докосни тук →
+                „Разлики между веригите“.
+              </Text>
+            </TouchableOpacity>
+
             {!loading && items.length > 0 ? (
               <Text style={styles.countLine}>
                 {total > items.length ? `Показвам ${items.length} от ${total} магазина` : `${items.length} магазина`}

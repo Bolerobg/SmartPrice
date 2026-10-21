@@ -993,6 +993,27 @@ export default function FeedScreen() {
         </TouchableOpacity>
       ) : null}
 
+      {/* ⚖️ Две кратки препратки: „Разлики между веригите“ (къде е най-евтино по
+          категории) и „Как работи“ (простичко обяснение + прозрачност). */}
+      <View style={styles.quickLinksRow}>
+        <TouchableOpacity
+          style={styles.quickLink}
+          activeOpacity={0.85}
+          onPress={() => router.push('/chains-compare' as never)}
+        >
+          <Ionicons name="swap-horizontal" size={13} color={COLORS.accentCyan} />
+          <Text style={styles.quickLinkText}>Разлики между веригите</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.quickLink}
+          activeOpacity={0.85}
+          onPress={() => router.push('/how-it-works' as never)}
+        >
+          <Ionicons name="information-circle-outline" size={13} color={COLORS.textSecondary} />
+          <Text style={styles.quickLinkText}>Как работи</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* ПАДАЩО МЕНЮ ЗА ВСИЧКИ ГРАДОВЕ В БЪЛГАРИЯ */}
       <CityPickerDropdown
         selectedCity={selectedCityFilter}
@@ -1741,6 +1762,21 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accentIndigo,
     borderColor: 'rgba(255, 255, 255, 0.24)',
   },
+  /* ⚖️ Бързи препратки под брояча: разлики между вериги + „Как работи“. */
+  quickLinksRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  quickLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  quickLinkText: { color: COLORS.textSecondary, fontSize: 11.5, fontWeight: '800' },
+
   /** Подсказване: написаното съвпада с тази верига („🔍 кауфланд“). */
   chainChipSuggested: {
     borderColor: COLORS.accentCyan,
