@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { many, one, tx } from '../db.js';
 import { requireUserId, optionalUserId } from '../lib/auth.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
-import { countPosts, loadPosts, type SortMode } from '../lib/feed.js';
+import { countPosts, loadPosts, type FeedFilters, type SortMode } from '../lib/feed.js';
 import { loadFullProfile } from '../lib/profile.js';
 import { getSetting } from '../lib/settings.js';
 import { checkFirstToComplete } from '../lib/sponsorRaffles.js';
@@ -162,11 +162,13 @@ export default async function postRoutes(app: FastifyInstance) {
      *      го няма по име (напр. дума от бележка).
      */
     const isText = Boolean(filters.q && filters.q.trim());
-    let scan = isText ? { ...filters, searchDepth: 'primary' as const } : filters;
+    // Типът се задава изрично: иначе TS стеснява searchDepth до 'primary' и
+    // следващото присвояване на 'full' гърми (хванато от tsc).
+    let scan: FeedFilters = isText ? { ...filters, searchDepth: 'primary' } : filters;
     let [items, total] = await Promise.all([loadPosts(scan, userId), countPosts(scan)]);
 
     if (isText && items.length === 0 && filters.offset === 0) {
-      scan = { ...filters, searchDepth: 'full' as const };
+      scan = { ...filters, searchDepth: 'full' };
       [items, total] = await Promise.all([loadPosts(scan, userId), countPosts(scan)]);
     }
 
