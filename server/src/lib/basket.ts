@@ -223,20 +223,21 @@ export async function compareBasket(
   }
 
   /**
-   * Подредбата трябва да съвпада с това, което човекът вижда: първо веригите,
-   * които покриват списъка (поне 60 %), подредени по ЦЕНА — защото „къде да
-   * пазарувам“ се решава по цена. Веригите с по-малко от половината продукти
-   * отиват най-отдолу (не могат да покрият списъка, значи не са отговор).
+   * Подредба (честна): първо веригите, които покриват НАЙ-МНОГО от списъка, а
+   * вътре в тях — по цена. Иначе 4-продуктова сметка „печелеше“ срещу
+   * 5-продуктова и човекът сравняваше различни неща (проверено на живо:
+   * Метро 7.85 € за 4 продукта срещу МИНИМАРТ 7.86 € за 5).
+   * Най-евтината ЕДНА верига = първият ред, за да съвпада с това, което се вижда.
    */
-  const all = Array.from(totals.values());
+  const all = Array.from(totals.values()).sort(
+    (a, b) => b.found - a.found || a.total - b.total
+  );
   const minCoverage = Math.max(
     1,
     Math.min(rows.length, Number(opts?.minCoverage ?? Math.ceil(rows.length * 0.6)) || 1)
   );
-  const eligible = all.filter((c) => c.found >= minCoverage).sort((a, b) => a.total - b.total);
-  const rest = all.filter((c) => c.found < minCoverage).sort((a, b) => b.found - a.found || a.total - b.total);
-  const chains = [...eligible, ...rest];
-  const best = eligible[0] ?? null;
+  const chains = all;
+  const best = all.find((c) => c.found >= minCoverage) ?? all[0] ?? null;
 
   // Най-изгодна ДВОЙКА: за всеки продукт взимаме по-евтиното от двете вериги.
   let bestPair: BasketPairTotal | null = null;
@@ -271,8 +272,13 @@ export async function compareBasket(
     best,
     bestPair,
     itemsTotal: rows.length,
+    /**
+     * „Спестяваш X € с комбинация от две вериги“ — само ако ЕДНАТА верига
+     * покрива ЦЕЛИЯ списък. Иначе сравняваме 6 продукта в двойката срещу 5 в
+     * едната верига и „спестяването“ е измама.
+     */
     pairSaving:
-      bestPair && best && bestPair.total < best.total
+      bestPair && best && best.found === rows.length && bestPair.total < best.total
         ? Number((best.total - bestPair.total).toFixed(2))
         : null,
   };
