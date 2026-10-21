@@ -346,7 +346,7 @@ async function loadCandidates(excludeIds: string[], words: string[]): Promise<Ca
         -- както идват цените от веригите и от касовите бележки) не се хващаше от
         -- шаблон с малки букви и дуелът оставаше празен, макар същият продукт да
         -- е в базата 5 пъти. Затова търсим и през sp_fold (сгъва кирилицата).
-        and (p.title ilike any($2::text[]) or sp_fold(p.title) like any($2::text[]))
+        and (p.title ilike any($2::text[]) or p.title_fold like any($2::text[]))
       order by p.price_paid asc
       limit 1500`,
     [excludeIds, patterns]

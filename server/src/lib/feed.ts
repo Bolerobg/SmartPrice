@@ -118,8 +118,11 @@ function buildWhere(filters: FeedFilters): Where {
             // сгъва кирилица, затова ilike не намираше „София“ по „софия“.
             const p = bind(`%${word}%`);
             clauses.push(`(
-              sp_fold(p.title) like ${p}
-              or sp_fold(p.description) like ${p}
+              -- ⚡ Сгънатите колони (title_fold / description_fold) са СЪХРАНЕНИ и с
+              -- триграм индекс — вместо sp_fold(...), който планировчикът разгъва и
+              -- индексът не се хващаше (търсенето отговаряше 10–12 секунди).
+              p.title_fold like ${p}
+              or p.description_fold like ${p}
               or sp_fold(p.place_name) like ${p}
               or sp_fold(p.city) like ${p}
               or sp_fold(p.address) like ${p}

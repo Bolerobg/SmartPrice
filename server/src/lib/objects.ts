@@ -499,7 +499,7 @@ export async function searchObjects(params: {
                  = md5(lower(btrim(coalesce(v.place_name,'')) || '|' || lower(btrim(coalesce(v.city,'')))))
              and p2.status = 'published'
              and (p2.title ilike $${args.length}
-                  or sp_fold(p2.title) like lower($${args.length})
+                  or p2.title_fold like lower($${args.length})
                   or p2.description ilike $${args.length})
         ))`
     );
@@ -766,9 +766,9 @@ export async function searchObjectOffers(
     args.push(`%${q}%`);
     const p = `$${args.length}`;
     search = ` and (p.title ilike ${p}
-                 or sp_fold(p.title) like lower(${p})
+                 or p.title_fold like lower(${p})
                  or p.description ilike ${p}
-                 or sp_fold(p.description) like lower(${p})
+                 or p.description_fold like lower(${p})
                  or upper(replace(p.public_code, '-', '')) like upper(replace(${p}, '-', '')))`;
   }
   const where = `p.status = 'published'

@@ -98,7 +98,7 @@ async function loadChainOffers(city: string | null, words: string[]): Promise<Ca
         and p.price_paid > 0
         and p.platform_tag = 'Супермаркет'
         and ($1::text is null or lower(p.city) = lower($1))
-        and (sp_fold(p.title) like any($2::text[]) or p.title ilike any($2::text[]))
+        and (p.title_fold like any($2::text[]) or p.title ilike any($2::text[]))
       limit 4000`,
     [city, patterns]
   );
