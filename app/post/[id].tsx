@@ -139,7 +139,14 @@ export default function PostDetailScreen() {
    * а не до продукта в магазина.
    */
   const hasShopLink = Boolean(post?.shopUrl);
-  const isCatalogImport = Boolean(post?.sourceUrl) && !hasShopLink;
+  /**
+   * 🛒 Оферта, внесена от каталозите на веригите (Метро, Кауфланд…).
+   *
+   * Опознава се по ИЗТОЧНИКА и етикета, не по линка: линкът към чуждия сайт е
+   * премахнат (по искане на потребителя), затова не може да служи за проверка.
+   */
+  const isCatalogImport =
+    post?.source === 'scraper' || post?.platformTag === 'Супермаркет';
 
   // Още теглим от сървъра — не показваме „не е намерена“ преждевременно.
   if (!post && !remoteTried) {
@@ -471,7 +478,11 @@ export default function PostDetailScreen() {
           <View style={styles.priceComparisonCard}>
             <View style={{ flex: 1 }}>
               <Text style={styles.priceBoxLabel}>
-                {isGreen ? 'ПЛАТЕНА ТОП ЦЕНА' : 'ПЛАТЕНА СУМА (КАПАН)'}
+                {isCatalogImport
+                  ? 'ЦЕНА В ВЕРИГАТА'
+                  : isGreen
+                    ? 'ПЛАТЕНА ТОП ЦЕНА'
+                    : 'ПЛАТЕНА СУМА (КАПАН)'}
               </Text>
               <Text style={[styles.priceBoxValue, { color: accentColor }]}>
                 {post.pricePaid.toFixed(2)} {post.currency}
@@ -571,7 +582,10 @@ export default function PostDetailScreen() {
             </View>
 
             {/* Сверка с магазина — общ компонент, за да е еднакво и при гостите */}
-            {post.sourceUrl ? (
+            {/* Сверка с магазина: показва се САМО когато има истински линк към
+                онлайн магазин. За внесените от веригите цени няма какво да
+                проверим (и не искаме да четем чуждия сайт). */}
+            {hasShopLink ? (
               <ShopPriceCompare postId={post.id} ourPriceEur={post.pricePaid} />
             ) : null}
 
@@ -579,7 +593,7 @@ export default function PostDetailScreen() {
                 При внесени от агрегатор цени (supermarketbg.eu) няма как да дадем
                 линк към конкретния магазин, затова по-добре без бутон, отколкото
                 бутон, който изхвърля човека в чуждия сайт. */}
-            {!hasShopLink && post.sourceUrl ? null : (
+            {!hasShopLink && isCatalogImport ? null : (
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => {

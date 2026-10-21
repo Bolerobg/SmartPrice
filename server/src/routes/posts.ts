@@ -8,6 +8,7 @@ import { loadFullProfile } from '../lib/profile.js';
 import { getSetting } from '../lib/settings.js';
 import { checkFirstToComplete } from '../lib/sponsorRaffles.js';
 import { checkShopPrice } from '../lib/shopPrice.js';
+import { isAggregatorSourceUrl } from '../lib/mappers.js';
 import { priceDuel } from '../lib/priceDuel.js';
 import { compareBasket } from '../lib/basket.js';
 
@@ -382,6 +383,15 @@ export default async function postRoutes(app: FastifyInstance) {
     }>('select source_url, place_name, price_paid, title from posts where id = $1', [id]);
     if (!row) throw notFound('Офертата не е намерена.');
     if (!row.source_url) throw badRequest('Тази оферта е от физически обект — няма линк към онлайн магазин.');
+    /**
+     * ⚠️ Цените, внесени от агрегатор, НЕ се проверяват в „магазина“: линкът
+     * води до чуждия сайт (от който ги внасяме) и не е линк към конкретния
+     * магазин. Затова отказваме, вместо да четем чужд сайт и да показваме
+     * подвеждащ резултат.
+     */
+    if (isAggregatorSourceUrl(row.source_url)) {
+      throw badRequest('Тази цена е сверена от каталозите на веригите — няма линк за проверка в магазин.');
+    }
 
     const force = String((req.query as Record<string, unknown>)?.refresh ?? '') === '1';
     const result = await checkShopPrice(row.source_url, force, id);

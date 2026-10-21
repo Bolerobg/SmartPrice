@@ -38,6 +38,8 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
    * пишем „потвърдена в сайта“, не „на място“.
    */
   const online = Boolean(post.sourceUrl);
+  /** 🛒 Цена от каталозите на веригите — трети изказ (нито „на място“, нито „в сайта“). */
+  const chainPrice = post.source === 'scraper' || post.platformTag === 'Супермаркет';
   const { confirmPriceValidToday, reportUpdatedPrice, userProfile } = useApp();
 
   const stats = useMemo(() => computePriceStats(post), [post]);
@@ -212,7 +214,7 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
       {/* ------------------------------------------------ Хронология */}
       <View style={styles.timeline}>
         {visibleEntries.map((entry, index) => {
-          const meta = entryLabel(entry, online);
+          const meta = entryLabel(entry, online, chainPrice);
           const dotColor =
             meta.color === 'green'
               ? COLORS.greenBright
@@ -386,7 +388,7 @@ export const PriceHistoryCard: React.FC<Props> = ({ post }) => {
       </View>
 
       <Text style={styles.footNote}>
-        {freshnessLabel(stats, online)} ·{' '}
+        {freshnessLabel(stats, online, chainPrice)} ·{' '}
         {stats.entries.length > 0
           ? `последно: ${formatRelativeTime(stats.entries[stats.entries.length - 1]!.recordedAt)}`
           : 'няма записи'}

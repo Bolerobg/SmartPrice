@@ -55,6 +55,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
   const [showComparisonImage, setShowComparisonImage] = useState(false);
 
   const isGreen = post.polarity === 'green';
+  /**
+   * 🛒 Цена, внесена от каталозите на веригите (Метро, Кауфланд…): няма „платена“
+   * цена и НЯМА линк навън — затова на картата не показваме нито „платена“,
+   * нито бутон към Google Maps (мястото е верига, не обект на улицата).
+   */
+  const isCatalogShop = post.source === 'scraper' || post.platformTag === 'Супермаркет';
   const accentColor = isGreen ? COLORS.greenPrimary : COLORS.redPrimary;
   const accentSoftBg = isGreen ? COLORS.greenSoftBg : COLORS.redSoftBg;
   const accentBorder = isGreen ? COLORS.greenBorder : COLORS.redBorder;
@@ -520,7 +526,11 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
           <View style={styles.priceOverlayBar}>
             <View style={styles.priceLeftCol}>
               <Text style={styles.priceOverlayLabel} numberOfLines={1}>
-                {isGreen ? 'ПЛАТЕНА ТОП ЦЕНА' : 'ПЛАТЕНА СУМА (КАПАН)'}
+                {isCatalogShop
+                  ? 'ЦЕНА В ВЕРИГАТА'
+                  : isGreen
+                    ? 'ПЛАТЕНА ТОП ЦЕНА'
+                    : 'ПЛАТЕНА СУМА (КАПАН)'}
               </Text>
               <View style={styles.priceNumbersRow}>
                 <Text style={[styles.priceMainValue, { color: accentColor }]}>
@@ -579,7 +589,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, distanceKm }) => {
           Искането е ясно: на главната оферта да няма линк към магазина. Линкът
           остава в екрана на офертата, а тук картата е само за физически обекти —
           за тях води до Google Maps с адреса. */}
-      {post.sourceUrl ? null : (
+      {post.shopUrl || isCatalogShop ? null : (
         /* Google Maps Адрес и Локация на обекта (само за физически обекти) */
         <TouchableOpacity
           activeOpacity={0.82}

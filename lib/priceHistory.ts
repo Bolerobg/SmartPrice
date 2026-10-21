@@ -136,7 +136,18 @@ export function priceTrendLabel(stats: PriceStats): string | null {
  * `online` = офертата е от онлайн магазин: тогава не „проверена на място“, а
  * „проверена в сайта“ — човек не ходи никъде, отваря продукта.
  */
-export function freshnessLabel(stats: PriceStats, online = false): string {
+export function freshnessLabel(stats: PriceStats, online = false, chain = false): string {
+  /**
+   * 🛒 Цена, внесена от каталозите на веригите: не е „на място“ и не е „в сайта“
+   * на магазина — сверяваме я ние, от каталозите на веригите. Затова трети, честен
+   * изказ („сверена от SmartPrice“), вместо „проверена от никого“.
+   */
+  if (chain) {
+    if (stats.daysSinceCheck === null) return 'сверена от SmartPrice';
+    if (stats.daysSinceCheck === 0) return 'сверена днес';
+    if (stats.daysSinceCheck === 1) return 'сверена вчера';
+    return `сверена преди ${stats.daysSinceCheck} дни`;
+  }
   if (stats.daysSinceCheck === null) return 'още не е проверявана';
   const where = online ? ' в сайта' : ' на място';
   if (stats.daysSinceCheck === 0) return online ? 'проверена днес в сайта' : 'проверена днес';
@@ -145,7 +156,7 @@ export function freshnessLabel(stats: PriceStats, online = false): string {
 }
 
 /** Описание на едно събитие в историята — човешки, с посока. */
-export function entryLabel(entry: PriceHistoryEntry, online = false): {
+export function entryLabel(entry: PriceHistoryEntry, online = false, chain = false): {
   title: string;
   icon: string;
   color: 'blue' | 'green' | 'amber';
@@ -155,7 +166,11 @@ export function entryLabel(entry: PriceHistoryEntry, online = false): {
   }
   if (entry.status === 'confirmed') {
     return {
-      title: online ? 'Потвърдена в сайта' : 'Потвърдена на място',
+      title: chain
+        ? 'Потвърдена от SmartPrice'
+        : online
+          ? 'Потвърдена в сайта'
+          : 'Потвърдена на място',
       icon: 'checkmark-circle',
       color: 'green',
     };
