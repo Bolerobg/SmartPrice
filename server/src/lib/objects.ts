@@ -212,7 +212,9 @@ export async function cheapestShopsByCategory(options?: {
   }>(
     `with shop_posts as (
        select md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) as slug,
-              p.place_name, p.category, p.price_paid::float as price
+              p.place_name,
+              coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) as category,
+              p.price_paid::float as price
          from posts p
         where p.status = 'published' and p.price_paid > 0
           -- Онлайн магазини И вериги за супермаркети: сравняваме типичната цена
@@ -452,7 +454,10 @@ export async function loadObject(slug: string): Promise<{
    */
   const categoriesStats = isShop
     ? await many<ObjectCategoryStat>(
-        `select p.category,
+        // Категорията: ако редът носи истинската категория на продукта (така
+        // идват цените от веригите на супермаркети — „Сирене“, „Зеленчуци“),
+        // групираме по нея; иначе по общата категория на приложението.
+        `select coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) as category,
                 count(*)::int as posts,
                 min(p.price_paid)::float as min_price,
                 avg(p.price_paid)::float as avg_price,
