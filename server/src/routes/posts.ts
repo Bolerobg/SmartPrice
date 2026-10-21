@@ -238,7 +238,7 @@ export default async function postRoutes(app: FastifyInstance) {
               min(p.price_paid)::float as min_price
          from posts p
         where p.status = 'published'
-          and p.tags @> array['supermarketbg.eu']
+          and p.platform_tag = 'Супермаркет'
           and btrim(coalesce(p.place_name, '')) <> ''
           and ($1::text is null or lower(p.city) = lower($1))
         group by 1
