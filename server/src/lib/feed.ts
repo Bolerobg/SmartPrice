@@ -227,8 +227,17 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
   // чак после избраното подреждане (най-нови/най-евтини).
   const orderSql = where.rank ? `${where.rank} asc, ${sortSql}` : sortSql;
 
-  const limitPlaceholder = `$${where.values.length + 1}`;
-  const offsetPlaceholder = `$${where.values.length + 2}`;
+  /**
+   * 🔴 LIMIT/OFFSET НЕ се подават като параметри!
+   *
+   * Проверено на живо 21.10.2026: със `limit $16` планировчикът не знае колко
+   * реда ще върне и избира план, който сортира целия каталог — заявката на
+   * лентата падаше от 60 ms на 4 285 ms („зарежда няколко стоки и увисва“).
+   * Като литерали числата са валидирани вече (zod в маршрута), затова ги слагаме
+   * директно и планировчикът вижда `limit 15` и ползва индекса.
+   */
+  const limitLiteral = Math.max(1, Math.min(60, Number(filters.limit) || 15));
+  const offsetLiteral = Math.max(0, Math.min(1_000_000, Number(filters.offset) || 0));
 
   /**
    * ⚠️ Редът на заявката е важен за скоростта (проверено на живо 21.10.2026):
@@ -248,14 +257,14 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
          join profiles a on a.id = p.author_id
         where ${where.clauses.join(' and ')}
         order by ${orderSql}
-        limit ${limitPlaceholder} offset ${offsetPlaceholder}
+        limit ${limitLiteral} offset ${offsetLiteral}
      )
      select v.*, p.signal_count::int as signal_count, p.source, p.source_note, p.source_url
        from page
        join v_posts_full v on v.id = page.id
        join posts p on p.id = page.id
        join profiles a on a.id = v.author_id`,
-    [...where.values, filters.limit, filters.offset]
+    where.values
   );
 
   const ids = rows.map((r) => r.id);

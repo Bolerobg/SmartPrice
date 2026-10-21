@@ -363,7 +363,7 @@ export async function chainDifferences(options?: {
          from cp a
          join cp b on b.category = a.category and b.product = a.product and b.chain > a.chain
         group by 1, 2, 3
-       having count(*) >= $3
+       having count(*) >= $2
      ),
      best as (
        select *, row_number() over (partition by category order by matched desc) as rn
@@ -376,9 +376,9 @@ export async function chainDifferences(options?: {
        from best b
       where b.rn = 1
       order by abs(b.a_total - b.b_total) desc
-      limit $2`,
-    [city, limit, minPosts]
-  );
+      limit ${limit}`,
+      [city, minPosts]
+      );
 
   return rows.map((r) => {
     // По-евтината верига от двойката — тя е „най-евтино“, а другата е „най-скъпо“.
@@ -422,7 +422,7 @@ const OBJECTS_FAST = (baseFilter: string) => `
       left join receipts r on r.post_id = p.id
      where p.status = 'published' ${baseFilter}
   )
-  select md5(lower(btrim(coalesce(place_name, '')) || '|' || lower(btrim(coalesce(city, '')))) as slug,
+  select md5(lower(btrim(coalesce(place_name, '')) || '|' || lower(btrim(coalesce(city, ''))))) as slug,
          min(btrim(coalesce(place_name, ''))) as place_name,
          min(btrim(coalesce(city, ''))) as city,
          count(*)::int as signals_count,
@@ -534,6 +534,8 @@ export async function searchObjects(params: {
   if (kind === 'place') baseFilter.push(`and (${PLACE_NAME_SQL.replace(/place_name/g, 'p.place_name')})`);
   const fast = OBJECTS_FAST(baseFilter.join(' '));
 
+  // ⚠️ LIMIT/OFFSET като литерали — иначе планировчикът избира лош план (виж
+  // бележката в lib/feed.ts: 60 ms → 4 285 ms заради `limit $n`).
   const rows = await many<ObjectRow>(
     `select * from (${fast}) v ${clause} order by ${order} limit ${limit} offset ${offset}`,
     args
