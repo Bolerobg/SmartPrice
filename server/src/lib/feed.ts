@@ -195,9 +195,12 @@ function buildWhere(filters: FeedFilters): Where {
     const phraseText = filters.q.trim().toLowerCase().replace(/'/g, "''");
     const phrase = `'%${phraseText}%'`;
     rank = `case
-              when sp_fold(p.title) like ${phrase} then 0
+              -- Най-напред продуктите, чиято КАТЕГОРИЯ е това, което търсиш:
+              -- при „сирене“ човек иска сирената, не баничките „със сирене“.
               when sp_fold(coalesce(p.custom_category_label, '')) like ${phrase}
-                   or sp_fold(sp_category_synonyms(p.category)) like ${phrase} then 1
+                   or sp_fold(sp_category_synonyms(p.category)) like ${phrase} then 0
+              when sp_fold(p.title) like ${phrase} then 1
+              -- Верига/магазин: „кауфланд“ вади първо офертите на Кауфланд.
               when sp_fold(p.place_name) like ${phrase} then 2
               else 3
             end`;
