@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -103,6 +103,47 @@ export default function ObjectScreen() {
   const [offersQ, setOffersQ] = useState('');
   const [offersBusy, setOffersBusy] = useState(false);
 
+  /**
+   * ↑ „Обратно най-горе“ — същото поведение като в „Поток“ и „Радар“.
+   *
+   * Защо: с 60–200 оферти човек, който е слязъл надолу, трябва да изтегли целия
+   * списък нагоре, за да стигне пак до търсачката. Затова при скрол надолу се
+   * показва бутон „↑ Нагоре“, който връща екрана в началото.
+   */
+  const scrollRef = useRef<ScrollView>(null);
+  const [showToTop, setShowToTop] = useState(false);
+
+  const scrollScreenToTop = React.useCallback((animated = true) => {
+    try {
+      scrollRef.current?.scrollTo({ y: 0, animated });
+    } catch {
+      /* екранът още не е готов */
+    }
+    if (typeof document !== 'undefined') {
+      // В уеб версията `scrollTo` понякога не стига — дърпаме и истинския скролер.
+      try {
+        const all = Array.from(document.querySelectorAll('div'));
+        for (let i = 0; i < all.length && i < 60; i += 1) {
+          const el = all[i] as HTMLElement;
+          let oy = '';
+          try {
+            oy = window.getComputedStyle(el).overflowY;
+          } catch {
+            oy = '';
+          }
+          if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+            el.scrollTop = 0;
+            break;
+          }
+        }
+      } catch {
+        /* не пречи на разглеждането */
+      }
+    }
+    // Програмното скролване не винаги ражда onScroll (в web) — скриваме бутона на ръка.
+    setShowToTop(false);
+  }, []);
+
   const loadOffers = React.useCallback(
     async (q: string, offset: number, append: boolean) => {
       if (!slug) return;
@@ -187,7 +228,17 @@ export default function ObjectScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        onScroll={(e) => {
+          // Бутонът се появява чак когато човекът е слязъл надолу (иначе пречи).
+          const y = e.nativeEvent.contentOffset.y;
+          setShowToTop((prev) => (prev === y > 700 ? prev : y > 700));
+        }}
+        scrollEventThrottle={64}
+      >
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => goBack(router)} style={styles.back}>
             <Ionicons name="chevron-back" size={22} color={COLORS.textPrimary} />
@@ -539,6 +590,20 @@ export default function ObjectScreen() {
           Всички цени са в €. Данните идват от сигнали на хората — обектът се разпознава по място и град.
         </Text>
       </ScrollView>
+
+      {/* ↑ Обратно най-горе — същото като в „Поток“ и „Радар“, за да не се налага
+          човекът да изтегля 60–200 оферти, за да стигне пак до търсачката. */}
+      {showToTop ? (
+        <TouchableOpacity
+          style={styles.toTop}
+          activeOpacity={0.85}
+          onPress={() => scrollScreenToTop(true)}
+          accessibilityLabel="Обратно най-горе"
+        >
+          <Ionicons name="arrow-up" size={19} color={COLORS.textPrimary} />
+          <Text style={styles.toTopText}>Нагоре</Text>
+        </TouchableOpacity>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -588,6 +653,29 @@ function SignalRow({ signal, onPress }: { signal: ObjectSignal; onPress: () => v
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bgPrimary },
+  /* ↑ „Нагоре“ — същото като в „Поток“/„Радар“, за да е еднакво за човека.
+     Екранът на обекта няма лента с табове, затова стои по-ниско. */
+  toTop: {
+    position: 'absolute',
+    right: 14,
+    bottom: 24,
+    zIndex: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 13,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(11,20,36,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.55)',
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  toTopText: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
   scroll: { padding: 16, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.bgPrimary, gap: 10 },
   muted: { color: COLORS.textSecondary, fontSize: 14 },

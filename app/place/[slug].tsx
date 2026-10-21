@@ -54,6 +54,50 @@ export default function PlaceOffersScreen() {
   const [error, setError] = useState('');
   const busyRef = useRef(false);
 
+  /**
+   * ↑ „Обратно най-горе“ — същото поведение като в „Поток“ и „Радар“.
+   *
+   * Защо: обект може да има 60–200 оферти; човек, който е слязъл надолу, иначе
+   * трябва да изтегли целия списък нагоре, за да стигне пак до филтрите.
+   */
+  const listRef = useRef<FlatList<PostItem>>(null);
+  const [showToTop, setShowToTop] = useState(false);
+
+  const scrollListToTop = useCallback((animated = true) => {
+    try {
+      listRef.current?.scrollToOffset({ offset: 0, animated });
+    } catch {
+      /* списъкът още не е готов */
+    }
+    if (typeof document === 'undefined') return;
+    try {
+      // В уеб версията `scrollToOffset` не винаги стига — дърпаме и DOM скролера.
+      const nodes: HTMLElement[] = [];
+      const marker = document.querySelector('[data-testid="place-offers-list"]') as HTMLElement | null;
+      if (marker) {
+        nodes.push(marker);
+        const inner = marker.querySelectorAll('div');
+        for (let i = 0; i < inner.length && i < 30; i += 1) nodes.push(inner[i] as HTMLElement);
+      }
+      for (const el of nodes) {
+        let oy = '';
+        try {
+          oy = window.getComputedStyle(el).overflowY;
+        } catch {
+          oy = '';
+        }
+        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+          el.scrollTop = 0;
+          break;
+        }
+      }
+    } catch {
+      /* не пречи на разглеждането */
+    }
+    // Програмното скролване не винаги ражда onScroll (в web) — скриваме бутона на ръка.
+    setShowToTop(false);
+  }, []);
+
   // Профилът на обекта: брой сигнали, цени, Google рейтинг и работно време.
   // Ако не се зареди, екранът пак работи (списъкът с оферти е важният).
   useEffect(() => {
@@ -119,7 +163,15 @@ export default function PlaceOffersScreen() {
   return (
     <SafeAreaView style={styles.root}>
       <FlatList
+        ref={listRef}
+        testID="place-offers-list"
         data={items}
+        onScroll={(e) => {
+          // Бутонът се появява чак когато човекът е слязъл надолу (иначе пречи).
+          const y = e.nativeEvent.contentOffset.y;
+          setShowToTop((prev) => (prev === y > 700 ? prev : y > 700));
+        }}
+        scrollEventThrottle={64}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <PostCard post={item} />}
         contentContainerStyle={styles.listContent}
@@ -292,12 +344,48 @@ export default function PlaceOffersScreen() {
           </View>
         }
       />
+
+      {/* ↑ Обратно най-горе — същото като в „Поток“/„Радар“, за да не се изтегля
+          целият списък, когато човек иска пак да види филтрите. */}
+      {showToTop ? (
+        <TouchableOpacity
+          style={styles.toTop}
+          activeOpacity={0.85}
+          onPress={() => scrollListToTop(true)}
+          accessibilityLabel="Обратно най-горе"
+        >
+          <Ionicons name="arrow-up" size={19} color={COLORS.textPrimary} />
+          <Text style={styles.toTopText}>Нагоре</Text>
+        </TouchableOpacity>
+      ) : null}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bgPrimary },
+  /* ↑ „Нагоре“ — същото като в „Поток“/„Радар“, за да е еднакво за човека. */
+  toTop: {
+    position: 'absolute',
+    right: 14,
+    bottom: 24,
+    zIndex: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 13,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(11,20,36,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.55)',
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  toTopText: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
   listContent: { padding: 16, paddingBottom: 40 },
   headerRow: {
     flexDirection: 'row',
