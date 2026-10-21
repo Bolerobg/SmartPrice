@@ -123,18 +123,21 @@ function buildWhere(filters: FeedFilters): Where {
               -- индексът не се хващаше (търсенето отговаряше 10–12 секунди).
               p.title_fold like ${p}
               or p.description_fold like ${p}
-              or sp_fold(p.place_name) like ${p}
-              or sp_fold(p.city) like ${p}
-              or sp_fold(p.address) like ${p}
-              or sp_fold(p.platform_tag) like ${p}
-              or sp_fold(p.custom_platform_label) like ${p}
-              or sp_fold(p.custom_category_label) like ${p}
-              or sp_fold(array_to_string(p.tags, ' ')) like ${p}
+              or p.place_name_fold like ${p}
+              or p.city_fold like ${p}
+              or p.address_fold like ${p}
+              or p.platform_tag_fold like ${p}
+              or p.platform_label_fold like ${p}
+              or p.category_label_fold like ${p}
+              -- Етикети: търсим във всеки таг поотделно. НЕ ползваме
+              -- array_to_string в индексируема колона (функцията е STABLE и не
+              -- може да е генерирана колона).
+              or exists (select 1 from unnest(p.tags) tg where sp_fold(tg) like ${p})
               or sp_fold(a.name) like ${p}
               or sp_fold(a.handle) like ${p}
               or p.price_paid::text like ${p}
               or upper(replace(p.public_code, '-', '')) like upper(replace(${p}, '-', ''))
-              or sp_fold(p.category) like ${p}
+              or p.category_fold like ${p}
               -- ЛАТИНСКИ ТЕКСТ (марки, домейни): sp_fold() сгъва кирилица, но НЕ
               -- пипа латиницата, затова „ANSMANN“, „bauhaus“, „Deichmann“ не се
               -- намираха (проверено 20.10.2026: q=ANSMANN → 0 резултата).
@@ -145,11 +148,10 @@ function buildWhere(filters: FeedFilters): Where {
               or p.custom_platform_label ilike ${p}
               or p.custom_category_label ilike ${p}
               or a.name ilike ${p}
-              -- Етикетите на категориите са в клиента, затова ги въвеждаме тук,
-              -- за да намериш „кафе“ или „хотел“, без да знаеш вътрешния id.
-              -- Синонимите вече се редактират от админ панела (category_labels).
-              or sp_fold(sp_category_synonyms(p.category)) like ${p}
-              or sp_fold(coalesce(p.seller_note, '')) like ${p}
+              -- Етикетите на категориите са в клиента; търсим и по истинския
+              -- етикет на продукта (category_label_fold) — за да намериш „сирене“,
+              -- без да знаеш вътрешния id.
+              or p.seller_note_fold like ${p}
               -- Смислови синоними: „капан“ намира всички червени флагове.
               or (p.polarity = 'green'
                   and 'оферта находка евтино изгодно намаление промоция топ'
@@ -161,16 +163,16 @@ function buildWhere(filters: FeedFilters): Where {
                 select 1 from receipts rc
                 join receipt_items ri on ri.receipt_id = rc.id
                 where rc.post_id = p.id
-                  and (sp_fold(ri.name) like ${p} or sp_fold(ri.highlight_reason) like ${p})
+                  and (ri.name_fold like ${p} or ri.highlight_reason_fold like ${p})
               )
               or exists (
                 select 1 from receipts rc
-                where rc.post_id = p.id and sp_fold(rc.merchant_name) like ${p}
+                where rc.post_id = p.id and rc.merchant_name_fold like ${p}
               )
               or exists (
                 select 1 from comments c
                 where c.post_id = p.id and c.status = 'published'
-                  and sp_fold(c.body) like ${p}
+                  and c.body_fold like ${p}
               )
             )`);
           }
