@@ -205,15 +205,36 @@ export default function RadarScreen() {
           category: activeCategory !== 'all' ? activeCategory : undefined,
           city: activeCity !== 'Всички градове' ? activeCity : undefined,
           q: query || undefined,
+          /**
+           * 🛒 Без внесените каталожни цени (Метро, Кауфланд…).
+           *
+           * Радарът е за МЕСТА и ДОКЛАДИ ОТ ХОРА — затова каталожните стоки не
+           * влизат тук. Без този филтър „Честни места“ показваше 55 974
+           * „оферти“ (почти всичките каталог), списъкът искаше още и още и
+           * приложението забиваше. Онлайн магазините си имат отделен екран.
+           */
+          excludeCatalog: true,
           limit: PAGE,
           offset,
         });
+        // Колко НОВИ реда дойдоха (не броим вече показаните).
+        const added = { n: 0 };
         setList((prev) => {
           if (replace) return feed.items;
           const seen = new Set(prev.map((p) => p.id));
-          return [...prev, ...feed.items.filter((p) => !seen.has(p.id))];
+          const fresh = feed.items.filter((p) => !seen.has(p.id));
+          added.n = fresh.length;
+          return [...prev, ...fresh];
         });
-        setListHasMore(Boolean(feed.hasMore));
+        /**
+         * „Има още“ само ако наистина има още.
+         *
+         * ПИТФОЛ (хванат на живо): ако следващата страница не донесе НИЩО ново,
+         * флагът оставаше вдигнат и „дръпни за още“ се задействаше веднага
+         * (списъкът е по-къс от екрана) — заявки една след друга, безкрайно,
+         * докато приложението забие. Сега без нови редове спираме.
+         */
+        setListHasMore(Boolean(feed.hasMore) && (replace ? true : added.n > 0));
         if (replace) setListTotal(Number(feed.total) || 0);
       } catch {
         if (replace) setList([]);
@@ -297,11 +318,21 @@ export default function RadarScreen() {
           void loadList(0, true);
         }}
         onEndReached={() => {
-          if (listHasMore) {
+          // Не пускаме нова заявка, докато тече текущата: иначе „дръпни за още“
+          // се задейства няколко пъти за един скрол и приложението забива.
+          // (Ако човекът иска веднага — има бутон „Зареди още оферти“ долу.)
+          if (listHasMore && !listBusy) {
             void loadList(list.length, false);
           }
         }}
-        onEndReachedThreshold={0.4}
+        onEndReachedThreshold={0.6}
+        // 🐎 Същите телефонни настройки като в потока: картите са високи, а
+        // Android по подразбиране „изрязва“ извън екрана и оставя празни места.
+        initialNumToRender={4}
+        maxToRenderPerBatch={5}
+        updateCellsBatchingPeriod={50}
+        windowSize={5}
+        removeClippedSubviews={false}
         ListEmptyComponent={
           listLoading ? (
             <View style={{ paddingVertical: 28, alignItems: 'center' }}>

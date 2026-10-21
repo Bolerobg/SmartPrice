@@ -792,6 +792,8 @@ export interface FeedQuery {
   place?: string;
   /** 🛒 Само офертите на една верига за супермаркети (Кауфланд, Метро…). */
   chain?: string;
+  /** 🛒 Без внесените каталожни цени — класациите на Радара (места/доклади от хора). */
+  excludeCatalog?: boolean;
   sort?: 'newest' | 'best_savings' | 'lowest_price' | 'highest_price' | 'most_helped';
   limit?: number;
   offset?: number;
@@ -926,6 +928,8 @@ export const api = {
     if (query.place) params.set('place', query.place);
     // 🛒 Само офертите на една верига (чиповете „Всички вериги / Кауфланд…“).
     if (query.chain) params.set('chain', query.chain);
+    // 🛒 Без внесените каталожни цени — за класациите на Радара (места и доклади).
+    if (query.excludeCatalog) params.set('excludeCatalog', 'true');
     if (query.sort) params.set('sort', query.sort);
     params.set('limit', String(query.limit ?? 60));
     params.set('offset', String(query.offset ?? 0));

@@ -95,6 +95,8 @@ const listQuerySchema = z.object({
   /** 🛒 Само офертите на една верига (чиповете „Всички вериги / Кауфланд…“). */
   chain: z.string().trim().max(80).optional(),
   sellerType: z.enum(['business', 'private']).optional(),
+  /** Без внесените каталожни цени („scraper“) — класациите на Радара. */
+  excludeCatalog: z.enum(['true', 'false']).optional(),
   sort: z.enum(['newest', 'best_savings', 'lowest_price', 'highest_price', 'most_helped']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
@@ -148,6 +150,7 @@ export default async function postRoutes(app: FastifyInstance) {
       placeSlug: q.place,
       chain: q.chain,
       sellerType: q.sellerType,
+      excludeCatalog: q.excludeCatalog === 'true',
       sort: q.sort as SortMode | undefined,
       limit: q.limit,
       offset: q.offset,
