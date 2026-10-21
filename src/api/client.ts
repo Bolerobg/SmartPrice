@@ -762,6 +762,8 @@ export interface FeedQuery {
   q?: string;
   /** Таг на обект (слуг) — само офертите на този обект (място + град). */
   place?: string;
+  /** 🛒 Само офертите на една верига за супермаркети (Кауфланд, Метро…). */
+  chain?: string;
   sort?: 'newest' | 'best_savings' | 'lowest_price' | 'highest_price' | 'most_helped';
   limit?: number;
   offset?: number;
@@ -894,6 +896,8 @@ export const api = {
     if (query.city && query.city !== 'Всички градове') params.set('city', query.city);
     if (query.q?.trim()) params.set('q', query.q.trim());
     if (query.place) params.set('place', query.place);
+    // 🛒 Само офертите на една верига (чиповете „Всички вериги / Кауфланд…“).
+    if (query.chain) params.set('chain', query.chain);
     if (query.sort) params.set('sort', query.sort);
     params.set('limit', String(query.limit ?? 60));
     params.set('offset', String(query.offset ?? 0));
@@ -904,6 +908,18 @@ export const api = {
    * Класация на обектите за „Радар“ — смята се в базата върху ВСИЧКИ постове,
    * не само върху заредените (иначе черният списък показваше 1 обект).
    */
+  /**
+   * 🛒 Кои вериги за супермаркети има в базата (за чиповете над потока).
+   * Връща само вериги, в които НАИСТИНА има внесени оферти, с техния брой.
+   */
+  chains: (city?: string) => {
+    const params = new URLSearchParams();
+    if (city && city !== 'Всички градове') params.set('city', city);
+    return rawRequest<{ items: Array<{ name: string; offers: number; minPrice: number | null }> }>(
+      `/api/posts/chains${params.toString() ? `?${params.toString()}` : ''}`
+    );
+  },
+
   venueRanking: (query: { polarity: 'red' | 'green'; category?: string; city?: string; limit?: number }) => {
     const params = new URLSearchParams({ polarity: query.polarity, limit: String(query.limit ?? 10) });
     if (query.category && query.category !== 'all') params.set('category', query.category);

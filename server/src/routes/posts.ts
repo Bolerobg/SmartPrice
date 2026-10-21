@@ -89,6 +89,8 @@ const listQuerySchema = z.object({
   // Таг на обект (слуг) — за екрана „всички оферти на този обект“, който се
   // отваря при натискане на обект в черния списък / класацията на Радара.
   place: z.string().trim().regex(/^[0-9a-f]{32}$/).optional(),
+  /** 🛒 Само офертите на една верига (чиповете „Всички вериги / Кауфланд…“). */
+  chain: z.string().trim().max(80).optional(),
   sellerType: z.enum(['business', 'private']).optional(),
   sort: z.enum(['newest', 'best_savings', 'lowest_price', 'highest_price', 'most_helped']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
@@ -141,6 +143,7 @@ export default async function postRoutes(app: FastifyInstance) {
       city: q.city,
       q: q.q,
       placeSlug: q.place,
+      chain: q.chain,
       sellerType: q.sellerType,
       sort: q.sort as SortMode | undefined,
       limit: q.limit,
@@ -211,6 +214,43 @@ export default async function postRoutes(app: FastifyInstance) {
         score: Number(r.score) || 0,
         reportsCount: Number(r.reports_count) || 0,
         hasReceipt: Boolean(r.has_receipt),
+      })),
+    };
+  });
+
+  /**
+   * 🛒 Кои вериги има в базата (за чиповете над потока).
+   *
+   * Защо отделен маршрут: чиповете трябва да са истински — само вериги, в които
+   * НАИСТИНА има оферти, и подредени по брой оферти. Иначе човекът вижда
+   * „Верига Валди“ с 0 продукта и си мисли, че приложението лъже.
+   */
+  app.get('/api/posts/chains', async (req) => {
+    const q = z
+      .object({
+        city: z.string().trim().max(80).optional(),
+        limit: z.coerce.number().int().min(1).max(60).default(30),
+      })
+      .parse(req.query ?? {});
+    const rows = await many<{ name: string; offers: number; min_price: number | null }>(
+      `select btrim(p.place_name) as name,
+              count(*)::int as offers,
+              min(p.price_paid)::float as min_price
+         from posts p
+        where p.status = 'published'
+          and p.tags @> array['supermarketbg.eu']
+          and btrim(coalesce(p.place_name, '')) <> ''
+          and ($1::text is null or lower(p.city) = lower($1))
+        group by 1
+        order by 2 desc, 1 asc
+        limit $2`,
+      [q.city ?? null, q.limit]
+    );
+    return {
+      items: rows.map((r) => ({
+        name: r.name,
+        offers: Number(r.offers) || 0,
+        minPrice: r.min_price == null ? null : Number(r.min_price),
       })),
     };
   });

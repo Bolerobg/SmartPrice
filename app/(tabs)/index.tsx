@@ -202,6 +202,32 @@ export default function FeedScreen() {
   const [nearbySorted, setNearbySorted] = useState(false);
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
+  /**
+   * 🛒 Вериги за супермаркети (внесените цени от Кауфланд, Метро, Билла…).
+   *
+   * Защо чипове, а не търсене по име: човек, който гледа „сирене“ за 4.68 €,
+   * иска с едно докосване да види само Кауфланд (или само Метро) и да сравни
+   * двата екрана. Името на веригата вече се търси и от търсачката, но чипът е
+   * по-бърз и не изяжда търсенето по продукт.
+   */
+  const [selectedChain, setSelectedChain] = useState<string | null>(null);
+  const [chainChips, setChainChips] = useState<Array<{ name: string; offers: number }>>([]);
+
+  // 0) Кои вериги има в базата — за чиповете. Сменя ли се градът, питаме пак
+  // (различните градове имат различни вериги с цени).
+  useEffect(() => {
+    let alive = true;
+    api
+      .chains(selectedCityFilter)
+      .then((res) => {
+        if (alive) setChainChips((res.items ?? []).slice(0, 24));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [selectedCityFilter]);
+
   // 1) Дебounce — чакаме да спреш да пишеш, преди да питаме сървъра.
   useEffect(() => {
     const t = setTimeout(
@@ -212,8 +238,10 @@ export default function FeedScreen() {
   }, [searchQuery]);
 
   // 2) Търсене в ЦЯЛАТА база със запазване на избрания град, категория и полярност.
+  // Работи и когато е избрана САМО верига (без текст) — тогава сървърът връща
+  // офертите на тази верига, а не само заредената страница.
   useEffect(() => {
-    if (!debouncedQuery) {
+    if (!debouncedQuery && !selectedChain) {
       setServerResults(null);
       setIsSearching(false);
       return;
@@ -222,7 +250,8 @@ export default function FeedScreen() {
     setIsSearching(true);
     api
       .feed({
-        q: debouncedQuery,
+        q: debouncedQuery || undefined,
+        chain: selectedChain ?? undefined,
         city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
         polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
         category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
@@ -240,7 +269,7 @@ export default function FeedScreen() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter]);
+  }, [debouncedQuery, selectedChain, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter]);
 
   const handleToggleNearby = async () => {
     if (nearbySorted) {
@@ -347,10 +376,16 @@ export default function FeedScreen() {
   }, [debouncedQuery, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter, scrollFeedToTop]);
 
   const filteredPosts = useMemo(() => {
-    const isSearchActive = Boolean(debouncedQuery) && serverResults !== null;
+    // Сървърните резултати се ползват и когато е избрана само верига (без текст).
+    const isSearchActive = (Boolean(debouncedQuery) || Boolean(selectedChain)) && serverResults !== null;
     const sourcePosts = isSearchActive ? serverResults! : posts;
 
     const matching = sourcePosts.filter((post) => {
+      // 🛒 Верига: сравняваме сгънато, защото „кауфланд“ трябва да хване
+      // „Кауфланд България“ — и в локалния филтър, и в сървърното търсене.
+      if (selectedChain && !post.placeName.toLowerCase().includes(selectedChain.toLowerCase())) {
+        return false;
+      }
       if (selectedPolarityFilter !== 'all' && post.polarity !== selectedPolarityFilter) {
         return false;
       }
@@ -380,6 +415,7 @@ export default function FeedScreen() {
     posts,
     serverResults,
     debouncedQuery,
+    selectedChain,
     selectedPolarityFilter,
     selectedCategoryFilter,
     selectedCityFilter,
@@ -403,6 +439,7 @@ export default function FeedScreen() {
     selectedPolarityFilter !== 'all' ||
     selectedCategoryFilter !== 'all' ||
     selectedCityFilter !== 'Всички градове' ||
+    Boolean(selectedChain) ||
     nearbySorted;
 
   const resetAllFilters = () => {
@@ -410,6 +447,7 @@ export default function FeedScreen() {
     setSelectedPolarityFilter('all');
     setSelectedCategoryFilter('all');
     setSelectedCityFilter('Всички градове');
+    setSelectedChain(null);
     setSortMode('newest');
     setNearbySorted(false);
   };
@@ -1022,6 +1060,62 @@ export default function FeedScreen() {
         })}
       </ScrollView>
 
+      {/* 🛒 Вериги за супермаркети — внесените цени от Кауфланд, Метро, Билла…
+          Появява се само когато в базата има такива оферти, за да не пречи на
+          хората, които гледат само находките от хора. */}
+      {chainChips.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesScroll}
+        >
+          <TouchableOpacity
+            style={[styles.categoryChip, !selectedChain && styles.categoryChipActive]}
+            onPress={() => setSelectedChain(null)}
+          >
+            <Ionicons
+              name="cart-outline"
+              size={14}
+              color={!selectedChain ? COLORS.white : COLORS.textSecondary}
+            />
+            <Text style={[styles.categoryChipText, !selectedChain && styles.categoryChipTextActive]}>
+              Всички вериги
+            </Text>
+          </TouchableOpacity>
+          {chainChips.map((c) => {
+            const active = (selectedChain ?? '').toLowerCase() === c.name.toLowerCase();
+            /**
+             * Умно подсказване: щом написаното в търсачката съвпада с име на
+             * верига („кауфланд“), чипът светва с 🔍 — човекът вижда, че има
+             * филтър по верига, без да го търси.
+             */
+            const suggested =
+              !active &&
+              searchQuery.trim().length >= 3 &&
+              c.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
+            return (
+              <TouchableOpacity
+                key={c.name}
+                style={[
+                  styles.categoryChip,
+                  active && styles.categoryChipActive,
+                  suggested && styles.chainChipSuggested,
+                ]}
+                onPress={() => setSelectedChain(active ? null : c.name)}
+              >
+                <Text
+                  style={[styles.categoryChipText, active && styles.categoryChipTextActive]}
+                  numberOfLines={1}
+                >
+                  {suggested ? '🔍 ' : ''}
+                  {c.name} ({c.offers})
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+
       {/* Умно сортиране + GPS „Наблизо до мен“ + бутон за изчистване на филтрите */}
       <View style={styles.sortAndResetRow}>
         <ScrollView
@@ -1600,6 +1694,11 @@ const styles = StyleSheet.create({
   categoryChipActive: {
     backgroundColor: COLORS.accentIndigo,
     borderColor: 'rgba(255, 255, 255, 0.24)',
+  },
+  /** Подсказване: написаното съвпада с тази верига („🔍 кауфланд“). */
+  chainChipSuggested: {
+    borderColor: COLORS.accentCyan,
+    backgroundColor: 'rgba(34,211,238,0.14)',
   },
   categoryChipText: {
     color: COLORS.textSecondary,

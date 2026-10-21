@@ -25,6 +25,11 @@ export interface FeedFilters {
    */
   placeSlug?: string;
   sellerType?: 'business' | 'private';
+  /**
+   * 🛒 Само офертите на една верига за супермаркети (Кауфланд България, Метро…).
+   * Ползва се от чиповете „Всички вериги / Кауфланд / …“ над потока.
+   */
+  chain?: string;
   authorId?: string;
   bookmarkedBy?: string;
   sort?: SortMode;
@@ -43,6 +48,15 @@ const SORTS: Record<SortMode, string> = {
 interface Where {
   clauses: string[];
   values: unknown[];
+  /**
+   * 🎯 Интелигентно подреждане при търсене: първо офертите, в чието ИМЕ е
+   * търсеното, после тези с това име на КАТЕГОРИЯТА (Сирене, Прясно мляко…),
+   * чак накрая всичко останало (съвпадение по описание, коментар, бележка).
+   *
+   * Защо: досега търсенето в потока вадеше „баничка със сирене“ преди самото
+   * сирене, ако е по-ново — човекът искаше първо продукта.
+   */
+  rank?: string;
 }
 
 function buildWhere(filters: FeedFilters): Where {
@@ -68,6 +82,10 @@ function buildWhere(filters: FeedFilters): Where {
   if (filters.placeSlug && PLACE_SLUG_RE.test(filters.placeSlug)) {
     clauses.push(`${PLACE_SLUG_SQL} = ${bind(filters.placeSlug)}`);
     clauses.push(`coalesce(p.source, '') not in ('scraper', 'olx')`);
+  }
+  if (filters.chain) {
+    // Веригата се сравнява сгъната (кирилица, C колация) — „кауфланд“ = „Кауфланд България“.
+    clauses.push(`sp_fold(p.place_name) like ${bind('%' + filters.chain.trim().toLowerCase() + '%')}`);
   }
   if (filters.authorId) clauses.push(`p.author_id = ${bind(filters.authorId)}`);
   if (filters.sellerType) clauses.push(`p.seller_type = ${bind(filters.sellerType)}`);
@@ -161,7 +179,24 @@ function buildWhere(filters: FeedFilters): Where {
     );
   }
 
-  return { clauses, values };
+  /**
+   * 🎯 Рангът (само когато има търсене): какво е качеството на съвпадението.
+   * 0 = търсеното е в ИМЕТО на продукта, 1 = в името на КАТЕГОРИЯТА,
+   * 2 = в името на веригата/магазина, 3 = другаде (описание, коментар, бележка).
+   */
+  let rank: string | undefined;
+  if (filters.q && filters.q.trim()) {
+    const phrase = bind('%' + filters.q.trim().toLowerCase() + '%');
+    rank = `case
+              when sp_fold(p.title) like ${phrase} then 0
+              when sp_fold(coalesce(p.custom_category_label, '')) like ${phrase}
+                   or sp_fold(sp_category_synonyms(p.category)) like ${phrase} then 1
+              when sp_fold(p.place_name) like ${phrase} then 2
+              else 3
+            end`;
+  }
+
+  return { clauses, values, rank };
 }
 
 const RECEIPT_SELECT = `
@@ -178,6 +213,9 @@ const RECEIPT_SELECT = `
 export async function loadPosts(filters: FeedFilters, userId: string | null) {
   const where = buildWhere(filters);
   const sortSql = SORTS[filters.sort ?? 'newest'];
+  // При търсене най-важно е КАКВО съвпада (име на продукт преди описание),
+  // чак после избраното подреждане (най-нови/най-евтини).
+  const orderSql = where.rank ? `${where.rank} asc, ${sortSql}` : sortSql;
 
   const limitPlaceholder = `$${where.values.length + 1}`;
   const offsetPlaceholder = `$${where.values.length + 2}`;
@@ -188,7 +226,7 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
        join posts p on p.id = v.id
        join profiles a on a.id = v.author_id
       where ${where.clauses.join(' and ')}
-      order by ${sortSql}
+      order by ${orderSql}
       limit ${limitPlaceholder} offset ${offsetPlaceholder}`,
     [...where.values, filters.limit, filters.offset]
   );
