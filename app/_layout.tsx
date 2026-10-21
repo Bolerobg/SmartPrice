@@ -16,6 +16,7 @@ import { RafflePromoHost } from '@/components/RafflePromoModal';
 import { ScreenTracker } from '@/components/ScreenTracker';
 import { AuthPromptModal } from '@/components/AuthPromptModal';
 import { FounderCelebration } from '@/components/FounderCelebration';
+import { UpdateBubble } from '@/components/UpdateBubble';
 // Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
 // Импортът е само за страничния ефект и трябва да е преди първия Alert.alert.
 import '@/lib/alertHost';
@@ -411,6 +412,10 @@ export default function RootLayout() {
                         <DonationModal />
             {/* Модалите за Alert.alert() — на web вградената функция е празна */}
             <AlertHost />
+            {/* 🫧 „Има нова версия“ — иначе инсталираното на компютъра/телефона
+                приложение остава със стария bundle и човек не разбира защо
+                вижда старо поведение. */}
+            <UpdateBubble />
           </View>
         </AuthGate>
       </AppProvider>

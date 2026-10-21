@@ -384,9 +384,46 @@ export default function RadarScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : (
-                <Text style={{ color: COLORS.textMuted, fontSize: 11 }}>
-                  Това са всички оферти в този режим.
-                </Text>
+                <>
+                  <Text style={{ color: COLORS.textMuted, fontSize: 11.5, textAlign: 'center' }}>
+                    Това са всички оферти от хора в този режим.
+                  </Text>
+                  {/* Празното място надолу не бива да изглежда като „счупен екран“:
+                      даваме ръчно обновяване и път към внесените цени на веригите
+                      (те са отделен екран, за да не удавят радара). */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setListRefreshing(true);
+                      void loadList(0, true);
+                    }}
+                    activeOpacity={0.85}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: COLORS.goldPrimary,
+                      backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                      borderRadius: 12,
+                      paddingHorizontal: 16,
+                      paddingVertical: 9,
+                    }}
+                  >
+                    <Text style={{ color: COLORS.goldBright, fontSize: 12.5, fontWeight: '900' }}>
+                      🔄 Обнови списъка
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => router.push('/shops')}
+                    activeOpacity={0.85}
+                    style={{
+                      borderRadius: 12,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                    }}
+                  >
+                    <Text style={{ color: COLORS.textSecondary, fontSize: 11.5, fontWeight: '700' }}>
+                      Внесените цени от веригите са в „Онлайн магазини“ ›
+                    </Text>
+                  </TouchableOpacity>
+                </>
               )}
             </View>
           ) : null
