@@ -192,6 +192,11 @@ export async function cheapestShopsByCategory(options?: {
   minWinnerPosts?: number;
   minSavingPct?: number;
   limit?: number;
+  /**
+   * ⚡ Само тези категории — за да не се смята класацията по ЦЕЛИЯ каталог, когато
+   * ни трябва за един-единствен обект (иначе страницата на обект чакаше секунди).
+   */
+  categories?: string[];
 }): Promise<BestValueCategory[]> {
   const minPosts = Math.max(2, Math.min(50, Number(options?.minPosts ?? 3) || 3));
   const minWinnerPosts = Math.max(
@@ -225,6 +230,8 @@ export async function cheapestShopsByCategory(options?: {
           -- на магазин/верига в една категория (иначе „най-изгоден“ се решаваше
           -- само между 3-4 онлайн магазина).
           and (${SHOP_NAME_SQL} or ${CHAIN_SQL})
+          and ($5::text[] is null or
+               coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) = any($5::text[]))
      ),
      per_shop as (
        select slug, max(place_name) as place_name, category,
@@ -255,7 +262,13 @@ export async function cheapestShopsByCategory(options?: {
         and (next_median is null or median_price <= next_median * (1 - $2::float / 100.0))
       order by shops_compared desc, category asc
       limit $3`,
-    [minPosts, minSaving, limit, minWinnerPosts]
+    [
+      minPosts,
+      minSaving,
+      limit,
+      minWinnerPosts,
+      options?.categories && options.categories.length ? options.categories : null,
+    ]
   );
 
   return rows.map((r) => ({
@@ -388,6 +401,54 @@ export async function chainDifferences(options?: {
   });
 }
 
+/**
+ * ⚡ БЪРЗ вариант на изгледа `v_objects`.
+ *
+ * Защо: `v_objects` агрегира ЦЕЛИЯ каталог (всички публикувани оферти) и чак после
+ * филтрира — при 53 000+ внесени цени заявката отговаряше 8 секунди и списъците
+ * „висяха“. Тук агрегираме САМО редовете, които ни трябват (`baseFilter` влиза
+ * вътре, върху `posts`), а външните условия остават същите — резултатът е един
+ * и същ, само че за части от секундата.
+ *
+ * Стойностите са 1:1 с изгледа (иначе списъците и страницата на обект щяха да
+ * показват различни числа).
+ */
+const OBJECTS_FAST = (baseFilter: string) => `
+  with base as materialized (
+    select p.id, p.place_name, p.city, p.author_id, p.polarity, p.price_paid, p.created_at,
+           p.helped_count, p.category, p.image_url, p.unit_type, p.latitude, p.longitude,
+           p.address, r.merchant_name, r.merchant_tax_id, r.verified_by_ai
+      from posts p
+      left join receipts r on r.post_id = p.id
+     where p.status = 'published' ${baseFilter}
+  )
+  select md5(lower(btrim(coalesce(place_name, '')) || '|' || lower(btrim(coalesce(city, '')))) as slug,
+         min(btrim(coalesce(place_name, ''))) as place_name,
+         min(btrim(coalesce(city, ''))) as city,
+         count(*)::int as signals_count,
+         count(distinct author_id)::int as reporters_count,
+         count(*) filter (where polarity = 'green')::int as green_count,
+         count(*) filter (where polarity = 'red')::int as red_count,
+         min(price_paid)::float as min_price,
+         max(price_paid)::float as max_price,
+         avg(price_paid)::float as avg_price,
+         max(created_at)::text as last_seen,
+         min(created_at)::text as first_seen,
+         sum(coalesce(helped_count, 0))::int as helped_total,
+         (array_agg(distinct category))[1] as category,
+         array_agg(distinct category) as categories,
+         (array_agg(image_url order by created_at desc))[1] as cover_image,
+         (array_agg(id order by created_at desc))[1] as last_post_id,
+         (array_agg(unit_type order by created_at desc))[1] as unit_type,
+         (array_agg(latitude order by created_at desc))[1] as latitude,
+         (array_agg(longitude order by created_at desc))[1] as longitude,
+         max(nullif(btrim(coalesce(address, '')), '')) as address,
+         max(nullif(btrim(coalesce(merchant_name, '')), '')) as merchant_name,
+         max(nullif(btrim(coalesce(merchant_tax_id, '')), '')) as merchant_tax_id,
+         count(*) filter (where verified_by_ai)::int as receipts_verified
+    from base
+   group by 1`;
+
 const OBJECT_COLUMNS = `
   slug, place_name, city, signals_count, reporters_count, green_count, red_count,
   min_price, max_price, avg_price, last_seen::text, first_seen::text, helped_total,
@@ -455,14 +516,29 @@ export async function searchObjects(params: {
   if (kind === 'place') where.push(`(${PLACE_NAME_SQL} and not (${CHAIN_EXISTS_V}))`);
   const clause = where.length ? 'where ' + where.join(' and ') : '';
 
+  /**
+   * ⚡ За скорост: градът и „магазин/място“ се подтискат ВЪТРЕ в агрегацията.
+   * Градът и името на мястото са едни и същи за целия групиран ред, затова
+   * филтърът вътре дава същия резултат, но не агрегира целия каталог (преди
+   * списъкът отговаряше 8 секунди при 53 000 внесени цени).
+   */
+  const baseFilter: string[] = [];
+  // ⚠️ Градът НЕ се подава втори път като нов параметър — ползваме СЪЩИЯ
+  // placeholder, който вече стои във външното условие. Иначе броячът щеше да
+  // получи неизползван параметър и Postgres да върне грешка (същият капан, който
+  // вече веднъж ни ухапа при търсенето).
+  const cityClause = city ? where.find((w) => w.startsWith('city ilike')) : undefined;
+  const cityParam = cityClause ? cityClause.slice(cityClause.indexOf('$')) : null;
+  if (cityParam) baseFilter.push(`and p.city ilike ${cityParam}`);
+  if (kind === 'shop') baseFilter.push(`and (${SHOP_NAME_SQL.replace(/place_name/g, 'p.place_name')})`);
+  if (kind === 'place') baseFilter.push(`and (${PLACE_NAME_SQL.replace(/place_name/g, 'p.place_name')})`);
+  const fast = OBJECTS_FAST(baseFilter.join(' '));
+
   const rows = await many<ObjectRow>(
-    `select ${OBJECT_COLUMNS} from v_objects v ${clause} order by ${order} limit ${limit} offset ${offset}`,
+    `select * from (${fast}) v ${clause} order by ${order} limit ${limit} offset ${offset}`,
     args
   );
-  const total = await one<{ n: string }>(
-    `select count(*)::text as n from v_objects v ${clause}`,
-    args
-  );
+  const total = await one<{ n: string }>(`select count(*)::text as n from (${fast}) v ${clause}`, args);
 
   return {
     total: Number(total?.n ?? 0) || 0,
@@ -491,7 +567,13 @@ export async function loadObject(slug: string): Promise<{
   const key = String(slug ?? '').trim().slice(0, 64);
   if (!/^[0-9a-f]{32}$/.test(key)) return null;
 
-  const object = await one<ObjectRow>(`select ${OBJECT_COLUMNS} from v_objects where slug = $1`, [key]);
+  // Агрегираме САМО офертите на този обект (не целия каталог) — иначе 8 сек.
+  const object = await one<ObjectRow>(
+    `${OBJECTS_FAST(
+      `and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1`
+    )}`,
+    [key]
+  );
   if (!object) return null;
 
   const [signals, history, months] = await Promise.all([
@@ -598,7 +680,10 @@ export async function loadObject(slug: string): Promise<{
   let categoriesWithBadges = categoriesStats;
   if (isShop && categoriesStats.length > 0) {
     try {
-      const winners = await cheapestShopsByCategory();
+      // Питаме само за категориите, които ТОЗИ обект има — не за целия каталог.
+      const winners = await cheapestShopsByCategory({
+        categories: categoriesStats.map((c) => c.category).filter(Boolean),
+      });
       const mine = new Map(winners.filter((w) => w.slug === key).map((w) => [w.category, w]));
       categoriesWithBadges = categoriesStats.map((c) => {
         const w = mine.get(c.category);

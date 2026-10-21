@@ -230,14 +230,31 @@ export async function loadPosts(filters: FeedFilters, userId: string | null) {
   const limitPlaceholder = `$${where.values.length + 1}`;
   const offsetPlaceholder = `$${where.values.length + 2}`;
 
+  /**
+   * ⚠️ Редът на заявката е важен за скоростта (проверено на живо 21.10.2026):
+   * `v_posts_full` е ТЕЖКА изгледа (обединява реакции, коментари, отличия), а
+   * предишната заявка първо я материализираше и после я съединяваше с `posts`
+   * → „Nested Loop ... Rows Removed by Join Filter: 788282“ и лентата отговаряше
+   * 7–9 секунди, тоест на телефона „зарежда няколко и увисва“.
+   *
+   * Сега: СТРАНИЦАТА първо (само `posts` + `profiles`, с индексите) → 15 id-та,
+   * и чак после обогатяваме точно тези 15 реда от изгледа. CTE-то е MATERIALIZED,
+   * за да не го „разплете“ планировчикът пак в скъпия вариант.
+   */
   const rows = await many<PostRow>(
-    `select v.*, p.signal_count::int as signal_count, p.source, p.source_note, p.source_url
-       from v_posts_full v
-       join posts p on p.id = v.id
-       join profiles a on a.id = v.author_id
-      where ${where.clauses.join(' and ')}
-      order by ${orderSql}
-      limit ${limitPlaceholder} offset ${offsetPlaceholder}`,
+    `with page as materialized (
+       select p.id
+         from posts p
+         join profiles a on a.id = p.author_id
+        where ${where.clauses.join(' and ')}
+        order by ${orderSql}
+        limit ${limitPlaceholder} offset ${offsetPlaceholder}
+     )
+     select v.*, p.signal_count::int as signal_count, p.source, p.source_note, p.source_url
+       from page
+       join v_posts_full v on v.id = page.id
+       join posts p on p.id = page.id
+       join profiles a on a.id = v.author_id`,
     [...where.values, filters.limit, filters.offset]
   );
 
