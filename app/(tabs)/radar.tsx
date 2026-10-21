@@ -13,6 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { CityPickerDropdown } from '@/components/CityPickerDropdown';
 import { useRouter } from 'expo-router';
 import { PostCard } from '@/components/PostCard';
+import { EasyPostCard } from '@/components/EasyPostCard';
+import { useEasyMode } from '@/lib/easyMode';
 import { CATEGORIES, COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { openInGoogleMaps } from '@/lib/locationService';
@@ -35,6 +37,8 @@ interface VenueItem {
 }
 
 export default function RadarScreen() {
+  /** 🧓 Едрият дизайн важи и тук — същите големи карти като в потока. */
+  const easy = useEasyMode();
   const router = useRouter();
   // От общото състояние ползваме само постовете за броячите по градове —
   // самата лента на радара се тегли отделно, филтрирана на сървъра.
@@ -304,7 +308,9 @@ export default function RadarScreen() {
         testID="radar-list"
         data={list}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <PostCard post={item} />}
+        renderItem={({ item }) =>
+          easy ? <EasyPostCard post={item} /> : <PostCard post={item} />
+        }
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         onScroll={(e) => {

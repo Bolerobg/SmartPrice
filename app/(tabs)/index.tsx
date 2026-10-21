@@ -17,6 +17,9 @@ import { useRouter } from 'expo-router';
 import { CityPickerDropdown } from '@/components/CityPickerDropdown';
 import { ActiveRaffleCard } from '@/components/ActiveRaffleCard';
 import { PostCard } from '@/components/PostCard';
+import { EasyPostCard } from '@/components/EasyPostCard';
+import { EasyModeSwitch } from '@/components/EasyModeSwitch';
+import { useEasyMode } from '@/lib/easyMode';
 import { QuickPricePhotoModal } from '@/components/QuickPricePhotoModal';
 import { SmartPriceAssistantCard } from '@/components/SmartPriceAssistantCard';
 import { SmartToolsModal } from '@/components/SmartToolsModal';
@@ -79,6 +82,9 @@ export default function FeedScreen() {
     loadMorePosts,
   } = useApp();
   const { isAuthenticated } = useAuth();
+
+  /** 🧓 Включен ли е едрият дизайн (големи карти, големи букви). */
+  const easy = useEasyMode();
 
   // --- Подкани (без да досаждаме) -------------------------------------------
   // Сървърът решава дали да ги покажем: обявите — най-много веднъж на 14 дни и
@@ -520,6 +526,10 @@ export default function FeedScreen() {
 
   const renderHeader = () => (
     <View style={styles.headerContainer}>
+      {/* 🧓 Едрият дизайн се включва ОТТУК — най-отгоре, за да се намира без
+          търсене. Изключването връща стария (по-дребен) изглед, а изборът се
+          помни на устройството. */}
+      <EasyModeSwitch compact />
       {/* Горна лента с лого и бутон за Дарение / VIP статус */}
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
@@ -1324,7 +1334,13 @@ export default function FeedScreen() {
           }}
           scrollEventThrottle={64}
           renderItem={({ item }) => (
-            <PostCard post={item} distanceKm={postDistances[item.id]} />
+            /* 🧓 В едрия режим картата е една голяма: снимка, име, цена и два
+               бутона. Иначе — старата (по-подробна, но по-дребна) карта. */
+            easy ? (
+              <EasyPostCard post={item} />
+            ) : (
+              <PostCard post={item} distanceKm={postDistances[item.id]} />
+            )
           )}
           ListHeaderComponent={renderHeader()}
           contentContainerStyle={styles.listContent}
