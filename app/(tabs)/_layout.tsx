@@ -4,6 +4,8 @@ import { Tabs, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
 import { AssistantFab } from '@/components/AssistantFab';
+import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/src/auth/AuthContext';
 
 export default function TabsLayout() {
   const pathname = usePathname();
@@ -16,6 +18,18 @@ export default function TabsLayout() {
         : pathname.includes('profile')
           ? 'profile'
           : 'feed';
+
+  const { isAuthenticated } = useAuth();
+  const { openAuthPrompt } = useApp();
+
+  // 🔒 ВЪРНАТО ОТ СТАРОТО ПРИЛОЖЕНИЕ (22.10.2026): гостът чете свободно, но
+  // „Сподели“ и „Профил“ искат профил. Вместо да го хвърляме на екран за вход,
+  // му показваме поканата (с бутони „Регистрирай се“ / „Вече имам профил“).
+  const guardTab = (reason: string) => (e: { preventDefault: () => void }) => {
+    if (isAuthenticated) return;
+    e.preventDefault();
+    openAuthPrompt(reason);
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.surface }}>
@@ -55,6 +69,27 @@ export default function TabsLayout() {
             ),
           }}
         />
+        {/* „Сподели“ — средата на таб-бара. Беше скрит в новия дизайн, а това е
+            основният вход за качване на находка, снимка или касова бележка. */}
+        <Tabs.Screen
+          name="add"
+          listeners={{
+            tabPress: guardTab('За да качиш находка, трябва профил. Отнема 30 секунди.'),
+          }}
+          options={{
+            title: 'Сподели',
+            tabBarIcon: ({ focused }) => (
+              <View
+                style={[
+                  styles.centerAddButton,
+                  focused && { transform: [{ scale: 1.06 }] },
+                ]}
+              >
+                <Ionicons name="scan" size={24} color={COLORS.onPrimary} />
+              </View>
+            ),
+          }}
+        />
         <Tabs.Screen
           name="radar"
           options={{
@@ -70,6 +105,9 @@ export default function TabsLayout() {
         />
         <Tabs.Screen
           name="profile"
+          listeners={{
+            tabPress: guardTab('Профилът пази значките, точките и любимите ти цени.'),
+          }}
           options={{
             title: 'Профил',
             tabBarIcon: ({ color, focused }) => (
@@ -79,12 +117,6 @@ export default function TabsLayout() {
                 color={color}
               />
             ),
-          }}
-        />
-        <Tabs.Screen
-          name="add"
-          options={{
-            href: null,
           }}
         />
       </Tabs>
@@ -123,5 +155,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.2,
     marginTop: 2,
+  },
+  // Кръглият бутон „Сподели“ в средата — истинският вход за качване.
+  centerAddButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 18,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Platform.OS === 'ios' ? 16 : 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.surfaceContainerLowest,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.32,
+    shadowRadius: 14,
+    elevation: 10,
   },
 });
