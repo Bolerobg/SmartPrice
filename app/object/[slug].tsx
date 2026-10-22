@@ -330,7 +330,7 @@ export default function ObjectScreen() {
                     accessibilityLabel={`Виж офертите: ${c.category}`}
                   >
                     <View style={styles.statRow}>
-                      <Text style={styles.statValue} numberOfLines={1}>
+                      <Text style={styles.statValue} numberOfLines={2}>
                         {CATEGORY_LABELS[c.category] || c.category}
                       </Text>
                       <Text style={styles.statAction}>{active ? 'показани ✕' : 'виж ›'}</Text>
@@ -801,10 +801,15 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderSubtle,
   },
   statLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600' },
-  statValue: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800', marginTop: 3 },
+  /**
+   * ⚠️ ЖИВО (22.10.2026): името на категорията се срязваше („Магазини и храни“),
+   * защото нямаше flex и „виж ›“ отстрани му вземаше мястото. Сега името заема
+   * остатъка от реда и може да мине на два реда.
+   */
+  statValue: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800', marginTop: 3, flex: 1, flexShrink: 1 },
   /* Категорията е БУТОН — изглежда като такъв и се оцветява, когато е избрана. */
-  statRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  statAction: { color: COLORS.accentCyan, fontSize: 11.5, fontWeight: '800', marginTop: 3 },
+  statRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'space-between' },
+  statAction: { color: COLORS.accentCyan, fontSize: 11.5, fontWeight: '800', marginTop: 3, flexShrink: 0 },
   statActive: {
     borderColor: COLORS.accentCyan,
     backgroundColor: 'rgba(34,211,238,0.12)',
