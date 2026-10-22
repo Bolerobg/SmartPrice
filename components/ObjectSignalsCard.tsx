@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { COLORS } from '@/constants/theme';
 import { formatMoney, formatNumber } from '@/src/lib/format';
@@ -9,7 +9,15 @@ import { loadObjectForPost, type ObjectDetail } from '@/src/api/client';
  * 🏪 Малка карта в офертата: към кой обект принадлежи и колко пъти хората са
  * сигнализирали за него. Води към пълната страница на обекта (#11).
  */
-export function ObjectSignalsCard({ postId }: { postId: string }) {
+export function ObjectSignalsCard({
+  postId,
+  isMapPlace = false,
+}: {
+  postId: string;
+  /** 📍 Място от Google Maps: за тях НЕ следим цени, затова бутонът води
+      към полезната информация в Google (отзиви, снимки, работно време). */
+  isMapPlace?: boolean;
+}) {
   const router = useRouter();
   const [data, setData] = useState<ObjectDetail | null>(null);
 
@@ -56,13 +64,40 @@ export function ObjectSignalsCard({ postId }: { postId: string }) {
         {(o.min_price ?? 0) <= 0.01 ? ' · няма посочена цена' : ''}
         {o.helped_total > 0 ? ' · помогнало ' + formatNumber(o.helped_total) + '×' : ''}
       </Text>
-      <TouchableOpacity
-        style={styles.btn}
-        onPress={() => router.push(('/object/' + o.slug) as never)}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.btnText}>История на цените и всички сигнали →</Text>
-      </TouchableOpacity>
+      {isMapPlace ? (
+        <>
+          <Text style={styles.meta}>Това е място, не магазин — цени не се следят.</Text>
+          <TouchableOpacity
+            style={styles.btn}
+            onPress={() => {
+              const q = encodeURIComponent(
+                [o.place_name, o.city].filter(Boolean).join(' ')
+              );
+              Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${q}`).catch(
+                () => router.push(('/object/' + o.slug) as never)
+              );
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.btnText}>Отзиви, снимки и работно време в Google Maps →</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.btnSecondary}
+            onPress={() => router.push(('/object/' + o.slug) as never)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.btnSecondaryText}>Всички сигнали за този обект →</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <TouchableOpacity
+          style={styles.btn}
+          onPress={() => router.push(('/object/' + o.slug) as never)}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.btnText}>История на цените и всички сигнали →</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -90,4 +125,15 @@ const styles = StyleSheet.create({
     borderColor: COLORS.greenBorder,
   },
   btnText: { color: COLORS.greenBright, fontSize: 13.5, fontWeight: '800' },
+  btnSecondary: {
+    marginTop: 8,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    backgroundColor: COLORS.bgCardElevated,
+    alignItems: 'center',
+  },
+  btnSecondaryText: { color: COLORS.textSecondary, fontSize: 12.5, fontWeight: '700' },
 });

@@ -763,7 +763,7 @@ export default function PostDetailScreen() {
           ) : null}
 
           {/* 🏪 Към кой обект е и колко души са сигнализирали за него */}
-          <ObjectSignalsCard postId={String(id)} />
+          <ObjectSignalsCard postId={String(id)} isMapPlace={isMapPlace} />
 
           {/* Пълна касова бележка (AI OCR) */}
           {post.receipt && (
