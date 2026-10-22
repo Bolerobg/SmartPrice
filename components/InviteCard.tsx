@@ -85,7 +85,7 @@ export const InviteCard: React.FC<Props> = ({ profile, onOpenCard, compact }) =>
     <View style={[styles.card, compact && styles.cardCompact]}>
       <View style={styles.headerRow}>
         <View style={styles.iconCircle}>
-          <Ionicons name="person-add" size={18} color={COLORS.black} />
+          <Ionicons name="person-add" size={18} color={COLORS.onPrimary} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Покани приятел — и двамата печелите</Text>

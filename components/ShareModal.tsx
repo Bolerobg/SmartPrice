@@ -129,7 +129,7 @@ export const ShareModal: React.FC<Props> = ({ post, onClose }) => {
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
             {systemShare && (
               <TouchableOpacity style={styles.systemBtn} onPress={handleSystem} activeOpacity={0.88}>
-                <Ionicons name="share-outline" size={18} color={COLORS.black} />
+                <Ionicons name="share-outline" size={18} color={COLORS.onPrimary} />
                 <Text style={styles.systemBtnText}>Сподели с друго приложение…</Text>
               </TouchableOpacity>
             )}
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 16,
   },
-  systemBtnText: { color: COLORS.black, fontSize: 14.5, fontWeight: '900' },
+  systemBtnText: { color: COLORS.onPrimary, fontSize: 14.5, fontWeight: '900' },
   sectionLabel: {
     color: COLORS.textMuted,
     fontSize: 11,

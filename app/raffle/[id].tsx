@@ -463,7 +463,7 @@ export default function RaffleDetailScreen() {
                 onPress={() => router.push('/(auth)/login' as never)}
                 activeOpacity={0.88}
               >
-                <Ionicons name="log-in-outline" size={17} color={COLORS.black} />
+                <Ionicons name="log-in-outline" size={17} color={COLORS.onPrimary} />
                 <Text style={styles.primaryBtnText}>Влез и участвай безплатно</Text>
               </TouchableOpacity>
               <Text style={styles.waitText}>
@@ -563,7 +563,7 @@ export default function RaffleDetailScreen() {
 
             {entry.runStarted ? (
               <TouchableOpacity style={styles.primaryBtn} onPress={() => void resumeOfficial()} activeOpacity={0.88}>
-                <Ionicons name="play" size={17} color={COLORS.black} />
+                <Ionicons name="play" size={17} color={COLORS.onPrimary} />
                 <Text style={styles.primaryBtnText}>Продължи официалното нареждане</Text>
               </TouchableOpacity>
             ) : null}
@@ -826,7 +826,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 12,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 14, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 14, fontWeight: '900' },
   btnDisabled: { opacity: 0.5 },
   secondaryBtn: {
     flexDirection: 'row',

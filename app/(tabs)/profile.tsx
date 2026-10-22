@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 5,
   },
-  storyCardBtnText: { color: COLORS.black, fontSize: 13.5, fontWeight: '900' },
+  storyCardBtnText: { color: COLORS.onPrimary, fontSize: 13.5, fontWeight: '900' },
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.bgPrimary,

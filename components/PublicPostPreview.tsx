@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginTop: 16,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 14.5, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 14.5, fontWeight: '900' },
   ghostBtn: { alignItems: 'center', paddingVertical: 11, marginTop: 4 },
   ghostBtnText: { color: COLORS.textMuted, fontSize: 12.5, fontWeight: '700' },
   shareRow: {

@@ -410,7 +410,7 @@ export const RafflePromoHost: React.FC = () => {
               }}
               activeOpacity={0.88}
             >
-              <Ionicons name="trophy" size={17} color={COLORS.black} />
+              <Ionicons name="trophy" size={17} color={COLORS.onPrimary} />
               <Text style={styles.ctaText}>{invite.cta}</Text>
             </TouchableOpacity>
 

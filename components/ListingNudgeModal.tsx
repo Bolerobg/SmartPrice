@@ -78,7 +78,7 @@ export const ListingNudgeModal: React.FC<Props> = ({
           <ScrollView contentContainerStyle={{ paddingBottom: 6 }} showsVerticalScrollIndicator={false}>
             <View style={styles.hero}>
               <View style={styles.heroIcon}>
-                <Ionicons name="pricetags" size={26} color={COLORS.black} />
+                <Ionicons name="pricetags" size={26} color={COLORS.onPrimary} />
               </View>
               <Text style={styles.heroTitle}>Имаш нещо втора ръка?</Text>
               <Text style={styles.heroText}>
@@ -124,7 +124,7 @@ export const ListingNudgeModal: React.FC<Props> = ({
             </View>
 
             <TouchableOpacity style={styles.cta} onPress={onGoToNew} activeOpacity={0.9}>
-              <Ionicons name="add-circle" size={19} color={COLORS.black} />
+              <Ionicons name="add-circle" size={19} color={COLORS.onPrimary} />
               <Text style={styles.ctaText}>Пусни обява сега</Text>
             </TouchableOpacity>
 
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.greenPrimary,
     marginTop: 10,
   },
-  ctaText: { color: COLORS.black, fontSize: 15, fontWeight: '900' },
+  ctaText: { color: COLORS.onPrimary, fontSize: 15, fontWeight: '900' },
   footerRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },
   footerLink: { color: COLORS.textSecondary, fontSize: 12.5, fontWeight: '700' },
 });

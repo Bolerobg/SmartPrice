@@ -399,7 +399,7 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 54,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 15.5, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 15.5, fontWeight: '900' },
   ghostBtn: {
     borderRadius: 15,
     paddingVertical: 14,

@@ -194,7 +194,7 @@ export default function MyListingsScreen() {
             {pendingSession ? (
               <TouchableOpacity style={styles.primaryBtn} onPress={() => void confirm()} disabled={busy === 'confirm'}>
                 {busy === 'confirm' ? (
-                  <ActivityIndicator color={COLORS.black} />
+                  <ActivityIndicator color={COLORS.onPrimary} />
                 ) : (
                   <Text style={styles.primaryBtnText}>Провери плащането</Text>
                 )}
@@ -353,6 +353,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.greenPrimary,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 14, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 14, fontWeight: '900' },
   noteText: { color: COLORS.textPrimary, fontSize: 13.5, lineHeight: 19 },
 });

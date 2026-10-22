@@ -224,7 +224,7 @@ export default function FavoritesScreen() {
 
             <View style={styles.actionsRow}>
               <TouchableOpacity style={styles.actionBtn} onPress={() => openMap(post, true)} activeOpacity={0.85}>
-                <Ionicons name="navigate" size={15} color={COLORS.black} />
+                <Ionicons name="navigate" size={15} color={COLORS.onPrimary} />
                 <Text style={styles.actionText}>Навигация</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -396,5 +396,5 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: COLORS.greenBright,
   },
-  modalPrimaryText: { color: COLORS.black, fontSize: 13.5, fontWeight: '900' },
+  modalPrimaryText: { color: COLORS.onPrimary, fontSize: 13.5, fontWeight: '900' },
 });

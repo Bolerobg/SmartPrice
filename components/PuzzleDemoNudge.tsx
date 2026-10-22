@@ -29,7 +29,7 @@ export const PuzzleDemoNudge: React.FC<Props> = ({ onTrain, onHide }) => {
   return (
     <View style={styles.wrap}>
       <View style={styles.icon}>
-        <Ionicons name="game-controller" size={18} color={COLORS.black} />
+        <Ionicons name="game-controller" size={18} color={COLORS.onPrimary} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.title}>Потренирай пъзела 🎯</Text>
@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
   text: { color: COLORS.textSecondary, fontSize: 12.5, lineHeight: 17, marginTop: 3 },
   row: { flexDirection: 'row', gap: 12, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' },
   go: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 11, backgroundColor: COLORS.greenPrimary },
-  goText: { color: COLORS.black, fontSize: 12.5, fontWeight: '900' },
+  goText: { color: COLORS.onPrimary, fontSize: 12.5, fontWeight: '900' },
   never: { color: COLORS.textMuted, fontSize: 11.5, fontWeight: '700' },
   x: { padding: 2 },
 });

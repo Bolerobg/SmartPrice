@@ -345,7 +345,7 @@ export const QuickPricePhotoModal: React.FC<QuickPricePhotoModalProps> = ({
                 onPress={() => pickPhoto(true)}
                 activeOpacity={0.85}
               >
-                <Ionicons name="camera" size={18} color={COLORS.black} />
+                <Ionicons name="camera" size={18} color={COLORS.onPrimary} />
                 <Text style={styles.cameraBtnText}>Снимай с Камера</Text>
               </TouchableOpacity>
 
@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   cameraBtnText: {
-    color: COLORS.black,
+    color: COLORS.onPrimary,
     fontSize: 13,
     fontWeight: '900',
   },

@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.goldPrimary,
   },
-  btnOkText: { color: COLORS.black, fontSize: 14, fontWeight: '900' },
+  btnOkText: { color: COLORS.onPrimary, fontSize: 14, fontWeight: '900' },
   btnGhost: {
     marginTop: 12,
     paddingVertical: 11,

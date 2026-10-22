@@ -163,7 +163,7 @@ export const AddToHomeScreenModal: React.FC<Props> = ({ visible, onClose, mode =
                   <Ionicons name="pricetags" size={26} color={COLORS.white} />
                 </View>
                 <View style={styles.plusBadge}>
-                  <Ionicons name="add" size={13} color={COLORS.black} />
+                  <Ionicons name="add" size={13} color={COLORS.onPrimary} />
                 </View>
               </View>
 
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     minHeight: 50,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 15, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 15, fontWeight: '900' },
   ghostBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 2 },
   ghostBtnText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '700' },
 });

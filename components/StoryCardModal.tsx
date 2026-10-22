@@ -117,9 +117,9 @@ export const StoryCardModal: React.FC<Props> = ({ visible, onClose, cardUrl, mes
               activeOpacity={0.88}
             >
               {busy ? (
-                <ActivityIndicator color={COLORS.black} size="small" />
+                <ActivityIndicator color={COLORS.onPrimary} size="small" />
               ) : (
-                <Ionicons name="share-social" size={18} color={COLORS.black} />
+                <Ionicons name="share-social" size={18} color={COLORS.onPrimary} />
               )}
               <Text style={styles.primaryBtnText}>
                 {Platform.OS === 'web' ? 'Сподели / свали картата' : 'Сподели картата'}
@@ -217,7 +217,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 16,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 14.5, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 14.5, fontWeight: '900' },
   copyRow: {
     flexDirection: 'row',
     alignItems: 'center',

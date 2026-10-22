@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 16,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 14, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 14, fontWeight: '900' },
   secondaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',

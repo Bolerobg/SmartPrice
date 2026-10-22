@@ -142,7 +142,7 @@ export const ProductPairPuzzle: React.FC<Props> = ({ tiles, targetPairs, badge, 
               )}
               {isMatched ? (
                 <View style={styles.tileCheck}>
-                  <Ionicons name="checkmark-circle" size={16} color={COLORS.black} />
+                  <Ionicons name="checkmark-circle" size={16} color={COLORS.onPrimary} />
                 </View>
               ) : null}
             </TouchableOpacity>

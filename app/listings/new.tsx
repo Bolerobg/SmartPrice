@@ -500,5 +500,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.greenPrimary,
   },
-  primaryBtnText: { color: COLORS.black, fontSize: 15, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 15, fontWeight: '900' },
 });

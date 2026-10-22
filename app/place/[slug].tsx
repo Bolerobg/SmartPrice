@@ -275,7 +275,7 @@ export default function PlaceOffersScreen() {
                     })
                   }
                 >
-                  <Ionicons name="map-outline" size={14} color={COLORS.black} />
+                  <Ionicons name="map-outline" size={14} color={COLORS.onPrimary} />
                   <Text style={styles.actionText}>Карта</Text>
                 </TouchableOpacity>
                 {slug ? (

@@ -123,7 +123,7 @@ export default function ChangePasswordScreen() {
               onPress={() => goBack(router)}
               activeOpacity={0.88}
             >
-              <Ionicons name="checkmark" size={18} color={COLORS.black} />
+              <Ionicons name="checkmark" size={18} color={COLORS.onPrimary} />
               <Text style={styles.primaryBtnText}>Разбрах</Text>
             </TouchableOpacity>
           ) : (
@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   primaryBtnDisabled: { opacity: 0.45 },
-  primaryBtnText: { color: COLORS.black, fontSize: 15.5, fontWeight: '900' },
+  primaryBtnText: { color: COLORS.onPrimary, fontSize: 15.5, fontWeight: '900' },
   forgotRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 18 },
   forgotText: { color: COLORS.textMuted, fontSize: 12.5, fontWeight: '700' },
 });

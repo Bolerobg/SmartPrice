@@ -551,7 +551,7 @@ export const SmartToolsModal: React.FC<SmartToolsModalProps> = ({
                     style={styles.addBtn}
                     onPress={handleAddCustomBasketItem}
                   >
-                    <Ionicons name="add" size={20} color={COLORS.black} />
+                    <Ionicons name="add" size={20} color={COLORS.onPrimary} />
                   </TouchableOpacity>
                 </View>
 
