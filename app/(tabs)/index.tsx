@@ -21,7 +21,7 @@ import { QuickPricePhotoModal } from '@/components/QuickPricePhotoModal';
 import { SmartPriceAssistantCard } from '@/components/SmartPriceAssistantCard';
 import { SmartToolsModal } from '@/components/SmartToolsModal';
 import { api } from '@/src/api/client';
-import { CATEGORIES, COLORS } from '@/constants/theme';
+import { CATEGORIES, COLORS, THEME_MODE, setThemeMode } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { FounderBanner } from '@/components/FounderBanner';
@@ -541,6 +541,20 @@ export default function FeedScreen() {
             </Text>
           </Text>
         </View>
+
+        {/* 🌙 Тъмна / светла тема (изборът се пази в устройството) */}
+        <TouchableOpacity
+          style={styles.themeToggleTop}
+          onPress={() => setThemeMode(THEME_MODE === 'dark' ? 'light' : 'dark')}
+          activeOpacity={0.85}
+          accessibilityLabel={THEME_MODE === 'dark' ? 'Светла тема' : 'Тъмна тема'}
+        >
+          <Ionicons
+            name={THEME_MODE === 'dark' ? 'sunny' : 'moon'}
+            size={17}
+            color={COLORS.primary}
+          />
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={[
@@ -1408,7 +1422,7 @@ export default function FeedScreen() {
           onPress={() => scrollFeedToTop(true)}
           accessibilityLabel="Обратно най-горе"
         >
-          <Ionicons name="arrow-up" size={19} color={COLORS.textPrimary} />
+          <Ionicons name="arrow-up" size={19} color={COLORS.primary} />
           <Text style={styles.toTopText}>Нагоре</Text>
         </TouchableOpacity>
       )}
@@ -1435,16 +1449,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     height: 42,
     borderRadius: 21,
-    backgroundColor: 'rgba(11,20,36,0.94)',
+    backgroundColor: COLORS.surfaceContainerLowest,
     borderWidth: 1,
-    borderColor: 'rgba(34,211,238,0.55)',
-    shadowColor: '#000',
-    shadowOpacity: 0.45,
+    borderColor: COLORS.outlineVariant,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.18,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
   },
-  toTopText: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
+  toTopText: { color: COLORS.primary, fontSize: 12.5, fontWeight: '800' },
   sellCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1627,6 +1641,17 @@ const styles = StyleSheet.create({
     color: COLORS.greenBright,
     fontWeight: '900',
   },
+  themeToggleTop: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderWidth: 1,
+    borderColor: COLORS.outlineVariant,
+    marginRight: 6,
+  },
   donateTopButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1638,7 +1663,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     shadowColor: COLORS.goldPrimary,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+      shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
@@ -1914,7 +1939,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4.5,
-    backgroundColor: 'rgba(17, 23, 40, 0.72)',
+    backgroundColor: COLORS.surfaceContainerLowest,
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
     paddingHorizontal: 10,

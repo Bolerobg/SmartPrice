@@ -1,6 +1,6 @@
 import { CategoryInfo, PlatformTag } from '@/types';
 
-export const COLORS = {
+export const LIGHT_COLORS = {
   // Spesti & Otkriy — Modern Utilitarian & Community-Centric Light Design System
   surface: '#f8f9ff',
   surfaceDim: '#cbdbf5',
@@ -92,6 +92,133 @@ export const COLORS = {
   white: '#FFFFFF',
   black: '#0b1c30',
 };
+/**
+ * 🌙 ТЪМНА ТЕМА (22.10.2026) — същите ключове, но в тъмните тонове на
+ * Material 3 (зелената схема). Изборът се пази в localStorage (`sp_theme`)
+ * и се прилага при ЗАРЕЖДАНЕ на приложението: затова смяната на темата
+ * презарежда страницата — така всички StyleSheet-ове се пресъздават с новите
+ * цветове (иначе старите стилове остават със старите стойности).
+ */
+export const DARK_COLORS = {
+  surface: '#0f1413',
+  surfaceDim: '#0f1413',
+  surfaceBright: '#353b39',
+  surfaceContainerLowest: '#0a0f0e',
+  surfaceContainerLow: '#171d1b',
+  surfaceContainer: '#1b211f',
+  surfaceContainerHigh: '#262c2a',
+  surfaceContainerHighest: '#313735',
+  onSurface: '#dfe4e1',
+  onSurfaceVariant: '#bfc9c5',
+  inverseSurface: '#dfe4e1',
+  inverseOnSurface: '#2c3130',
+  outline: '#8a938f',
+  outlineVariant: '#3f4946',
+  surfaceTint: '#4edea3',
+  primary: '#4edea3',
+  onPrimary: '#003826',
+  primaryContainer: '#006c49',
+  onPrimaryContainer: '#b9f0d7',
+  inversePrimary: '#006c49',
+  primaryFixed: '#6ffbbe',
+  primaryFixedDim: '#4edea3',
+  onPrimaryFixed: '#002113',
+  onPrimaryFixedVariant: '#005236',
+  secondary: '#bcc7dc',
+  onSecondary: '#263143',
+  secondaryContainer: '#3c4658',
+  onSecondaryContainer: '#d8e3f9',
+  secondaryFixed: '#d8e3f9',
+  secondaryFixedDim: '#bcc7dc',
+  onSecondaryFixed: '#111c2c',
+  onSecondaryFixedVariant: '#3c4658',
+  tertiary: '#ffb95f',
+  onTertiary: '#472a00',
+  tertiaryContainer: '#653e00',
+  onTertiaryContainer: '#ffddb8',
+  tertiaryFixed: '#ffddb8',
+  tertiaryFixedDim: '#ffb95f',
+  onTertiaryFixed: '#2a1700',
+  onTertiaryFixedVariant: '#653e00',
+  error: '#ffb4ab',
+  onError: '#690005',
+  errorContainer: '#93000a',
+  onErrorContainer: '#ffdad6',
+  bgPrimary: '#0f1413',
+  bgSecondary: '#171d1b',
+  bgCard: '#1b211f',
+  bgCardElevated: '#262c2a',
+  bgGlass: 'rgba(15, 20, 19, 0.90)',
+  borderSubtle: 'rgba(255, 255, 255, 0.10)',
+  borderStrong: 'rgba(255, 255, 255, 0.22)',
+  textPrimary: '#dfe4e1',
+  textSecondary: '#bfc9c5',
+  textMuted: '#8a938f',
+  greenPrimary: '#4edea3',
+  greenBright: '#4edea3',
+  greenDark: '#6ffbbe',
+  greenSoftBg: 'rgba(78, 222, 163, 0.14)',
+  greenBorder: 'rgba(78, 222, 163, 0.35)',
+  redPrimary: '#ffb4ab',
+  redBright: '#ffb4ab',
+  redDark: '#ffdad6',
+  redSoftBg: 'rgba(255, 180, 171, 0.14)',
+  redBorder: 'rgba(255, 180, 171, 0.35)',
+  goldPrimary: '#ffb95f',
+  goldBright: '#ffb95f',
+  goldSoftBg: 'rgba(255, 185, 95, 0.14)',
+  goldBorder: 'rgba(255, 185, 95, 0.35)',
+  accentIndigo: '#4edea3',
+  accentCyan: '#4edea3',
+  accentPurple: '#bcc7dc',
+  accentCyanSoftBg: 'rgba(78, 222, 163, 0.14)',
+  accentCyanBorder: 'rgba(78, 222, 163, 0.35)',
+  indigoSoftBg: 'rgba(188, 199, 220, 0.12)',
+  white: '#FFFFFF',
+  black: '#0a0f0e',
+};
+
+const THEME_KEY = 'sp_theme';
+
+/** Кой режим е избран: 'dark' | 'light' (по подразбиране — светлата). */
+function readThemeMode(): 'light' | 'dark' {
+  try {
+    const g: any = globalThis as any;
+    const ls = g?.localStorage;
+    const saved = ls ? String(ls.getItem(THEME_KEY) || '') : '';
+    if (saved === 'dark' || saved === 'light') return saved;
+    if (g?.matchMedia && g.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+  } catch {
+    /* няма localStorage (нативно) — остава светлата */
+  }
+  return 'light';
+}
+
+/** Избраният режим за ТОВА зареждане на приложението. */
+export const THEME_MODE: 'light' | 'dark' = readThemeMode();
+
+/** Активната палитра — всички екрани я ползват през COLORS. */
+export const COLORS = THEME_MODE === 'dark' ? DARK_COLORS : LIGHT_COLORS;
+
+/**
+ * Смяна на темата. На уеб презарежда страницата — единственият сигурен начин
+ * всички вече създадени стилове (StyleSheet.create) да получат новите цветове.
+ */
+export function setThemeMode(mode: 'light' | 'dark'): void {
+  try {
+    const g: any = globalThis as any;
+    g?.localStorage?.setItem(THEME_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const g: any = globalThis as any;
+    if (g?.location?.reload) g.location.reload();
+  } catch {
+    /* ignore */
+  }
+}
+
 
 /**
  * Стандартизирани цветови тагове за търговските вериги според DESIGN.md и code.html

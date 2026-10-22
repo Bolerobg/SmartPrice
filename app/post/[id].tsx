@@ -1205,7 +1205,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(6, 9, 17, 0.90)',
   },
   commentPriceTagText: {
-    color: COLORS.greenBright,
+    color: '#6ffbbe',
     fontSize: 12,
     fontWeight: '800',
   },

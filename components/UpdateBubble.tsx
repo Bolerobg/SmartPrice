@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   text: {
-    color: COLORS.textPrimary,
+    color: '#ffffff',
     fontSize: 13,
     fontWeight: '800',
   },

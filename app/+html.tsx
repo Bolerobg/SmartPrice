@@ -24,6 +24,25 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, maximum-scale=5, shrink-to-fit=no, viewport-fit=cover"
         />
         <meta name="theme-color" content="#f8f9ff" />
+        {/* Тъмната тема се прилага ОЩЕ ПРЕДИ първото рисуване — иначе премигва бяло.
+            Изборът се пази в localStorage (`sp_theme`). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+(function(){
+  try {
+    var saved = localStorage.getItem('sp_theme');
+    var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.style.backgroundColor = dark ? '#0f1413' : '#f8f9ff';
+    document.documentElement.style.color = dark ? '#dfe4e1' : '#0b1c30';
+    var m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', dark ? '#0f1413' : '#f8f9ff');
+  } catch (e) {}
+})();
+`,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -56,6 +75,17 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+html[data-theme="dark"], html[data-theme="dark"] body, html[data-theme="dark"] #root {
+  background-color: #0f1413 !important;
+  color: #dfe4e1;
+}
+html[data-theme="dark"] ::selection {
+  background: rgba(78, 222, 163, 0.28);
+  color: #dfe4e1;
 }
 body {
   margin: 0;

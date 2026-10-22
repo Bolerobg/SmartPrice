@@ -1510,7 +1510,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   livePriceSmallLabel: {
-    color: COLORS.textMuted,
+    color: 'rgba(255,255,255,0.78)',
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.5,
