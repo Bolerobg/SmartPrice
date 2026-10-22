@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { AppProvider, useApp } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/src/auth/AuthContext';
@@ -16,51 +17,110 @@ import { ScreenTracker } from '@/components/ScreenTracker';
 import { AuthPromptModal } from '@/components/AuthPromptModal';
 import { FounderCelebration } from '@/components/FounderCelebration';
 import { UpdateBubble } from '@/components/UpdateBubble';
+// Подменя Alert.alert с работеща версия на web (react-native-web я прави празна).
+// Импортът е само за страничния ефект и трябва да е преди първия Alert.alert.
 import '@/lib/alertHost';
+import { ONBOARDING_SEEN_KEY } from './(auth)/onboarding';
 import { captureFirstTouch } from '@/lib/firstTouch';
 import { COLORS } from '@/constants/theme';
 
+// Отбелязваме откъде е дошъл човекът (utm_source/referrer) — веднъж, при
+// първото отваряне. Нужно е за статистиката „откъде идват хората“ в панела.
 captureFirstTouch();
 
+/** Колко минимум да се вижда splash екранът (за да не премигва) */
+
+/** Домейнът, който се показва на splash екрана. Идва от билда
+ *  (EXPO_PUBLIC_API_URL), затова смяната на домейна не иска промяна в кода. */
 const APP_DISPLAY_HOST = (process.env.EXPO_PUBLIC_API_URL || 'https://smartprice.bg')
   .replace(/^https?:\/\//, '')
   .replace(/\/+$/, '');
-const MIN_SPLASH_MS = 400;
+const MIN_SPLASH_MS = 5600;
 
+/** Трите обещания, които се появяват едно след друго на сплаша. */
 const SPLASH_FEATURES: { icon: string; text: string }[] = [
-  { icon: 'pricetag', text: 'Сравнение на цени по вериги в реално време' },
-  { icon: 'receipt', text: 'Потвърдени касови бележки от общността' },
-  { icon: 'trending-down', text: 'История на цената и максимална икономия' },
+  { icon: 'pricetags', text: 'Реални цени от хора като теб' },
+  { icon: 'alert-circle', text: 'Червени флагове и скрити такси' },
+  { icon: 'scan', text: 'Снимаш бона — AI го прочита' },
+];
+
+const SPLASH_HINTS = [
+  'Топ находки от реални хора',
+  'Червени флагове и скрити такси',
+  'AI скенер на касови бележки',
+  'Без реклами. Без платени ревюта.',
 ];
 
 /* ------------------------------------------------------------------ */
-/*  Splash екран (Spesti & Otkriy Light Utilitarian)                   */
+/*  Splash екран                                                       */
 /* ------------------------------------------------------------------ */
 const Splash: React.FC = () => {
-  const logoScale = useRef(new Animated.Value(0.88)).current;
+  const logoScale = useRef(new Animated.Value(0.7)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
+  const glow = useRef(new Animated.Value(0)).current;
+  const textOpacity = useRef(new Animated.Value(0)).current;
   const barWidth = useRef(new Animated.Value(0)).current;
+  const [hintIndex, setHintIndex] = useState(0);
+  // Трите обещания излизат едно по едно — така сплашът има „дишане“, не е
+  // просто лого, което изчезва, преди човек да го прочете.
+  const featAnims = useRef(SPLASH_FEATURES.map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(logoScale, { toValue: 1, friction: 7, tension: 80, useNativeDriver: true }),
+      Animated.spring(logoScale, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }),
       Animated.timing(logoOpacity, {
         toValue: 1,
-        duration: 240,
+        duration: 420,
         easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(textOpacity, {
+        toValue: 1,
+        duration: 600,
+        delay: 220,
         useNativeDriver: true,
       }),
       Animated.timing(barWidth, {
         toValue: 1,
-        duration: MIN_SPLASH_MS,
-        easing: Easing.out(Easing.quad),
+        duration: MIN_SPLASH_MS - 200,
+        easing: Easing.inOut(Easing.quad),
         useNativeDriver: false,
       }),
     ]).start();
-  }, [barWidth, logoOpacity, logoScale]);
+
+    // Меко „дишане“ на логото
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ])
+    ).start();
+
+    // Трите обещания: появяват се последователно (леко отдолу нагоре).
+    Animated.stagger(
+      420,
+      featAnims.map((a) =>
+        Animated.timing(a, { toValue: 1, duration: 460, delay: 620, useNativeDriver: true })
+      )
+    ).start();
+
+    // Сменящи се подсказки
+    const t = setInterval(() => setHintIndex((i) => (i + 1) % SPLASH_HINTS.length), 1300);
+    return () => clearInterval(t);
+  }, [barWidth, featAnims, glow, logoOpacity, logoScale, textOpacity]);
 
   return (
-    <LinearGradient colors={['#f8f9ff', '#eff4ff', '#f8f9ff']} style={styles.splash}>
+    <LinearGradient colors={['#f8f9ff', '#eff4ff', '#dce9ff']} style={styles.splash}>
+      <Animated.View
+        style={[
+          styles.glow,
+          {
+            opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.52] }),
+            transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1.18] }) }],
+          },
+        ]}
+      />
+
       <Animated.View
         style={[
           styles.logoWrap,
@@ -68,28 +128,31 @@ const Splash: React.FC = () => {
         ]}
       >
         <LinearGradient
-          colors={['#006c49', '#10b981']}
+          colors={[COLORS.primary, COLORS.primaryContainer]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.logoGradient}
         >
-          <Ionicons name="pricetags" size={38} color={COLORS.white} />
+          <Ionicons name="pricetags" size={40} color={COLORS.white} />
         </LinearGradient>
       </Animated.View>
 
-      <Animated.View style={{ opacity: logoOpacity, alignItems: 'center' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20 }}>
-          <Text style={styles.splashTitle}>Спести & Открий</Text>
-          <View style={styles.bgBadge}>
-            <Text style={styles.bgBadgeText}>BG</Text>
-          </View>
-        </View>
-        <Text style={styles.splashSlogan}>Прозрачни цени и реални икономии всеки ден</Text>
+      <Animated.View style={{ opacity: textOpacity, alignItems: 'center' }}>
+        <Text style={styles.splashTitle}>SmartPrice</Text>
+
+        {/* Слоганът: защо съществува приложението, не какво прави.
+            „Помагаме си взаимно“ е идеята; „безплатно“ е обещанието. */}
+        <Text style={styles.splashSlogan}>Помагаме си взаимно. Безплатно.</Text>
+
+        <Text style={styles.splashTagline}>
+          Всеки споделя цена — всички печелим.{'\n'}Без реклами. Без платени ревюта.
+        </Text>
       </Animated.View>
 
-      <View style={{ marginTop: 24, gap: 10, width: '100%', maxWidth: 340 }}>
-        {SPLASH_FEATURES.map((f) => (
-          <View
+      {/* Какво получава човекът — три реда, които се появяват един след друг */}
+      <View style={{ marginTop: 26, gap: 10, width: '100%', maxWidth: 340 }}>
+        {SPLASH_FEATURES.map((f, i) => (
+          <Animated.View
             key={f.text}
             style={{
               flexDirection: 'row',
@@ -97,30 +160,45 @@ const Splash: React.FC = () => {
               gap: 12,
               backgroundColor: COLORS.surfaceContainerLowest,
               borderWidth: 1,
-              borderColor: COLORS.borderSubtle,
+              borderColor: COLORS.outlineVariant,
               borderRadius: 16,
               paddingHorizontal: 14,
               paddingVertical: 10,
+              opacity: featAnims[i],
+              transform: [
+                {
+                  translateY: featAnims[i].interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
             }}
           >
             <View
               style={{
                 width: 34,
                 height: 34,
-                borderRadius: 10,
+                borderRadius: 11,
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: COLORS.primaryFixed,
+                backgroundColor: 'rgba(0, 108, 73, 0.10)',
+                borderWidth: 1,
+                borderColor: 'rgba(0, 108, 73, 0.24)',
               }}
             >
-              <Ionicons name={f.icon as never} size={16} color={COLORS.onPrimaryFixedVariant} />
+              <Ionicons name={f.icon as never} size={16} color={COLORS.greenBright} />
             </View>
-            <Text style={{ color: COLORS.onSurface, fontSize: 13, fontWeight: '700', flex: 1 }}>
+            <Text style={{ color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '700', letterSpacing: -0.2 }}>
               {f.text}
             </Text>
-          </View>
+          </Animated.View>
         ))}
       </View>
+
+      <Animated.View style={[styles.hintPill, { opacity: textOpacity }]}>
+        <Text style={styles.hintPillText}>{SPLASH_HINTS[hintIndex]}</Text>
+      </Animated.View>
 
       <View style={styles.barTrack}>
         <Animated.View
@@ -137,7 +215,7 @@ const Splash: React.FC = () => {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Порта: отваря директно основния интерфейс                          */
+/*  Порта: невлезнали → onboarding (първи път) или вход                 */
 /* ------------------------------------------------------------------ */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isBootstrapping, isAuthenticated } = useAuth();
@@ -157,30 +235,90 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const [minTimePassed, setMinTimePassed] = useState(false);
+  const [onboardingSeen, setOnboardingSeen] = useState<boolean | null>(null);
+  // Показали ли сме обяснението „Как работи“ в тази сесия. Пази се в ref, за да
+  // не върне човека обратно в обяснението, след като го е пропуснал (иначе
+  // цикъл: поток → обяснение → поток).
+  const introShownRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setMinTimePassed(true), MIN_SPLASH_MS);
     return () => clearTimeout(t);
   }, []);
 
-  const ready = !isBootstrapping && minTimePassed;
+  useEffect(() => {
+    (async () => {
+      const flag = await AsyncStorage.getItem(ONBOARDING_SEEN_KEY);
+      setOnboardingSeen(flag === '1');
+    })();
+  }, []);
+
+  const ready = !isBootstrapping && minTimePassed && onboardingSeen !== null;
 
   useEffect(() => {
     if (!ready) return;
     const inAuthGroup = segments[0] === '(auth)';
+    // Споделена оферта (post/<id>) се показва и на гости — иначе линкът,
+    // пратен на приятел, водеше само до екран за вход.
     const isPublicPost = segments[0] === 'post';
+    // Презентацията (/tour) се показва и на невлезли — точно това искаме:
+    // човекът да я види ПРЕДИ да се регистрира.
     const isPublicTour = segments[0] === 'tour';
+    // Томболата се рекламира ПРЕДИ регистрация: гостът трябва да може да
+    // отвори /raffle и /raffle/<id> и да види наградата. Иначе натискането на
+    // „Виж томболата“ само го връщаше на екрана за вход (нищо не се случваше).
     const isPublicRaffle = segments[0] === 'raffle';
+    // Потокът се чете и БЕЗ профил — това е входната врата от TikTok:
+    // човекът първо вижда реалните находки, чак после решава да влезе.
     const isTabs = segments[0] === '(tabs)';
+    // AI съветникът „Ценко“ е достъпен и за гости. Иначе натискането на
+    // бутона му (или директен адрес /assistant) хвърляше госта обратно в
+    // потока и чатът изглеждаше „счупен“ — нищо не се отваряше.
     const isPublicAssistant = segments[0] === 'assistant';
+    /**
+     * Публични информационни екрани: обект/магазин (`/object/<slug>`),
+     * „всички оферти на обекта“ (`/place/<slug>`) и табът „Магазини“ (`/shops`).
+     *
+     * Защо: тези екрани показват само публична информация (цени, оферти) и са
+     * част от разглеждането — гостът трябва да може да ги отвори, без да го
+     * хвърляме на екрана за вход. Преди това линк към обект „не правеше нищо“.
+     */
     const isPublicObject = segments[0] === 'object';
     const isPublicPlace = segments[0] === 'place';
     const isPublicShops = segments[0] === 'shops';
-    const isPublicChainsCompare = segments[0] === 'chains-compare';
-    const isPublicHowItWorks = segments[0] === 'how-it-works';
-    const isPublicListings = segments[0] === 'listings';
-    const isPublicFavorites = segments[0] === 'favorites';
-    const isPublicPuzzle = segments[0] === 'puzzle-demo';
+
+    // ПЪРВО ПУСКАНЕ / НОВА ВЕРСИЯ НА ОБЯСНЕНИЕТО: интерактивното обяснение
+    // (13 екрана) излиза веднага след сплаша — и на гости, и на ВЛЕЗЛИ.
+    // Преди влезлите го виждаха само ако са го видели като гости, защото
+    // проверката стоеше само в клона за гости — затова „никъде не излизаше“.
+    // Споделен линк (post, raffle) и прегледът (/tour) НЕ се превземат —
+    // човекът е поискал точно тях. Пропуска се с „Пропусни“ с едно натискане.
+    /*
+     * ВАЖНО (19.10.2026): тук липсваше `!isPublicAssistant`.
+     *
+     * Затова, когато човек отвори Ценко от чисто устройство/нов webview (напр.
+     * линк от Telegram, или Safari изчистил паметта си), чатът се отваряше, той
+     * пишеше въпроса си — и в този момент портата го хвърляше в обяснението.
+     * Екранът се размонтираше: „въпросът се скри и не ми отговори“.
+     * Ценко е публичен екран като /tour и /post — гостът трябва да може да го
+     * ползва, без да го изхвърляме.
+     */
+    if (
+      !onboardingSeen &&
+      !introShownRef.current &&
+      !inAuthGroup &&
+      !isPublicTour &&
+      !isPublicPost &&
+      !isPublicRaffle &&
+      !isPublicAssistant &&
+      !isPublicObject &&
+      !isPublicPlace &&
+      !isPublicShops
+    ) {
+      introShownRef.current = true;
+      router.replace('/(auth)/onboarding');
+      return;
+    }
 
     if (!isAuthenticated) {
       if (
@@ -192,14 +330,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         !isPublicObject &&
         !isPublicPlace &&
         !isPublicShops &&
-        !isPublicChainsCompare &&
-        !isPublicHowItWorks &&
-        !isPublicListings &&
-        !isPublicFavorites &&
-        !isPublicPuzzle &&
         !isTabs
       ) {
-        router.replace('/(tabs)');
+        // Първото пускане води до обяснението, после директно в потока.
+        router.replace(onboardingSeen ? '/(tabs)' : '/(auth)/onboarding');
       }
       return;
     }
@@ -207,32 +341,41 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (inAuthGroup) {
       router.replace('/(tabs)');
     }
-  }, [ready, isAuthenticated, segments, router]);
+  }, [ready, isAuthenticated, onboardingSeen, segments, router]);
 
-  const showSplash = useMemo(() => !ready, [ready]);
+  const showSplash = useMemo(
+    () => !ready,
+    [ready]
+  );
 
   if (showSplash) return <Splash />;
 
-  return (
-    <>
-      {children}
-      <AddToHomeScreenModal
-        visible={isAddToHomeOpen}
-        onClose={closeAddToHome}
-        mode={addToHomeMode}
-      />
-      <ShareModal post={sharingPost} onClose={closeShare} />
-      <RafflePromoHost />
-      <ScreenTracker />
-      <AuthPromptModal
-        visible={isAuthPromptOpen}
-        reason={authPromptReason}
-        onClose={closeAuthPrompt}
-      />
-      <FounderCelebration data={founderCelebration} onClose={closeFounderCelebration} />
-    </>
-  );
-}
+    return (
+      <>
+        {children}
+        {/* Модалът е тук, защото AuthGate е вътре в AppProvider и вижда
+            състоянието му (в RootLayout то още не съществува). */}
+        <AddToHomeScreenModal
+          visible={isAddToHomeOpen}
+          onClose={closeAddToHome}
+          mode={addToHomeMode}
+        />
+        <ShareModal post={sharingPost} onClose={closeShare} />
+        {/* Реклама на томболата: макс. 3 пъти, с X, на различни влизания */}
+        <RafflePromoHost />
+        {/* 👥 Брои кой къде отваря — за статистиката в админ панела. */}
+        <ScreenTracker />
+        {/* Гост натисна нещо, което иска профил → покана вместо суха грешка */}
+        <AuthPromptModal
+          visible={isAuthPromptOpen}
+          reason={authPromptReason}
+          onClose={closeAuthPrompt}
+        />
+        {/* Значка „Основател“ — поздрав веднага след първата находка */}
+        <FounderCelebration data={founderCelebration} onClose={closeFounderCelebration} />
+      </>
+    );
+  }
 
 export default function RootLayout() {
   return (
@@ -240,11 +383,11 @@ export default function RootLayout() {
       <AppProvider>
         <AuthGate>
           <View style={styles.root}>
-            <StatusBar style="dark" />
+            <StatusBar style="light" />
             <Stack
               screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: COLORS.surface },
+                contentStyle: { backgroundColor: COLORS.bgPrimary },
                 animation: 'slide_from_right',
               }}
             >
@@ -255,6 +398,8 @@ export default function RootLayout() {
                 name="post/[id]"
                 options={{ headerShown: false, presentation: 'card' }}
               />
+              {/* AI съветникът „Ценко“ — отваря се като лист отдолу (модал),
+                  за да не се губи контекстът на екрана, от който е отворен. */}
               <Stack.Screen
                 name="assistant"
                 options={{
@@ -264,8 +409,12 @@ export default function RootLayout() {
                 }}
               />
             </Stack>
-            <DonationModal />
+                        <DonationModal />
+            {/* Модалите за Alert.alert() — на web вградената функция е празна */}
             <AlertHost />
+            {/* 🫧 „Има нова версия“ — иначе инсталираното на компютъра/телефона
+                приложение остава със стария bundle и човек не разбира защо
+                вижда старо поведение. */}
             <UpdateBubble />
           </View>
         </AuthGate>
@@ -275,69 +424,86 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.surface, overflow: 'hidden' },
-  splash: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-    overflow: 'hidden',
+  root: { flex: 1, backgroundColor: COLORS.bgPrimary, overflow: 'hidden' },
+    splash: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+      // Скрива ореола, ако е по-широк от екрана — иначе на web се появява
+      // хоризонтален скрол.
+      overflow: 'hidden',
+    },
+  glow: {
+    position: 'absolute',
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: COLORS.primary,
+    opacity: 0.16,
+    top: '26%',
   },
   logoWrap: {
-    shadowColor: '#006c49',
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    shadowColor: COLORS.primary,
+    shadowOpacity: 0.5,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
   },
   logoGradient: {
-    width: 84,
-    height: 84,
-    borderRadius: 24,
+    width: 92,
+    height: 92,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   splashTitle: {
-    color: COLORS.onSurface,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.6,
-  },
-  bgBadge: {
-    backgroundColor: COLORS.primaryFixed,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  bgBadgeText: {
-    color: COLORS.onPrimaryFixedVariant,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.4,
+    color: COLORS.textPrimary,
+    fontSize: 32,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+    marginTop: 22,
   },
   splashSlogan: {
-    color: COLORS.onSurfaceVariant,
-    fontSize: 14,
-    fontWeight: '600',
+    color: COLORS.accentCyan,
+    fontSize: 17,
+    fontWeight: '900',
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: 12,
+    letterSpacing: -0.2,
   },
+  splashTagline: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  hintPill: {
+    marginTop: 26,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    backgroundColor: COLORS.surfaceContainerLowest,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  hintPillText: { color: COLORS.accentCyan, fontSize: 12.5, fontWeight: '800' },
   barTrack: {
     position: 'absolute',
-    bottom: 68,
+    bottom: 74,
     width: 150,
-    height: 4,
+    height: 3,
     borderRadius: 2,
-    backgroundColor: COLORS.surfaceContainerHigh,
+    backgroundColor: 'rgba(11, 28, 48, 0.10)',
     overflow: 'hidden',
   },
-  barFill: { height: 4, borderRadius: 2, backgroundColor: COLORS.primary },
+  barFill: { height: 3, borderRadius: 2, backgroundColor: COLORS.accentCyan },
   splashFoot: {
     position: 'absolute',
-    bottom: 36,
-    color: COLORS.outline,
+    bottom: 40,
+    color: COLORS.textMuted,
     fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.4,
+    letterSpacing: 0.5,
   },
 });
