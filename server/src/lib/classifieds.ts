@@ -27,6 +27,8 @@ import {
 } from './scraper.js';
 import { apifyToken, apifyReady, apifyBudgetAllows, addApifySpend } from './apifyBrowser.js';
 import { env, features } from '../env.js';
+// 🚗 Колите са изключени от обявите (по заявка, 22.10.2026).
+import { isVehicleListing, vehiclesBlocked } from './noVehicles.js';
 
 export type ClassifiedSource = 'olx' | 'imot' | 'alo' | 'facebook';
 
@@ -430,6 +432,8 @@ export async function importClassifieds(
   let imported = 0;
   let skipped = 0;
   const skippedReasons: string[] = [];
+  // 🚗 Без автомобили в обявите (по заявка на собственика, 22.10.2026).
+  const noVehicles = await vehiclesBlocked();
 
   for (const l of listings) {
     const title = (l.title || '').trim().slice(0, 200);
@@ -443,6 +447,13 @@ export async function importClassifieds(
     if (exists) {
       skipped += 1;
       skippedReasons.push(`${title.slice(0, 40)}: вече е в приложението`);
+      continue;
+    }
+
+    // 🚗 Кола/част за кола не се внася (по заявка, 22.10.2026).
+    if (noVehicles && isVehicleListing(title, l.description, Object.values(l.attrs ?? {}).join(' '))) {
+      skipped += 1;
+      skippedReasons.push(`${title.slice(0, 40)}: автомобил`);
       continue;
     }
 

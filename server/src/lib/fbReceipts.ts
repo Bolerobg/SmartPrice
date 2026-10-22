@@ -5,6 +5,8 @@ import { getSetting, setSetting } from './settings.js';
 import { parseUnit } from './scraper.js';
 import { putImage, publicUrl } from './storage.js';
 import { officialProfileId, pickUserAgent } from './scraper.js';
+// 🚗 Колите са изключени от обявите (по заявка, 22.10.2026).
+import { isVehicleListing, vehiclesBlocked } from './noVehicles.js';
 
 /** Официален фиксиран курс: 1 € = 1.95583 лв. */
 const BGN_PER_EUR = 1.95583;
@@ -1669,6 +1671,18 @@ async function processCommentSignals(params: {
         });
         const title = scrubAuthorName(analysis.title, c.author, authorAlias);
         const description = scrubAuthorName(analysis.description, c.author, authorAlias);
+        // 🚗 Без автомобили (по заявка, 22.10.2026): и коментар за кола не влиза в обявите.
+        if (
+          (await vehiclesBlocked()) &&
+          (analysis.topic === 'vehicles' ||
+            isVehicleListing(title, description, analysis.placeName))
+        ) {
+          skipped++;
+          if (params.jobId) {
+            await logJob(params.jobId, `⏭ Пропуснато (автомобил): „${title.slice(0, 50)}“`);
+          }
+          continue;
+        }
         const status = analysis.isReceipt ? 'pending' : 'not_receipt';
         await one(
           `insert into fb_receipt_queue (
@@ -1923,6 +1937,10 @@ export async function processRawFbPosts(params: {
       )?.id ?? null;
   const autoAdminId = jobAdmin ?? fallbackAdmin;
 
+  // 🚗 Без автомобили в обявите (по заявка на собственика, 22.10.2026).
+  // Чете се веднъж за целия пуск; настройката в app_settings е `no_vehicles`.
+  const noCars = await vehiclesBlocked();
+
   for (const post of params.posts) {
     if (queued >= cap) break;
 
@@ -2005,7 +2023,13 @@ export async function processRawFbPosts(params: {
         analysis.title = scrubAuthorName(analysis.title, post.authorName, authorAlias);
         analysis.description = scrubAuthorName(analysis.description, post.authorName, authorAlias);
 
-        const status = analysis.isReceipt ? 'pending' : 'not_receipt';
+        // 🚗 Без автомобили (22.10.2026): тема „Авто“ ИЛИ дума за кола → отказваме.
+        const vehicle =
+          noCars &&
+          (analysis.topic === 'vehicles' ||
+            isVehicleListing(analysis.title, analysis.description, analysis.placeName));
+        const publishable = analysis.isReceipt && !vehicle;
+        const status = vehicle ? 'rejected' : analysis.isReceipt ? 'pending' : 'not_receipt';
         const row = await one<{ id: string }>(
           `insert into fb_receipt_queue (
              job_id, group_url, fb_post_id, fb_post_url, fb_author_name, fb_posted_at,
@@ -2032,7 +2056,9 @@ export async function processRawFbPosts(params: {
             downloaded.localUrl,
             downloaded.sha256,
             status,
-            analysis.skipReason ?? null,
+            vehicle
+              ? 'Автомобил — обявите с коли са изключени (по заявка на собственика).'
+              : analysis.skipReason ?? null,
             analysis.polarity,
             analysis.category,
             analysis.title,
@@ -2056,7 +2082,7 @@ export async function processRawFbPosts(params: {
 
         if (row) insertedIds.push(row.id);
 
-        if (analysis.isReceipt) {
+        if (publishable) {
           queued++;
           // ⚡ Увереност над прага → влиза направо (настройката от панела).
           if (
@@ -2098,7 +2124,12 @@ export async function processRawFbPosts(params: {
           skipped++;
           if (params.jobId) {
             await query(`update fb_receipt_jobs set skipped = skipped + 1 where id = $1`, [params.jobId]);
-            await logJob(params.jobId, `⏭ Пропуснато (${analysis.kind === 'price_signal' ? 'сигнал без ясно място' : 'не е касова бележка'}): ${analysis.skipReason ?? ''}`);
+            await logJob(
+              params.jobId,
+              vehicle
+                ? `⏭ Пропуснато (автомобил — обявите с коли са изключени): „${analysis.title.slice(0, 50)}“`
+                : `⏭ Пропуснато (${analysis.kind === 'price_signal' ? 'сигнал без ясно място' : 'не е касова бележка'}): ${analysis.skipReason ?? ''}`
+            );
           }
         }
       } catch (err) {
@@ -2421,6 +2452,19 @@ export async function approveFbReceiptItem(
   }
   if (row.status === 'approved' && row.post_id) {
     return { postId: row.post_id, alreadyApproved: true };
+  }
+
+  // 🚗 Автомобилни обяви не се публикуват (по заявка на собственика, 22.10.2026).
+  // Редът е трети по ред защита: дори някой да натисне „Одобри“ в панела, кола не влиза.
+  if (
+    (await vehiclesBlocked()) &&
+    (row.topic === 'vehicles' || isVehicleListing(row.title, row.description, row.place_name))
+  ) {
+    await query(
+      `update fb_receipt_queue set status = 'rejected', skip_reason = $1 where id = $2`,
+      ['Автомобил — обявите с коли са изключени (по заявка на собственика).', queueId]
+    );
+    throw new Error('Автомобилни обяви не се публикуват — колите са изключени от обявите.');
   }
 
   const title = (overrides?.title ?? row.title).trim().slice(0, 200);
