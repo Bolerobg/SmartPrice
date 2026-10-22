@@ -489,14 +489,41 @@ export default function FeedScreen() {
     postDistances,
   ]);
 
-  const greenCount = useMemo(
-    () => posts.filter((p) => p.polarity === 'green').length,
-    [posts]
-  );
-  const redCount = useMemo(
-    () => posts.filter((p) => p.polarity === 'red').length,
-    [posts]
-  );
+  /**
+   * ⚠️ ЖИВО ПОПРАВЕНО (22.10.2026): чиповете „🟢 Оферти (60)“ / „🔴 Не ходи (0)“
+   * показваха броя на ЗАРЕДЕНИТЕ постове, а не колко има в базата — затова
+   * изглеждаше, че двата бутона водят до съвсем различни неща (60 срещу 0,
+   * а всъщност са 108 642 срещу 32). Сега искаме истинските бройки от сървъра
+   * (лека заявка с limit=1) за текущите филтри по град/категория/верига/търсене.
+   */
+  const [polarityTotals, setPolarityTotals] = useState<{ green: number; red: number } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const base = {
+      q: debouncedQuery || undefined,
+      chain: selectedChain ?? undefined,
+      city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
+      category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
+      limit: 1,
+    };
+    Promise.all([
+      api.feed({ ...base, polarity: 'green' }),
+      api.feed({ ...base, polarity: 'red' }),
+    ])
+      .then(([g, r]) => {
+        if (alive) setPolarityTotals({ green: g.total ?? 0, red: r.total ?? 0 });
+      })
+      .catch(() => {
+        if (alive) setPolarityTotals(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [debouncedQuery, selectedChain, selectedCityFilter, selectedCategoryFilter]);
+
+  const greenCount = polarityTotals?.green ?? posts.filter((p) => p.polarity === 'green').length;
+  const redCount = polarityTotals?.red ?? posts.filter((p) => p.polarity === 'red').length;
 
   const hasActiveFilters =
     searchQuery.trim().length > 0 ||
@@ -1128,7 +1155,7 @@ export default function FeedScreen() {
             adjustsFontSizeToFit
             minimumFontScale={0.8}
           >
-            🟢 Оферти ({greenCount})
+            🟢 Оферти ({greenCount.toLocaleString('bg-BG')})
           </Text>
         </TouchableOpacity>
 
@@ -1151,7 +1178,7 @@ export default function FeedScreen() {
             adjustsFontSizeToFit
             minimumFontScale={0.8}
           >
-            🔴 Не ходи ({redCount})
+            🔴 Не ходи ({redCount.toLocaleString('bg-BG')})
           </Text>
         </TouchableOpacity>
       </View>
