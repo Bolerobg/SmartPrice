@@ -45,7 +45,9 @@ function unitFor(badge: { metric?: string | null }): string {
 export default function ProfileScreen() {
   const router = useRouter();
   const { userProfile, posts, openDonationModal, refreshAll, openAddToHome } = useApp();
-  const { user, logout, refreshProfile } = useAuth();
+  // ВНИМАНИЕ: контекстът дава `profile`/`isAuthenticated`, не `user` —
+  // с `user` TypeScript спираше деплоя (TS2339). (поправено 22.10.2026)
+  const { isAuthenticated, logout, refreshProfile } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'badges' | 'bookmarks' | 'donations'>(
     'badges'
@@ -103,7 +105,7 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {!user && (
+        {!isAuthenticated && (
           <View style={styles.guestAuthBanner}>
             <View style={{ flex: 1 }}>
               <Text style={styles.guestAuthTitle}>Разглеждаш като гост</Text>
