@@ -553,7 +553,7 @@ export default function FeedScreen() {
           <Ionicons
             name={userProfile.isSupporter ? 'shield-checkmark' : 'heart'}
             size={14}
-            color={userProfile.isSupporter ? COLORS.goldBright : COLORS.black}
+            color={userProfile.isSupporter ? COLORS.goldBright : COLORS.onPrimary}
           />
           <Text
             style={[
@@ -599,7 +599,7 @@ export default function FeedScreen() {
           disabled={codeBusy}
           onPress={() => void openByCode()}
         >
-          <Ionicons name="pricetag" size={15} color={COLORS.black} />
+          <Ionicons name="pricetag" size={15} color={COLORS.onPrimary} />
           <Text style={styles.codeJumpText}>
             {codeBusy ? 'Търся офертата...' : `Отвори оферта с ID ${searchQuery.trim().toUpperCase()}`}
           </Text>
@@ -663,8 +663,8 @@ export default function FeedScreen() {
           onPress={() => handleQuickPickAndOpen(true)}
           activeOpacity={0.88}
         >
-          <Ionicons name="camera" size={15} color={COLORS.black} />
-          <Text style={{ color: COLORS.black, fontSize: 12, fontWeight: '900' }}>
+          <Ionicons name="camera" size={15} color={COLORS.onPrimary} />
+          <Text style={{ color: COLORS.onPrimary, fontSize: 12, fontWeight: '900' }}>
             Снимай цена
           </Text>
         </TouchableOpacity>
@@ -756,7 +756,7 @@ export default function FeedScreen() {
             accessibilityLabel="Пусни обява за продажба"
           >
             <View style={styles.sellIcon}>
-              <Ionicons name="pricetags" size={17} color={COLORS.black} />
+              <Ionicons name="pricetags" size={17} color={COLORS.onPrimary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sellTitle}>Продавам нещо?</Text>
@@ -918,7 +918,7 @@ export default function FeedScreen() {
                     onPress={() => handleQuickPickAndOpen(true)}
                     activeOpacity={0.85}
                   >
-                    <Ionicons name="camera" size={15} color={COLORS.black} />
+                    <Ionicons name="camera" size={15} color={COLORS.onPrimary} />
                     <Text style={styles.quickIconBtnPrimaryText}>Снимай</Text>
                   </TouchableOpacity>
 
@@ -981,7 +981,7 @@ export default function FeedScreen() {
         <View style={styles.guestCard}>
           <View style={styles.guestRow}>
             <View style={styles.guestIcon}>
-              <Ionicons name="people" size={19} color={COLORS.black} />
+              <Ionicons name="people" size={19} color={COLORS.onPrimary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.guestTitle}>Виждаш реалните цени. Влез и участвай.</Text>
@@ -1481,7 +1481,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: COLORS.greenPrimary,
   },
-  sellBtnText: { color: COLORS.black, fontSize: 13, fontWeight: '900' },
+  sellBtnText: { color: COLORS.onPrimary, fontSize: 13, fontWeight: '900' },
   guestCard: {
     marginHorizontal: 2,
     marginTop: 12,
@@ -1556,7 +1556,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 11,
   },
-  codeJumpText: { color: COLORS.black, fontSize: 13, fontWeight: '900' },
+  codeJumpText: { color: COLORS.onPrimary, fontSize: 13, fontWeight: '900' },
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.bgPrimary,
@@ -1648,7 +1648,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.goldBorder,
   },
   donateTopButtonText: {
-    color: COLORS.black,
+    color: COLORS.onPrimary,
     fontSize: 11.5,
     fontWeight: '900',
   },
@@ -1763,7 +1763,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   quickIconBtnPrimaryText: {
-    color: COLORS.black,
+    color: COLORS.onPrimary,
     fontSize: 11.5,
     fontWeight: '900',
   },
