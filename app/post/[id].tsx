@@ -22,6 +22,7 @@ import { ReceiptModalCard } from '@/components/ReceiptModalCard';
 import { PublicPostPreview } from '@/components/PublicPostPreview';
 import { PriceHistoryCard } from '@/components/PriceHistoryCard';
 import { ObjectSignalsCard } from '@/components/ObjectSignalsCard';
+import { PlaceVisitCard } from '@/components/PlaceVisitCard';
 import { ShopPriceCompare } from '@/components/ShopPriceCompare';
 import { PriceDuelCard } from '@/components/PriceDuelCard';
 import { Avatar } from '@/components/Avatar';
@@ -738,7 +739,7 @@ export default function PostDetailScreen() {
 
           {/* История на цената + „Беше ли на място?“ — САМО за оферти с цена.
               При места от Google Maps цена не се следи, затова картата не се показва. */}
-          {isMapPlace ? null : <PriceHistoryCard post={post} />}
+          {isMapPlace ? <PlaceVisitCard post={post} /> : <PriceHistoryCard post={post} />}
 
           {/*
             🛒 Оферта от ВЕРИГА (внесена цена): казваме честно как стои историята.
