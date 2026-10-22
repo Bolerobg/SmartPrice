@@ -72,6 +72,12 @@ export default function ProfileScreen() {
 
   const handleRefresh = async () => {
     if (isRefreshing) return;
+    // След „Излез“ няма токен: заявката връща 401 и изскачаше
+    // „Не успя да се обнови“ — модалът изглеждаше, че не се затваря.
+    if (!isAuthenticated) {
+      router.replace('/(tabs)' as never);
+      return;
+    }
     setIsRefreshing(true);
     setJustRefreshed(false);
     try {
@@ -335,7 +341,12 @@ export default function ProfileScreen() {
                   {
                     text: 'Излез',
                     style: 'destructive',
-                    onPress: () => void logout(),
+                    onPress: () => {
+                      void (async () => {
+                        await logout();
+                        router.replace('/(tabs)' as never);
+                      })();
+                    },
                   },
                 ])
               }

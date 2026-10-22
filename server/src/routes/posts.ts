@@ -107,7 +107,15 @@ const venuesQuerySchema = z.object({
   polarity: z.enum(['green', 'red']).default('red'),
   category: z.string().max(40).optional(),
   city: z.string().max(80).optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(10),
+  /**
+   * 🏆 Колко обекта връщаме наведнъж.
+   *
+   * ПИТФОЛ (22.10.2026): таванът беше 50, а в базата има 169 обекта в „Честни
+   * места“. Импортираните от Google картата места имат по 1 сигнал → стояха в
+   * дъното и не влизаха в първите 50; изглеждаше, че „новите места липсват“.
+   * Сега таванът е 500, за да се стигат всички обекти.
+   */
+  limit: z.coerce.number().int().min(1).max(500).default(50),
 });
 
 function computePricePerUnit(
@@ -192,6 +200,8 @@ export default async function postRoutes(app: FastifyInstance) {
       reports_count: number;
       has_receipt: boolean;
       slug: string | null;
+      rating: number | null;
+      reviews_count: number | null;
     }>(
       `select btrim(coalesce(v.place_name, '')) as place_name,
               coalesce(v.city, '') as city,
@@ -200,6 +210,10 @@ export default async function postRoutes(app: FastifyInstance) {
               -- таг (място + град).
               md5(lower(btrim(coalesce(v.place_name, ''))) || '|' || lower(btrim(coalesce(v.city, '')))) as slug,
               min(nullif(btrim(coalesce(v.address, '')), '')) as address,
+              -- ⭐ Истинската оценка от Google (ако мястото е обогатено) — за да
+              -- не изглеждат новите обекти „празни“ до старите с гласове.
+              max(pe.rating)::float as rating,
+              max(pe.reviews_count)::int as reviews_count,
               count(*)::int as reports_count,
               sum(case when $1 = 'red'
                     then coalesce((v.reactions->>'pureRobbery')::int, 0)
@@ -210,6 +224,8 @@ export default async function postRoutes(app: FastifyInstance) {
               bool_or(coalesce(v.verified_valid_today_count, 0) > 0) as has_receipt
          from v_posts_full v
          join posts p on p.id = v.id
+         left join place_enrichment pe
+                on pe.slug = md5(lower(btrim(coalesce(v.place_name, ''))) || '|' || lower(btrim(coalesce(v.city, ''))))
         where p.status = 'published'
           and v.polarity = $1
           -- Класацията е за ОБЕКТИ с гласове от хора. Внесените стоки (scraper)
@@ -225,8 +241,14 @@ export default async function postRoutes(app: FastifyInstance) {
           and ($2::text is null or v.category = $2)
           and ($3::text is null or v.city = $3)
         group by 1, 2
-        order by score desc, reports_count desc, place_name asc
-        limit $4`,
+        -- ⭐ По гласове от хора, после по истинската оценка от Google, за да не
+        -- потъват новите обекти само защото още нямат гласове.
+        order by score desc,
+                 rating desc nulls last,
+                 reviews_count desc nulls last,
+                 reports_count desc,
+                 place_name asc
+         limit $4`,
       [q.polarity, q.category ?? null, q.city ?? null, q.limit]
     );
     return {
@@ -239,6 +261,8 @@ export default async function postRoutes(app: FastifyInstance) {
         score: Number(r.score) || 0,
         reportsCount: Number(r.reports_count) || 0,
         hasReceipt: Boolean(r.has_receipt),
+        rating: r.rating ?? undefined,
+        reviewsCount: r.reviews_count ?? undefined,
       })),
     };
   });
