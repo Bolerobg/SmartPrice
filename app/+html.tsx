@@ -21,33 +21,57 @@ export default function Root({ children }: PropsWithChildren) {
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
+          content="width=device-width, initial-scale=1, maximum-scale=5, shrink-to-fit=no, viewport-fit=cover"
         />
-        <meta name="theme-color" content="#060911" />
+        <meta name="theme-color" content="#f8f9ff" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+          rel="stylesheet"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+          rel="stylesheet"
+        />
         {/* Основният ресет на Expo за ScrollView */}
         <ScrollViewStyleReset />
         <style
           dangerouslySetInnerHTML={{
             __html: `
-/* ---- 2026 Obsidian Dark Mode & Typography Polish ---- */
+/* ---- Spesti & Otkriy Light Utilitarian Design System & Plus Jakarta Sans ---- */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 html, body {
   height: 100%;
   max-width: 100%;
   overflow-x: hidden;
-  overscroll-behavior-x: none;
-  background-color: #060911;
+  overscroll-behavior: none;
+  background-color: #f8f9ff;
+  color: #0b1c30;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  text-align: start;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
-body { margin: 0; background-color: #060911; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background-color: #f8f9ff;
+  -webkit-text-size-adjust: 100%;
+}
 
 ::selection {
-  background: rgba(34, 211, 238, 0.25);
-  color: #F8FAFC;
+  background: rgba(16, 185, 129, 0.22);
+  color: #0b1c30;
+}
+
+/* Force Plus Jakarta Sans & tabular numerals for prices */
+#root, #root div, #root span, #root p, #root input, #root textarea, #root button {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- Коренът е точно колкото екрана ---- */
@@ -58,6 +82,7 @@ body { margin: 0; background-color: #060911; -webkit-text-size-adjust: 100%; }
   max-width: 100vw;
   min-height: 100%;
   overflow-x: hidden;
+  background-color: #f8f9ff;
 }
 
 /* ---- Ключовата поправка ----
@@ -76,7 +101,7 @@ body { margin: 0; background-color: #060911; -webkit-text-size-adjust: 100%; }
 
 /* Текстът се пренася, вместо да избутва ширината */
 #root [dir="auto"] {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* ---- Хоризонталните ленти с чипове продължават да скролват ---- */
@@ -87,8 +112,7 @@ body { margin: 0; background-color: #060911; -webkit-text-size-adjust: 100%; }
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
-#root [style*="overflow-x: auto"]::-webkit-scrollbar,
-#root [style*="overflow-x:auto"]::-webkit-scrollbar {
+::-webkit-scrollbar {
   display: none;
 }
 `,

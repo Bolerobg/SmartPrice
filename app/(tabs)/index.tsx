@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  FlatList,
+  Image,
+  Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -11,1407 +12,1566 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { CityPickerDropdown } from '@/components/CityPickerDropdown';
-import { ActiveRaffleCard } from '@/components/ActiveRaffleCard';
-import { PostCard } from '@/components/PostCard';
-import { QuickPricePhotoModal } from '@/components/QuickPricePhotoModal';
-import { SmartPriceAssistantCard } from '@/components/SmartPriceAssistantCard';
-import { SmartToolsModal } from '@/components/SmartToolsModal';
-import { api } from '@/src/api/client';
-import { CATEGORIES, COLORS } from '@/constants/theme';
+import { COLORS, CITIES, getRetailChainStyle } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
-import { useAuth } from '@/src/auth/AuthContext';
-import { FounderBanner } from '@/components/FounderBanner';
-import { ListingNudgeModal } from '@/components/ListingNudgeModal';
-import { PuzzleDemoNudge } from '@/components/PuzzleDemoNudge';
-import {
-  calculateDistanceKm,
-  detectUserAndStoreLocation,
-  getCityCoordinates,
-  getCoordinatesForPost,
-} from '@/lib/locationService';
-import { matchesUniversalSearch, SortMode, sortPostsSmart } from '@/lib/smartSearch';
-import { formatNumber } from '@/src/lib/format';
+import { QuickPricePhotoModal } from '@/components/QuickPricePhotoModal';
+import { SmartToolsModal, type SmartToolTab } from '@/components/SmartToolsModal';
+import { api } from '@/src/api/client';
 import type { PostItem } from '@/types';
 
-/** Колко да изчакаме, преди да питаме сървъра (за да не удряме на всяка буква) */
-const SEARCH_DEBOUNCE_MS = 350;
+const DEFAULT_AVATAR_URI =
+  'https://lh3.googleusercontent.com/aida/AEtjO1VuErqROe2PbBbZAgjMVuoRCFBmUSE6QBmQJJy1GloyyA2zUp2ZUjBkd78F_UhmIerVdZCyPj_hc9gLVQvykukOnVllDkvHaiCA-Z4IqyIya3kjRZcisn_g05eL7F4kh6zl784M0kWjbUrHioEPTmWXxrOVsgs24pbFPqy86VaaXyVLlGdmx0GwOmCmxHxeV1TCkzh8aqIsSIWkJuglQsQq59wl-Ts6O9m4mF8h9n1C543Afsrr4AlkM8A';
 
-const QUICK_SEARCH_SUGGESTIONS = [
-  'Кафе',
-  'Вода',
-  'Зехтин',
-  'Меню',
-  'Нощувка',
-  'Такса',
-  'Бележка',
+const VEREIA_CHEESE_IMG =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuAYrUoGkpK3UD8QMXjJgHPpgVayhTjO4P2qYQXb6VbTBXGrNgZaLqjOscEQbqxNdi_hTqpMD-m7Dhk0ThcfRJ7IOek3cGxqHVzVaCPCUaMftT0neKqZDu3spU-47letFW9jKmuDAqkbyOqLtzETLVsaynoXGSj-2IDVNm9ga6EG50bUe5-zzW4cc6WOY8dpwwmptQsOjexvhkLp21yiuGWxXYcJiMa7yxtNl-VYbRztEnpK4_g5FV0s';
+
+export interface ChainOfferItem {
+  id: string;
+  chain: string;
+  branch: string;
+  price: number;
+  oldPrice?: number;
+  discountPct?: number;
+  isBestDeal?: boolean;
+  inStock?: boolean;
+  promoText?: string;
+  promoType?: 'brochure' | 'eco' | 'loyalty' | 'regular';
+  savingText?: string;
+  withoutCardText?: string;
+  verificationText?: string;
+  verifiedReceipt?: boolean;
+  compact?: boolean;
+}
+
+export interface CatalogProduct {
+  id: string;
+  searchLabel: string;
+  brandCategory: string;
+  title: string;
+  subtitle: string;
+  barcode: string;
+  weight: string;
+  badgeText: string;
+  imageUri: string;
+  lowestPrice: number;
+  avgPrice: number;
+  highestPrice: number;
+  maxSaving: number;
+  historyDropPct: number;
+  historyPeak: number;
+  historyLow: number;
+  historyInsight: string;
+  lastVerifiedText: string;
+  upvotes: number;
+  downvotes: number;
+  offers: ChainOfferItem[];
+}
+
+const CATALOG_PRODUCTS: CatalogProduct[] = [
+  {
+    id: 'vereia-cheese-400',
+    searchLabel: 'Краве сирене Верея 400г',
+    brandCategory: 'Верея • Млечни',
+    title: 'Краве сирене 400г БДС',
+    subtitle: 'Саламурено сирене, кутия',
+    barcode: '380001234567',
+    weight: '400 г',
+    badgeText: 'БДС',
+    imageUri: VEREIA_CHEESE_IMG,
+    lowestPrice: 5.89,
+    avgPrice: 7.45,
+    highestPrice: 8.99,
+    maxSaving: 3.1,
+    historyDropPct: 18,
+    historyPeak: 8.99,
+    historyLow: 5.89,
+    historyInsight: 'В момента цената е близо до историческия минимум за последните 6 месеца.',
+    lastVerifiedText: 'Последно потвърдено преди 22 минути от потребител в Kaufland - Младост',
+    upvotes: 42,
+    downvotes: 2,
+    offers: [
+      {
+        id: 'kaufland-1',
+        chain: 'KAUFLAND',
+        branch: 'Младост 4',
+        price: 5.89,
+        oldPrice: 8.99,
+        discountPct: 34,
+        isBestDeal: true,
+        inStock: true,
+        promoText: 'Седмична брошура • до неделя',
+        promoType: 'brochure',
+        verificationText: 'Касова бележка',
+        verifiedReceipt: true,
+      },
+      {
+        id: 'lidl-1',
+        chain: 'LIDL',
+        branch: 'бул. България',
+        price: 6.49,
+        promoText: 'Редовна цена • Алтернатива Pilos',
+        promoType: 'eco',
+        savingText: 'Спестяваш 2.50 лв.',
+        verificationText: 'Обновено преди 3 ч.',
+      },
+      {
+        id: 'billa-1',
+        chain: 'BILLA',
+        branch: 'Студентски град',
+        price: 7.29,
+        promoText: 'С Billa Card клубна цена',
+        promoType: 'loyalty',
+        withoutCardText: 'Без карта: 8.19 лв.',
+        verificationText: 'Потвърдено от клиент',
+      },
+      {
+        id: 'fantastico-1',
+        chain: 'ФАНТАСТИКО',
+        branch: 'Драгалевци',
+        price: 7.89,
+        promoText: 'Редовна цена на рафт',
+        promoType: 'regular',
+        compact: true,
+      },
+      {
+        id: 'tmarket-1',
+        chain: 'Т-МАРКЕТ',
+        branch: 'Люлин 3',
+        price: 8.49,
+        promoText: 'Редовна цена',
+        promoType: 'regular',
+        compact: true,
+      },
+    ],
+  },
+  {
+    id: 'butter-president-250',
+    searchLabel: 'Краве масло Президент 250г',
+    brandCategory: 'Президент • Млечни',
+    title: 'Краве масло 82% 250г',
+    subtitle: 'Масло от пастьоризирана сметана',
+    barcode: '322802117002',
+    weight: '250 г',
+    badgeText: '82%',
+    imageUri: 'https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=400&auto=format&fit=crop&q=80',
+    lowestPrice: 4.99,
+    avgPrice: 6.45,
+    highestPrice: 7.89,
+    maxSaving: 2.9,
+    historyDropPct: 22,
+    historyPeak: 7.89,
+    historyLow: 4.99,
+    historyInsight: 'Промоционалната цена в Lidl е с 22% под средната за месеца.',
+    lastVerifiedText: 'Последно потвърдено преди 45 минути от потребител в Lidl - Люлин',
+    upvotes: 31,
+    downvotes: 1,
+    offers: [
+      {
+        id: 'lidl-butter',
+        chain: 'LIDL',
+        branch: 'бул. Сливница',
+        price: 4.99,
+        oldPrice: 7.89,
+        discountPct: 37,
+        isBestDeal: true,
+        inStock: true,
+        promoText: 'Уикенд акция • с Lidl Plus',
+        promoType: 'brochure',
+        verificationText: 'Касова бележка',
+        verifiedReceipt: true,
+      },
+      {
+        id: 'kaufland-butter',
+        chain: 'KAUFLAND',
+        branch: 'Банишора',
+        price: 5.49,
+        promoText: 'Седмична брошура • Kaufland Card',
+        promoType: 'eco',
+        savingText: 'Спестяваш 2.40 лв.',
+        verificationText: 'Обновено преди 1 ч.',
+      },
+      {
+        id: 'billa-butter',
+        chain: 'BILLA',
+        branch: 'Лозенец',
+        price: 6.29,
+        promoText: 'С Billa Card клубна цена',
+        promoType: 'loyalty',
+        withoutCardText: 'Без карта: 7.49 лв.',
+        verificationText: 'Потвърдено от клиент',
+      },
+      {
+        id: 'fantastico-butter',
+        chain: 'ФАНТАСТИКО',
+        branch: 'Гео Милев',
+        price: 6.99,
+        promoText: 'Редовна цена на рафт',
+        promoType: 'regular',
+        compact: true,
+      },
+    ],
+  },
+  {
+    id: 'olive-oil-1l',
+    searchLabel: 'Зехтин Extra Virgin 1л',
+    brandCategory: 'Minerva • Масла',
+    title: 'Зехтин Extra Virgin 1л',
+    subtitle: 'Студено пресован маслинов зехтин',
+    barcode: '520105401211',
+    weight: '1 л',
+    badgeText: 'Екстра',
+    imageUri: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&auto=format&fit=crop&q=80',
+    lowestPrice: 16.99,
+    avgPrice: 21.4,
+    highestPrice: 25.99,
+    maxSaving: 9.0,
+    historyDropPct: 26,
+    historyPeak: 25.99,
+    historyLow: 16.99,
+    historyInsight: 'Силна промоция тази седмица — спестяваш до 9.00 лв. на бутилка.',
+    lastVerifiedText: 'Последно потвърдено преди 1 час от потребител в Фантастико - Младост',
+    upvotes: 58,
+    downvotes: 3,
+    offers: [
+      {
+        id: 'fantastico-oil',
+        chain: 'ФАНТАСТИКО',
+        branch: 'Младост 1',
+        price: 16.99,
+        oldPrice: 25.99,
+        discountPct: 35,
+        isBestDeal: true,
+        inStock: true,
+        promoText: 'Седмична брошура • до сряда',
+        promoType: 'brochure',
+        verificationText: 'Касова бележка',
+        verifiedReceipt: true,
+      },
+      {
+        id: 'kaufland-oil',
+        chain: 'KAUFLAND',
+        branch: 'Дружба',
+        price: 18.49,
+        promoText: 'Промо палет • Ограничени количества',
+        promoType: 'eco',
+        savingText: 'Спестяваш 7.50 лв.',
+        verificationText: 'Обновено преди 2 ч.',
+      },
+      {
+        id: 'billa-oil',
+        chain: 'BILLA',
+        branch: 'Център',
+        price: 21.99,
+        promoText: 'С Billa Card клубна цена',
+        promoType: 'loyalty',
+        withoutCardText: 'Без карта: 24.99 лв.',
+        verificationText: 'Потвърдено от клиент',
+      },
+    ],
+  },
 ];
 
-const SORT_OPTIONS: { id: SortMode; label: string; icon: string }[] = [
-  { id: 'newest', label: 'Най-нови', icon: 'time-outline' },
-  { id: 'best_savings', label: 'Топ спестяване', icon: 'trending-down-outline' },
-  { id: 'lowest_price', label: 'Най-ниска цена', icon: 'arrow-down-outline' },
-  { id: 'highest_price', label: 'Най-висока цена', icon: 'arrow-up-outline' },
-  { id: 'most_helped', label: 'Най-полезни', icon: 'flame-outline' },
-];
-
-export default function FeedScreen() {
+export default function PricesComparisonScreen() {
+  const router = useRouter();
   const {
-    posts,
     userProfile,
-    priceAlerts,
-    selectedPolarityFilter,
-    setSelectedPolarityFilter,
-    selectedCategoryFilter,
-    setSelectedCategoryFilter,
     selectedCityFilter,
     setSelectedCityFilter,
-    openDonationModal,
-    totalCommunitySavedAllPosts,
-    openAuthPrompt,
-    isRefreshing,
-    refreshAll,
-    isLoadingMore,
-    hasMorePosts,
-    loadMorePosts,
+    priceAlerts,
   } = useApp();
-  const { isAuthenticated } = useAuth();
 
-  // --- Подкани (без да досаждаме) -------------------------------------------
-  // Сървърът решава дали да ги покажем: обявите — най-много веднъж на 14 дни и
-  // само на някого без собствени обяви; тренировката — на 48 часа. Тук само
-  // питаме веднъж при отваряне на екрана.
-  const [showListingNudge, setShowListingNudge] = useState(false);
-  // Ръчно отваряне на „Как работи?“ от картата за обяви
-  const [listingHelpManual, setListingHelpManual] = useState(false);
-  const [showPuzzleNudge, setShowPuzzleNudge] = useState(false);
-  const [nudgePrice, setNudgePrice] = useState(2);
-  const [nudgeDays, setNudgeDays] = useState(60);
+  const displayCity =
+    selectedCityFilter && selectedCityFilter !== 'Всички градове'
+      ? selectedCityFilter
+      : 'София';
 
+  const [selectedProductId, setSelectedProductId] = useState<string>(CATALOG_PRODUCTS[0]!.id);
+  const [searchInput, setSearchInput] = useState<string>(CATALOG_PRODUCTS[0]!.searchLabel);
+  const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
+
+  // Любими продукти (сърцето в Hero картата)
+  const [favoriteIds, setFavoriteIds] = useState<Record<string, boolean>>({});
+
+  // Списък за пазаруване (бутоните „+ В списъка“ и долният бутон „Добави в пазарската кошница“)
+  const [addedOffers, setAddedOffers] = useState<
+    Record<string, { chain: string; productTitle: string; price: number; saving: number }>
+  >({});
+
+  // Гласуване „Точна ли е тази цена?“ (👍 / 👎)
+  const [userVote, setUserVote] = useState<Record<string, 'up' | 'down' | null>>({});
+
+  // Филтър за веригите и сортиране
+  const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
+  const [chainFilter, setChainFilter] = useState<string>('ALL');
+  const [onlyVerifiedFilter, setOnlyVerifiedFilter] = useState<boolean>(false);
+  const [sortOrder, setSortOrder] = useState<'price_asc' | 'discount_desc'>('price_asc');
+
+  // Модали: Град, Камера/Бележка, Умни инструменти (Кошница / Аларми), Пазарска кошница
+  const [isCityModalOpen, setIsCityModalOpen] = useState<boolean>(false);
+  const [citySearch, setCitySearch] = useState<string>('');
+  const [isQuickPhotoOpen, setIsQuickPhotoOpen] = useState<boolean>(false);
+  const [isSmartToolsOpen, setIsSmartToolsOpen] = useState<boolean>(false);
+  const [smartToolsTab, setSmartToolsTab] = useState<SmartToolTab>('basket');
+  const [isBasketDrawerOpen, setIsBasketDrawerOpen] = useState<boolean>(false);
+  const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState<boolean>(false);
+
+  // Реални оферти от сървъра при търсене на произволен продукт
+  const [liveServerOffers, setLiveServerOffers] = useState<PostItem[]>([]);
+  const [isSearchingLive, setIsSearchingLive] = useState<boolean>(false);
+
+  const currentProduct = useMemo(
+    () => CATALOG_PRODUCTS.find((p) => p.id === selectedProductId) ?? CATALOG_PRODUCTS[0]!,
+    [selectedProductId]
+  );
+
+  // Когато потребителят напише нещо различно от текущия продукт, търсим и в сървъра
   useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const demo = await api.puzzleDemoNudge();
-        if (alive && demo.show) setShowPuzzleNudge(true);
-      } catch {
-        /* подканата не е критична */
-      }
-      if (!isAuthenticated) return;
-      try {
-        const [nudge, cfg] = await Promise.all([api.listingNudge(), api.listingConfig()]);
-        if (!alive) return;
-        setNudgePrice(cfg.priceEur);
-        setNudgeDays(cfg.days);
-        if (nudge.show) setShowListingNudge(true);
-      } catch {
-        /* подканата не е критична */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [isAuthenticated]);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [codeBusy, setCodeBusy] = useState(false);
-  /** Реф към потока — за „обратно най-горе“ и за скок при ново търсене. */
-  const feedRef = useRef<FlatList<PostItem>>(null);
-  /** Показваме бутона „↑“ само когато човекът е слязъл надолу. */
-  const [showToTop, setShowToTop] = useState(false);
-
-  /**
-   * Връща потока най-горе.
-   *
-   * Защо и през DOM: в уеб версията (Expo web) `scrollToOffset` понякога не стига
-   * до началото, а на телефон човек трябва да „изтегля“ стотици оферти нагоре, за
-   * да стигне до търсачката. Затова дърпаме и истинския скролер.
-   */
-  const scrollFeedToTop = useCallback((animated = true) => {
-    try {
-      feedRef.current?.scrollToOffset({ offset: 0, animated });
-    } catch {
-      /* списъкът още не е готов */
-    }
-    if (typeof document === 'undefined') return;
-    try {
-      const root = document.querySelector('[data-testid="feed-list"]') as HTMLElement | null;
-      const all: HTMLElement[] = root ? [root] : [];
-      if (root) {
-        const inner = root.querySelectorAll('div');
-        for (let i = 0; i < inner.length && i < 30; i += 1) all.push(inner[i] as HTMLElement);
-      }
-      for (const el of all) {
-        let oy = '';
-        try {
-          oy = window.getComputedStyle(el).overflowY;
-        } catch {
-          oy = '';
-        }
-        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
-          el.scrollTop = 0;
-          break;
-        }
-      }
-    } catch {
-      /* не пречи на разглеждането */
-    }
-    // Скриваме бутона веднага: програмното скролване не винаги ражда onScroll
-    // събитие (в web), затова иначе той остава видим и горе.
-    setShowToTop(false);
-  }, []);
-
-  const [isToolsExpanded, setIsToolsExpanded] = useState(false);
-  const router = useRouter();
-
-  // ID-то на офертата е САМО ЧИСЛА (напр. 48219357). Ако написаното изглежда
-  // като такъв номер — предлагаме да я отворим направо, вместо да търсим по думи.
-  const looksLikeOfferCode = /^\d{6,12}$/.test(searchQuery.trim());
-
-  const openByCode = async () => {
-    const code = searchQuery.trim();
-    if (!code) return;
-    setCodeBusy(true);
-    try {
-      const { post } = await api.postByCode(code);
-      setSearchQuery('');
-      router.push(`/post/${post.id}` as never);
-    } catch (err) {
-      Alert.alert(
-        'Няма такава оферта',
-        err instanceof Error && err.message
-          ? err.message
-          : `Не намерих оферта с ID ${code.toUpperCase()}. Провери кода и опитай пак.`
-      );
-    } finally {
-      setCodeBusy(false);
-    }
-  };
-
-  // Търсенето пита сървъра (цялата база), а не само заредените 60 поста.
-  const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [serverResults, setServerResults] = useState<PostItem[] | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  /** Има ли още страници в сървърното търсене (верига/текст) и теглим ли в момента. */
-  const [searchHasMore, setSearchHasMore] = useState(false);
-  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
-  const [sortMode, setSortMode] = useState<SortMode>('newest');
-  const [isQuickPhotoOpen, setIsQuickPhotoOpen] = useState(false);
-  const [quickInitialPhoto, setQuickInitialPhoto] = useState<string | null>(null);
-  const [isSmartToolsOpen, setIsSmartToolsOpen] = useState(false);
-  const [smartToolsTab, setSmartToolsTab] = useState<'basket' | 'shrinkflation' | 'alerts'>('basket');
-  const [nearbySorted, setNearbySorted] = useState(false);
-  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-
-  /**
-   * 🛒 Вериги за супермаркети (внесените цени от Кауфланд, Метро, Билла…).
-   *
-   * Защо чипове, а не търсене по име: човек, който гледа „сирене“ за 4.68 €,
-   * иска с едно докосване да види само Кауфланд (или само Метро) и да сравни
-   * двата екрана. Името на веригата вече се търси и от търсачката, но чипът е
-   * по-бърз и не изяжда търсенето по продукт.
-   */
-  const [selectedChain, setSelectedChain] = useState<string | null>(null);
-  const [chainChips, setChainChips] = useState<Array<{ name: string; offers: number }>>([]);
-  /**
-   * 📊 Колко цени от вериги има изобщо — показва се горе в потока.
-   * Идва заедно с чиповете (същата заявка), не искаме втора.
-   */
-  const [chainStats, setChainStats] = useState<{
-    offers: number;
-    chains: number;
-    cities: number;
-    /** Различните продукти (не са същото като офертите: един продукт = много вериги). */
-    products: number;
-  } | null>(null);
-
-  // 0) Кои вериги има в базата — за чиповете. Сменя ли се градът, питаме пак
-  // (различните градове имат различни вериги с цени).
-  useEffect(() => {
-    let alive = true;
-    api
-      .chains(selectedCityFilter)
-      .then((res) => {
-        if (!alive) return;
-        setChainChips((res.items ?? []).slice(0, 24));
-        if (res.stats) setChainStats(res.stats);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [selectedCityFilter]);
-
-  // 1) Дебounce — чакаме да спреш да пишеш, преди да питаме сървъра.
-  useEffect(() => {
-    const t = setTimeout(
-      () => setDebouncedQuery(searchQuery.trim()),
-      SEARCH_DEBOUNCE_MS
-    );
-    return () => clearTimeout(t);
-  }, [searchQuery]);
-
-  // 2) Търсене в ЦЯЛАТА база със запазване на избрания град, категория и полярност.
-  // Работи и когато е избрана САМО верига (без текст) — тогава сървърът връща
-  // офертите на тази верига, а не само заредената страница.
-  useEffect(() => {
-    if (!debouncedQuery && !selectedChain) {
-      setServerResults(null);
-      setIsSearching(false);
-      setSearchHasMore(false);
+    const q = searchInput.trim();
+    if (!q || q === currentProduct.searchLabel) {
+      setLiveServerOffers([]);
+      setIsSearchingLive(false);
       return;
     }
     let cancelled = false;
-    setIsSearching(true);
-    api
-      .feed({
-        q: debouncedQuery || undefined,
-        chain: selectedChain ?? undefined,
-        city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
-        polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
-        category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
-        limit: 60,
-      })
-      .then((res) => {
-        if (cancelled) return;
-        setServerResults(res.items);
-        // Има ли още страници? Без това скролването спираше след първите 60
-        // оферти на избраната верига и екранът изглеждаше „закован“.
-        setSearchHasMore(Boolean(res.hasMore));
-      })
-      .catch(() => {
-        if (!cancelled) setServerResults([]);
-      })
-      .finally(() => {
-        if (!cancelled) setIsSearching(false);
-      });
+    setIsSearchingLive(true);
+    const timer = setTimeout(() => {
+      api
+        .feed({
+          q,
+          city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
+          limit: 15,
+        })
+        .then((res) => {
+          if (!cancelled) setLiveServerOffers(res.items ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setLiveServerOffers([]);
+        })
+        .finally(() => {
+          if (!cancelled) setIsSearchingLive(false);
+        });
+    }, 320);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [debouncedQuery, selectedChain, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter]);
+  }, [searchInput, currentProduct.searchLabel, selectedCityFilter]);
 
-  /**
-   * 🔎 Още резултати от сървърното търсене (за верига без текст).
-   *
-   * Защо е нужно: при избрана верига лентата показва сървърните резултати, а
-   * „дръпни за още“ пълнеше стария локален списък — тоест на екрана не се
-   * появяваше нищо ново и след 60-те оферти екранът оставаше празен. Сега
-   * искаме следващата страница от сървъра и я добавяме към същия списък.
-   */
-  const loadMoreSearch = useCallback(async () => {
-    if (searchLoadingMore || !searchHasMore || serverResults === null) return;
-    setSearchLoadingMore(true);
-    try {
-      const res = await api.feed({
-        q: debouncedQuery || undefined,
-        chain: selectedChain ?? undefined,
-        city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
-        polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
-        category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
-        limit: 60,
-        offset: serverResults.length,
-      });
-      setServerResults((prev) => {
-        const seen = new Set((prev ?? []).map((p) => p.id));
-        return [...(prev ?? []), ...res.items.filter((p) => !seen.has(p.id))];
-      });
-      setSearchHasMore(Boolean(res.hasMore));
-    } catch {
-      // тихо: следващата страница може и да не дойде — не чупим екрана
-    } finally {
-      setSearchLoadingMore(false);
-    }
-  }, [
-    searchLoadingMore,
-    searchHasMore,
-    serverResults,
-    debouncedQuery,
-    selectedChain,
-    selectedCityFilter,
-    selectedPolarityFilter,
-    selectedCategoryFilter,
-  ]);
-
-  const handleToggleNearby = async () => {
-    if (nearbySorted) {
-      setNearbySorted(false);
-      return;
-    }
-    const info = await detectUserAndStoreLocation({
-      fallbackCity: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : userProfile.city,
-    });
-
-    // Без реални координати не подреждаме по „разстояние“ — иначе би било измислено.
-    if (!info.hasRealCoordinates) {
-      Alert.alert(
-        'Няма достъп до локацията',
-        'Не успях да взема GPS координати (няма разрешение или няма сигнал). Разреши достъп до локацията и опитай пак — иначе подредбата по разстояние би била неточна.'
-      );
-      return;
-    }
-
-    setUserCoords({ latitude: info.latitude, longitude: info.longitude });
-    setNearbySorted(true);
+  const handleSelectProduct = (prod: CatalogProduct) => {
+    setSelectedProductId(prod.id);
+    setSearchInput(prod.searchLabel);
+    setIsSearchFocused(false);
+    setChainFilter('ALL');
   };
 
-  const cityPostCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    posts.forEach((p) => {
-      const key = p.city.toLowerCase();
-      counts[key] = (counts[key] || 0) + 1;
-    });
-    return counts;
-  }, [posts]);
+  // Филтрирани и сортирани оферти по вериги за текущия продукт
+  const visibleOffers = useMemo(() => {
+    let list = [...currentProduct.offers];
+    if (chainFilter !== 'ALL') {
+      list = list.filter((o) => o.chain.toLowerCase() === chainFilter.toLowerCase());
+    }
+    if (onlyVerifiedFilter) {
+      list = list.filter((o) => o.verifiedReceipt || o.verificationText?.includes('Потвърдено'));
+    }
+    if (sortOrder === 'discount_desc') {
+      list.sort((a, b) => (b.discountPct ?? 0) - (a.discountPct ?? 0));
+    } else {
+      list.sort((a, b) => a.price - b.price);
+    }
+    return list;
+  }, [currentProduct.offers, chainFilter, onlyVerifiedFilter, sortOrder]);
 
-  const handleQuickPickAndOpen = async (fromCamera: boolean) => {
-    try {
-      if (fromCamera) {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) {
-          setQuickInitialPhoto(null);
-          setIsQuickPhotoOpen(true);
-          return;
-        }
-        const res = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'],
-          allowsEditing: true,
-          quality: 0.85,
-        });
-        if (!res.canceled && res.assets[0]?.uri) {
-          setQuickInitialPhoto(res.assets[0].uri);
-          setIsQuickPhotoOpen(true);
-        }
+  const toggleOfferInList = (offer: ChainOfferItem) => {
+    const saving = Math.max(0, currentProduct.highestPrice - offer.price);
+    setAddedOffers((prev) => {
+      const next = { ...prev };
+      if (next[offer.id]) {
+        delete next[offer.id];
       } else {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-          Alert.alert(
-            'Достъп до галерията',
-            'Моля, разреши достъпа до снимките от настройките на телефона.'
-          );
-          return;
-        }
-        const res = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          allowsEditing: true,
-          quality: 0.85,
-        });
-        if (!res.canceled && res.assets[0]?.uri) {
-          setQuickInitialPhoto(res.assets[0].uri);
-          setIsQuickPhotoOpen(true);
-        }
+        next[offer.id] = {
+          chain: offer.chain,
+          productTitle: currentProduct.title,
+          price: offer.price,
+          saving,
+        };
       }
-    } catch {
-      setQuickInitialPhoto(null);
-      setIsQuickPhotoOpen(true);
-    }
+      return next;
+    });
   };
 
-  const postDistances = useMemo(() => {
-    const map: Record<string, number> = {};
-    const referenceCity =
-      selectedCityFilter !== 'Всички градове' ? selectedCityFilter : userProfile.city;
-    const refCoords = userCoords ?? getCityCoordinates(referenceCity);
-    if (!refCoords) return map;
+  // Изчисляване на общата икономия за бутона „Добави в пазарската кошница“
+  // По подразбиране показва 12.40 лв. (точно както в дизайна), а при добавяне на артикули ги сумира
+  const basketItemsList = Object.entries(addedOffers);
+  const dynamicSavings = useMemo(() => {
+    if (basketItemsList.length === 0) return 12.4;
+    const extraSavings = basketItemsList.reduce((sum, [, item]) => sum + item.saving, 0);
+    return Number((12.4 + extraSavings).toFixed(2));
+  }, [basketItemsList]);
 
-    posts.forEach((p) => {
-      const coords = getCoordinatesForPost(p);
-      if (!coords) return;
-      map[p.id] = calculateDistanceKm(
-        refCoords.latitude,
-        refCoords.longitude,
-        coords.latitude,
-        coords.longitude
-      );
-    });
-    return map;
-  }, [posts, userCoords, selectedCityFilter, userProfile.city]);
+  const currentVote = userVote[currentProduct.id] ?? null;
+  const displayUpvotes = currentProduct.upvotes + (currentVote === 'up' ? 1 : 0);
+  const displayDownvotes = currentProduct.downvotes + (currentVote === 'down' ? 1 : 0);
 
-  /**
-   * Ново търсене или нов филтър → показваме резултатите ОТ НАЧАЛОТО.
-   * Иначе човек търси нещо и вижда средата на стария списък.
-   */
-  useEffect(() => {
-    scrollFeedToTop(false);
-    const t = setTimeout(() => scrollFeedToTop(false), 350);
-    return () => clearTimeout(t);
-  }, [debouncedQuery, selectedCityFilter, selectedPolarityFilter, selectedCategoryFilter, scrollFeedToTop]);
-
-  const filteredPosts = useMemo(() => {
-    // Сървърните резултати се ползват и когато е избрана само верига (без текст).
-    const isSearchActive = (Boolean(debouncedQuery) || Boolean(selectedChain)) && serverResults !== null;
-    const sourcePosts = isSearchActive ? serverResults! : posts;
-
-    const matching = sourcePosts.filter((post) => {
-      // 🛒 Верига: сравняваме сгънато, защото „кауфланд“ трябва да хване
-      // „Кауфланд България“ — и в локалния филтър, и в сървърното търсене.
-      if (selectedChain && !post.placeName.toLowerCase().includes(selectedChain.toLowerCase())) {
-        return false;
-      }
-      if (selectedPolarityFilter !== 'all' && post.polarity !== selectedPolarityFilter) {
-        return false;
-      }
-      if (selectedCategoryFilter !== 'all' && post.category !== selectedCategoryFilter) {
-        return false;
-      }
-      if (
-        selectedCityFilter !== 'Всички градове' &&
-        post.city.toLowerCase() !== selectedCityFilter.toLowerCase()
-      ) {
-        return false;
-      }
-      if (!isSearchActive && !matchesUniversalSearch(post, searchQuery)) {
-        return false;
-      }
-      return true;
-    });
-
-    if (nearbySorted) {
-      return [...matching].sort(
-        (a, b) => (postDistances[a.id] ?? 999) - (postDistances[b.id] ?? 999)
-      );
-    }
-
-    return sortPostsSmart(matching, sortMode);
-  }, [
-    posts,
-    serverResults,
-    debouncedQuery,
-    selectedChain,
-    selectedPolarityFilter,
-    selectedCategoryFilter,
-    selectedCityFilter,
-    searchQuery,
-    sortMode,
-    nearbySorted,
-    postDistances,
-  ]);
-
-  const greenCount = useMemo(
-    () => posts.filter((p) => p.polarity === 'green').length,
-    [posts]
-  );
-  const redCount = useMemo(
-    () => posts.filter((p) => p.polarity === 'red').length,
-    [posts]
-  );
-
-  const hasActiveFilters =
-    searchQuery.trim().length > 0 ||
-    selectedPolarityFilter !== 'all' ||
-    selectedCategoryFilter !== 'all' ||
-    selectedCityFilter !== 'Всички градове' ||
-    Boolean(selectedChain) ||
-    nearbySorted;
-
-  const resetAllFilters = () => {
-    setSearchQuery('');
-    setSelectedPolarityFilter('all');
-    setSelectedCategoryFilter('all');
-    setSelectedCityFilter('Всички градове');
-    setSelectedChain(null);
-    setSortMode('newest');
-    setNearbySorted(false);
-  };
-
+  const isFavorite = Boolean(favoriteIds[currentProduct.id]);
   const activeAlertsCount = priceAlerts.filter((a) => a.isActive).length;
 
-  const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      {/* Горна лента с лого и бутон за Дарение / VIP статус */}
-      <View style={styles.topBar}>
-        <View style={styles.topBarLeft}>
-          <View style={styles.brandRow}>
-            <View style={styles.logoBadge}>
-              <Ionicons name="pricetags" size={16} color={COLORS.greenBright} />
-            </View>
-            <Text style={styles.brandTitle} numberOfLines={1}>
-              SmartPrice
-            </Text>
-            <View style={styles.liveTag}>
-              <Text style={styles.liveTagText}>AI • БГ</Text>
-            </View>
-          </View>
-          <Text style={styles.brandSub} numberOfLines={1}>
-            Общността спести{' '}
-            <Text style={styles.savedHighlight}>
-              {totalCommunitySavedAllPosts.toLocaleString('bg-BG')} €
-            </Text>
-          </Text>
-        </View>
+  const filteredCities = useMemo(() => {
+    const q = citySearch.trim().toLowerCase();
+    if (!q) return CITIES.slice(0, 20);
+    return CITIES.filter((c) => c.toLowerCase().includes(q)).slice(0, 30);
+  }, [citySearch]);
 
-        <TouchableOpacity
-          style={[
-            styles.donateTopButton,
-            userProfile.isSupporter && styles.supporterTopButton,
-          ]}
-          onPress={() => openDonationModal()}
-          activeOpacity={0.85}
-        >
-          <Ionicons
-            name={userProfile.isSupporter ? 'shield-checkmark' : 'heart'}
-            size={14}
-            color={userProfile.isSupporter ? COLORS.goldBright : COLORS.black}
-          />
-          <Text
-            style={[
-              styles.donateTopButtonText,
-              userProfile.isSupporter && { color: COLORS.goldBright },
-            ]}
-            numberOfLines={1}
-          >
-            {userProfile.isSupporter ? 'VIP Пазител' : 'Подкрепи'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* УНИВЕРСАЛНА ТЪРСАЧКА (Търси по всичко!) */}
-      <View style={styles.universalSearchBox}>
-        <Ionicons name="search" size={18} color={COLORS.greenBright} />
-        <TextInput
-          style={styles.universalSearchInput}
-          placeholder="Търси продукт, място, град, цена... или ID на оферта"
-          placeholderTextColor={COLORS.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          returnKeyType="search"
-        />
-        {isSearching && (
-          <ActivityIndicator size="small" color={COLORS.greenBright} style={{ marginRight: 6 }} />
-        )}
-        {searchQuery.length > 0 && (
-          <TouchableOpacity
-            onPress={() => setSearchQuery('')}
-            style={styles.clearSearchBtn}
-          >
-            <Ionicons name="close-circle" size={19} color={COLORS.textMuted} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Търсене по ID на оферта */}
-      {looksLikeOfferCode && (
-        <TouchableOpacity
-          style={styles.codeJump}
-          activeOpacity={0.88}
-          disabled={codeBusy}
-          onPress={() => void openByCode()}
-        >
-          <Ionicons name="pricetag" size={15} color={COLORS.black} />
-          <Text style={styles.codeJumpText}>
-            {codeBusy ? 'Търся офертата...' : `Отвори оферта с ID ${searchQuery.trim().toUpperCase()}`}
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Бързи тагове за умно търсене с 1 докосване */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.quickSearchScroll}
-      >
-        {QUICK_SEARCH_SUGGESTIONS.map((item) => {
-          const active = searchQuery.toLowerCase() === item.toLowerCase();
-          return (
-            <TouchableOpacity
-              key={item}
-              style={[
-                styles.quickSearchTag,
-                active && styles.quickSearchTagActive,
-              ]}
-              onPress={() => setSearchQuery(active ? '' : item)}
+  const renderTrendChart = () => {
+    if (Platform.OS === 'web') {
+      return (
+        <View style={styles.chartContainer}>
+          <div style={{ width: '100%', height: 100, position: 'relative' }}>
+            <svg
+              viewBox="0 0 320 90"
+              preserveAspectRatio="none"
+              style={{ width: '100%', height: '100%', overflow: 'visible' }}
             >
-              <Ionicons
-                name="sparkles-outline"
-                size={11}
-                color={active ? COLORS.greenBright : COLORS.textMuted}
+              <defs>
+                <linearGradient id="spestiChartGrad" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#10B981" stopOpacity="0.30" />
+                  <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
+                </linearGradient>
+              </defs>
+              <line
+                x1="0"
+                y1="15"
+                x2="320"
+                y2="15"
+                stroke="#E2E8F0"
+                strokeDasharray="3,3"
+                strokeWidth="1"
               />
-              <Text
-                style={[
-                  styles.quickSearchTagText,
-                  active && styles.quickSearchTagTextActive,
-                ]}
+              <line
+                x1="0"
+                y1="50"
+                x2="320"
+                y2="50"
+                stroke="#E2E8F0"
+                strokeDasharray="3,3"
+                strokeWidth="1"
+              />
+              <line
+                x1="0"
+                y1="80"
+                x2="320"
+                y2="80"
+                stroke="#E2E8F0"
+                strokeDasharray="3,3"
+                strokeWidth="1"
+              />
+              <path
+                d="M0,25 Q40,20 80,45 T160,30 T240,75 T320,68 L320,90 L0,90 Z"
+                fill="url(#spestiChartGrad)"
+              />
+              <path
+                d="M0,25 Q40,20 80,45 T160,30 T240,75 T320,68"
+                fill="none"
+                stroke="#006C49"
+                strokeLinecap="round"
+                strokeWidth="2.5"
+              />
+              <circle cx="80" cy="45" r="4" fill="#565E74" />
+              <text
+                x="80"
+                y="38"
+                fill="#565E74"
+                fontSize="9"
+                fontWeight="700"
+                textAnchor="middle"
+                fontFamily="Plus Jakarta Sans, sans-serif"
               >
-                {item}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* КОМПАКТЕН BENTO ACTION BAR (Above-the-Fold): Снимай цена • Инструменти & AI • Томбола • Гид */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 10,
-        }}
-      >
-        <TouchableOpacity
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            backgroundColor: COLORS.greenBright,
-            paddingHorizontal: 13,
-            paddingVertical: 10,
-            borderRadius: 14,
-          }}
-          onPress={() => handleQuickPickAndOpen(true)}
-          activeOpacity={0.88}
-        >
-          <Ionicons name="camera" size={15} color={COLORS.black} />
-          <Text style={{ color: COLORS.black, fontSize: 12, fontWeight: '900' }}>
-            Снимай цена
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-            backgroundColor: isToolsExpanded ? COLORS.indigoSoftBg : COLORS.bgCard,
-            borderWidth: 1,
-            borderColor: isToolsExpanded ? COLORS.accentCyanBorder : COLORS.borderSubtle,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            borderRadius: 14,
-          }}
-          onPress={() => setIsToolsExpanded((prev) => !prev)}
-          activeOpacity={0.85}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-            <Ionicons
-              name="sparkles"
-              size={14}
-              color={isToolsExpanded ? COLORS.accentCyan : COLORS.goldBright}
-            />
-            <Text
-              style={{
-                color: COLORS.textPrimary,
-                fontSize: 12,
-                fontWeight: '800',
-                flex: 1,
-              }}
-              numberOfLines={1}
-            >
-              AI Асистент & Инструменти
-            </Text>
+                {currentProduct.historyPeak.toFixed(2)}
+              </text>
+              <circle cx="240" cy="75" r="4.5" fill="#10B981" />
+              <text
+                x="240"
+                y="70"
+                fill="#006C49"
+                fontSize="9"
+                fontWeight="800"
+                textAnchor="middle"
+                fontFamily="Plus Jakarta Sans, sans-serif"
+              >
+                {currentProduct.historyLow.toFixed(2)}
+              </text>
+            </svg>
+          </div>
+          <View style={styles.chartAxisRow}>
+            <Text style={styles.chartAxisLabel}>Преди 30 дни</Text>
+            <Text style={styles.chartAxisLabel}>Преди 15 дни</Text>
+            <Text style={[styles.chartAxisLabel, styles.chartAxisLabelToday]}>Днес</Text>
           </View>
-          <Ionicons
-            name={isToolsExpanded ? 'chevron-up' : 'chevron-down'}
-            size={15}
-            color={COLORS.textSecondary}
-          />
-        </TouchableOpacity>
+        </View>
+      );
+    }
 
-        <TouchableOpacity
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 13,
-            backgroundColor: COLORS.goldSoftBg,
-            borderWidth: 1,
-            borderColor: COLORS.goldBorder,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          onPress={() => router.push('/raffle' as never)}
-          accessibilityLabel="Активна томбола"
-        >
-          <Ionicons name="gift" size={16} color={COLORS.goldBright} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 13,
-            backgroundColor: COLORS.bgCard,
-            borderWidth: 1,
-            borderColor: COLORS.borderSubtle,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          onPress={() => router.push('/tour?review=1' as never)}
-          accessibilityLabel="Как работи приложението"
-        >
-          <Ionicons name="help-circle-outline" size={18} color={COLORS.accentCyan} />
-        </TouchableOpacity>
+    // Native fallback за iOS / Android
+    return (
+      <View style={styles.chartContainer}>
+        <View style={styles.nativeChartBox}>
+          <View style={styles.nativeChartGridLine} />
+          <View style={styles.nativeChartGridLine} />
+          <View style={styles.nativeChartGridLine} />
+          <View style={styles.nativeChartPointsRow}>
+            <View style={styles.nativeChartPointCol}>
+              <Text style={styles.nativePeakLabel}>{currentProduct.historyPeak.toFixed(2)}</Text>
+              <View style={styles.nativePeakDot} />
+            </View>
+            <View style={[styles.nativeChartPointCol, { marginTop: 28 }]}>
+              <Text style={styles.nativeLowLabel}>{currentProduct.historyLow.toFixed(2)}</Text>
+              <View style={styles.nativeLowDot} />
+            </View>
+          </View>
+        </View>
+        <View style={styles.chartAxisRow}>
+          <Text style={styles.chartAxisLabel}>Преди 30 дни</Text>
+          <Text style={styles.chartAxisLabel}>Преди 15 дни</Text>
+          <Text style={[styles.chartAxisLabel, styles.chartAxisLabelToday]}>Днес</Text>
+        </View>
       </View>
+    );
+  };
 
-      {/* РАЗГЪВАЕМ BENTO ПАНЕЛ: Кошница, Шринкфлация, Аларми, Томбола, Бързо качване и AI Асистент */}
-          {/* 🏷️ Продавам — входът е ВИНАГИ видим в лентата, не се крие в профила.
-              Досега човек не намираше откъде да пусне обява. */}
-          <TouchableOpacity
-            style={styles.sellCard}
-            onPress={() => router.push('/listings/new' as never)}
-            activeOpacity={0.9}
-            accessibilityLabel="Пусни обява за продажба"
-          >
-            <View style={styles.sellIcon}>
-              <Ionicons name="pricetags" size={17} color={COLORS.black} />
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      {/* ================================================================ */}
+      {/* FIXED TOP HEADER (Спести & Открий + BG + Локация + Нотификации)  */}
+      {/* ================================================================ */}
+      <View style={styles.header}>
+        <View style={styles.headerInner}>
+          <View style={styles.headerLeft}>
+            <View style={styles.brandTitleRow}>
+              <Text style={styles.brandTitle}>Спести & Открий</Text>
+              <View style={styles.bgPill}>
+                <Text style={styles.bgPillText}>BG</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sellTitle}>Продавам нещо?</Text>
-              <Text style={styles.sellSub} numberOfLines={2}>
-                Пусни обява за 2 € · 60 дни · до 5 снимки
-              </Text>
-            </View>
-            <View style={styles.sellBtn}>
-              <Text style={styles.sellBtnText}>Пусни</Text>
-            </View>
-          </TouchableOpacity>
-
-          {/* Връзките са ИЗВЪН картата — иначе се застъпват с натискането ѝ */}
-          <View style={styles.sellLinks}>
             <TouchableOpacity
-              onPress={() => router.push('/listings' as never)}
-              activeOpacity={0.8}
-              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+              style={styles.locationBtn}
+              onPress={() => setIsCityModalOpen(true)}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={`Избран град ${displayCity}. Натисни за смяна на града`}
             >
-              <Text style={styles.sellMine}>Моите обяви →</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setListingHelpManual(true)}
-              activeOpacity={0.8}
-              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-            >
-              <Text style={styles.sellHow}>Как работи?</Text>
+              <Ionicons name="location" size={14} color={COLORS.primary} />
+              <Text style={styles.locationBtnText}>{displayCity}</Text>
+              <Ionicons name="chevron-down" size={14} color={COLORS.onSurfaceVariant} />
             </TouchableOpacity>
           </View>
 
-      {(isToolsExpanded || searchQuery.trim().length > 0) && (
-        <View style={{ marginBottom: 6 }}>
-          <View
-            style={{
-              flexDirection: 'row',
-              flexWrap: 'wrap',
-              gap: 8,
-              marginBottom: 10,
-            }}
-          >
+          <View style={styles.headerRight}>
             <TouchableOpacity
-              style={{
-                flex: 1,
-                minWidth: 100,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                backgroundColor: COLORS.greenSoftBg,
-                borderWidth: 1,
-                borderColor: COLORS.greenBorder,
-                borderRadius: 15,
-                paddingVertical: 10,
-                paddingHorizontal: 10,
-              }}
-              onPress={() => {
-                setSmartToolsTab('basket');
-                setIsSmartToolsOpen(true);
-              }}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="cart" size={14} color={COLORS.greenBright} />
-              <Text
-                style={{ color: COLORS.greenBright, fontSize: 11.5, fontWeight: '800', letterSpacing: -0.2 }}
-                numberOfLines={1}
-              >
-                🛒 Кошница
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={{
-                flex: 1,
-                minWidth: 105,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                backgroundColor: COLORS.redSoftBg,
-                borderWidth: 1,
-                borderColor: COLORS.redBorder,
-                borderRadius: 15,
-                paddingVertical: 10,
-                paddingHorizontal: 10,
-              }}
-              onPress={() => {
-                setSmartToolsTab('shrinkflation');
-                setIsSmartToolsOpen(true);
-              }}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="scale" size={14} color={COLORS.redBright} />
-              <Text
-                style={{ color: COLORS.redBright, fontSize: 11.5, fontWeight: '800', letterSpacing: -0.2 }}
-                numberOfLines={1}
-              >
-                📉 Шринкфлация
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={{
-                flex: 1,
-                minWidth: 100,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                backgroundColor: COLORS.goldSoftBg,
-                borderWidth: 1,
-                borderColor: COLORS.goldBorder,
-                borderRadius: 15,
-                paddingVertical: 10,
-                paddingHorizontal: 10,
-              }}
+              style={styles.bellBtn}
               onPress={() => {
                 setSmartToolsTab('alerts');
                 setIsSmartToolsOpen(true);
               }}
-              activeOpacity={0.85}
+              activeOpacity={0.75}
+              accessibilityLabel={`Ценови известия${activeAlertsCount ? ` (${activeAlertsCount})` : ''}`}
             >
-              <Ionicons name="notifications" size={14} color={COLORS.goldBright} />
-              <Text
-                style={{ color: COLORS.goldBright, fontSize: 11.5, fontWeight: '800', letterSpacing: -0.2 }}
-                numberOfLines={1}
-              >
-                🔔 Аларми ({activeAlertsCount})
-              </Text>
+              <Ionicons name="notifications-outline" size={22} color={COLORS.onSurfaceVariant} />
+              <View style={styles.bellDot} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.avatarWrap}
+              onPress={() => router.push('/(tabs)/profile' as never)}
+              activeOpacity={0.8}
+              accessibilityLabel="Отвори профил"
+            >
+              <Image
+                source={{ uri: userProfile.avatar || DEFAULT_AVATAR_URI }}
+                style={styles.avatarImg}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      {/* ================================================================ */}
+      {/* MAIN SCROLLABLE CONTENT                                          */}
+      {/* ================================================================ */}
+      <ScrollView
+        style={styles.mainScroll}
+        contentContainerStyle={styles.mainScrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* 1. Search & Barcode Quick Access Bar */}
+        <View style={styles.searchSection}>
+          <View style={styles.searchPill}>
+            <View style={styles.searchLeft}>
+              <Ionicons name="search" size={20} color={COLORS.primary} />
+              <TextInput
+                style={styles.searchInput}
+                value={searchInput}
+                onChangeText={setSearchInput}
+                onFocus={() => setIsSearchFocused(true)}
+                placeholder="Търси продукт, марка или баркод..."
+                placeholderTextColor={COLORS.outline}
+                returnKeyType="search"
+              />
+              {searchInput.length > 0 && isSearchFocused ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchInput('');
+                    setIsSearchFocused(true);
+                  }}
+                  hitSlop={8}
+                >
+                  <Ionicons name="close-circle" size={18} color={COLORS.outline} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            <TouchableOpacity
+              style={styles.barcodeBtn}
+              onPress={() => setIsBarcodeModalOpen(true)}
+              activeOpacity={0.8}
+              accessibilityLabel="Сканирай баркод"
+            >
+              <Ionicons name="barcode-outline" size={19} color={COLORS.onSurfaceVariant} />
             </TouchableOpacity>
           </View>
 
-          {isToolsExpanded && (
-            <>
-              <View style={styles.quickUploadBar}>
-                <TouchableOpacity
-                  style={styles.quickUploadLeft}
-                  onPress={() => {
-                    setQuickInitialPhoto(null);
-                    setIsQuickPhotoOpen(true);
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.quickCameraCircle}>
-                    <Ionicons name="camera" size={18} color={COLORS.greenBright} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.quickUploadTitle} numberOfLines={1}>
-                      Качи снимка с цена 📸
-                    </Text>
-                    <Text style={styles.quickUploadSub} numberOfLines={1}>
-                      Авто-засичане на магазин по GPS & адрес в Google Maps
-                    </Text>
-                  </View>
+          {/* Бърз избор на продукти за моментално тестване и сравнение */}
+          {isSearchFocused && (
+            <View style={styles.productSuggestionsCard}>
+              <View style={styles.suggestionsHeaderRow}>
+                <Text style={styles.suggestionsTitle}>Каталог за сравнение по вериги</Text>
+                <TouchableOpacity onPress={() => setIsSearchFocused(false)} hitSlop={8}>
+                  <Text style={styles.suggestionsCloseText}>Затвори</Text>
                 </TouchableOpacity>
-
-                <View style={styles.quickUploadActions}>
+              </View>
+              {CATALOG_PRODUCTS.map((prod) => {
+                const active = prod.id === currentProduct.id;
+                return (
                   <TouchableOpacity
-                    style={styles.quickIconBtnPrimary}
-                    onPress={() => handleQuickPickAndOpen(true)}
-                    activeOpacity={0.85}
+                    key={prod.id}
+                    style={[styles.suggestionRow, active && styles.suggestionRowActive]}
+                    onPress={() => handleSelectProduct(prod)}
+                    activeOpacity={0.8}
                   >
-                    <Ionicons name="camera" size={15} color={COLORS.black} />
-                    <Text style={styles.quickIconBtnPrimaryText}>Снимай</Text>
+                    <Image source={{ uri: prod.imageUri }} style={styles.suggestionThumb} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.suggestionName} numberOfLines={1}>
+                        {prod.searchLabel}
+                      </Text>
+                      <Text style={styles.suggestionMeta}>
+                        Най-ниска: {prod.lowestPrice.toFixed(2)} лв. • Икономия до{' '}
+                        {prod.maxSaving.toFixed(2)} лв.
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={active ? 'checkmark-circle' : 'chevron-forward'}
+                      size={18}
+                      color={active ? COLORS.primary : COLORS.outline}
+                    />
                   </TouchableOpacity>
+                );
+              })}
 
-                  <TouchableOpacity
-                    style={styles.quickIconBtnSecondary}
-                    onPress={() => handleQuickPickAndOpen(false)}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="images-outline" size={16} color={COLORS.textPrimary} />
-                  </TouchableOpacity>
+              {/* Резултати от живата база при въведен текст */}
+              {isSearchingLive ? (
+                <View style={{ paddingVertical: 10, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                </View>
+              ) : liveServerOffers.length > 0 ? (
+                <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: COLORS.borderSubtle, paddingTop: 8 }}>
+                  <Text style={styles.suggestionsTitle}>
+                    Оферти от базата ({liveServerOffers.length})
+                  </Text>
+                  {liveServerOffers.slice(0, 5).map((post) => (
+                    <TouchableOpacity
+                      key={post.id}
+                      style={styles.suggestionRow}
+                      onPress={() => {
+                        setIsSearchFocused(false);
+                        router.push(`/post/${post.id}` as never);
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.suggestionName} numberOfLines={1}>
+                          {post.title}
+                        </Text>
+                        <Text style={styles.suggestionMeta} numberOfLines={1}>
+                          {post.placeName} • {post.city}
+                        </Text>
+                      </View>
+                      <Text style={{ color: COLORS.primary, fontWeight: '800', fontSize: 13 }}>
+                        {post.pricePaid.toFixed(2)} {post.currency}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          )}
+        </View>
+
+        {/* 2. Hero Product Overview Card */}
+        <View style={styles.sectionPad}>
+          <View style={styles.heroCard}>
+            {/* Decorative background glow */}
+            <View style={styles.heroGlow} pointerEvents="none" />
+
+            <View style={styles.heroTopRow}>
+              {/* Product Thumbnail with verified sticker */}
+              <View style={styles.heroThumbContainer}>
+                <View style={styles.heroThumbBox}>
+                  <Image
+                    source={{ uri: currentProduct.imageUri }}
+                    style={styles.heroThumbImg}
+                    resizeMode="cover"
+                  />
+                </View>
+                <View style={styles.heroVerifiedSticker}>
+                  <Ionicons name="checkmark-circle" size={11} color={COLORS.onPrimary} />
+                  <Text style={styles.heroVerifiedStickerText}>{currentProduct.badgeText}</Text>
                 </View>
               </View>
 
-              <ActiveRaffleCard onOpen={() => router.push('/raffle' as never)} />
+              {/* Meta info */}
+              <View style={styles.heroMetaCol}>
+                <View style={styles.heroBrandRow}>
+                  <Text style={styles.heroBrandText}>{currentProduct.brandCategory}</Text>
+                  <TouchableOpacity
+                    style={styles.favoriteBtn}
+                    onPress={() =>
+                      setFavoriteIds((prev) => ({
+                        ...prev,
+                        [currentProduct.id]: !prev[currentProduct.id],
+                      }))
+                    }
+                    hitSlop={8}
+                    accessibilityLabel="Добави в любими"
+                  >
+                    <Ionicons
+                      name={isFavorite ? 'heart' : 'heart-outline'}
+                      size={20}
+                      color={isFavorite ? COLORS.error : COLORS.onSurfaceVariant}
+                    />
+                  </TouchableOpacity>
+                </View>
 
-              {showPuzzleNudge ? (
-                <PuzzleDemoNudge
-                  onTrain={() => {
-                    setShowPuzzleNudge(false);
-                    router.push('/puzzle-demo' as never);
-                  }}
-                  onHide={() => setShowPuzzleNudge(false)}
-                />
-              ) : null}
-            </>
-          )}
-
-          <SmartPriceAssistantCard
-            filteredPosts={filteredPosts}
-            allPosts={posts}
-            searchQuery={searchQuery}
-            selectedCity={selectedCityFilter}
-            onApplyQuickQuery={(q) => setSearchQuery(q)}
-          />
-        </View>
-      )}
-
-      {/* Бонусът за новодошли: първа находка в първите минути → „Основател“ */}
-      <FounderBanner />
-
-      {/* 🎁 Красивият модел „и ти можеш да продаваш“ — показва се рядко. */}
-      <ListingNudgeModal
-        visible={showListingNudge || listingHelpManual}
-        manual={listingHelpManual}
-        priceEur={nudgePrice}
-        days={nudgeDays}
-        onClose={() => {
-          setShowListingNudge(false);
-          setListingHelpManual(false);
-        }}
-        onGoToNew={() => {
-          setShowListingNudge(false);
-          setListingHelpManual(false);
-          router.push('/listings/new' as never);
-        }}
-      />
-
-      {/* Гостът чете потока, но не може да участва */}
-      {!isAuthenticated && (
-        <View style={styles.guestCard}>
-          <View style={styles.guestRow}>
-            <View style={styles.guestIcon}>
-              <Ionicons name="people" size={19} color={COLORS.black} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.guestTitle}>Виждаш реалните цени. Влез и участвай.</Text>
-              <Text style={styles.guestSub}>
-                Профилът е безплатен и отнема 30 секунди — после гласуваш, коментираш, качваш
-                находки, събираш значки и участваш в томболата.
-              </Text>
-            </View>
-          </View>
-          <View style={styles.guestButtons}>
-            <TouchableOpacity
-              style={styles.guestPrimary}
-              activeOpacity={0.9}
-              onPress={() => router.push('/(auth)/register' as never)}
-            >
-              <Ionicons name="rocket" size={15} color={COLORS.white} />
-              <Text style={styles.guestPrimaryText}>Регистрирай се</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.guestGhost}
-              activeOpacity={0.85}
-              onPress={() => openAuthPrompt('Виж какво получаваш с профил — безплатно е.')}
-            >
-              <Text style={styles.guestGhostText}>Какво получавам?</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/*
-        📊 „53 367 цени от 42 вериги“ — на ВИДНО място, защото това е силата на
-        приложението: не само находките на хората, а и цените на веригите, с
-        които се сравняват. Докосване → таб „Магазини“ (там са веригите с цени
-        по категории).
-      */}
-      {chainStats && chainStats.offers > 0 ? (
-        <TouchableOpacity
-          style={styles.chainStatsCard}
-          activeOpacity={0.85}
-          onPress={() => router.push('/shops' as never)}
-          accessibilityLabel="Цени от веригите — виж магазините"
-        >
-          <View style={styles.chainStatsIcon}>
-            <Ionicons name="cart" size={16} color={COLORS.accentCyan} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.chainStatsTitle} numberOfLines={1}>
-              {formatNumber(chainStats.products)} продукта · {formatNumber(chainStats.offers)} цени
-              {/* Избран град → казваме кой е, вместо да броим „1 града“. */}
-              {selectedCityFilter !== 'Всички градове' ? ` в ${selectedCityFilter}` : ''}
-            </Text>
-            <Text style={styles.chainStatsSub} numberOfLines={2}>
-              Кауфланд, Метро, Билла…{' '}
-              {chainStats.cities > 1 ? `в ${chainStats.cities} града` : 'тук'} — сверяваме ги с
-              находките на хората
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
-        </TouchableOpacity>
-      ) : null}
-
-      {/* ⚖️ Две кратки препратки: „Разлики между веригите“ (къде е най-евтино по
-          категории) и „Как работи“ (простичко обяснение + прозрачност). */}
-      <View style={styles.quickLinksRow}>
-        <TouchableOpacity
-          style={styles.quickLink}
-          activeOpacity={0.85}
-          onPress={() => router.push('/chains-compare' as never)}
-        >
-          <Ionicons name="swap-horizontal" size={13} color={COLORS.accentCyan} />
-          <Text style={styles.quickLinkText}>Разлики между веригите</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.quickLink}
-          activeOpacity={0.85}
-          onPress={() => router.push('/how-it-works' as never)}
-        >
-          <Ionicons name="information-circle-outline" size={13} color={COLORS.textSecondary} />
-          <Text style={styles.quickLinkText}>Как работи</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ПАДАЩО МЕНЮ ЗА ВСИЧКИ ГРАДОВЕ В БЪЛГАРИЯ */}
-      <CityPickerDropdown
-        selectedCity={selectedCityFilter}
-        onSelectCity={setSelectedCityFilter}
-        includeAllOption
-        label="Филтър по град в България"
-        cityPostCounts={cityPostCounts}
-      />
-
-      {/* Главен превключвател: Всички / 🟢 Топ Оферти / 🔴 Червени Флагове */}
-      <View style={styles.polaritySwitcher}>
-        <TouchableOpacity
-          style={[
-            styles.polarityTab,
-            selectedPolarityFilter === 'all' && styles.polarityTabAllActive,
-          ]}
-          onPress={() => setSelectedPolarityFilter('all')}
-        >
-          <Text
-            style={[
-              styles.polarityTabText,
-              selectedPolarityFilter === 'all' && styles.polarityTabTextActive,
-            ]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.8}
-          >
-            ✨ Всички ({posts.length})
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.polarityTab,
-            selectedPolarityFilter === 'green' && styles.polarityTabGreenActive,
-          ]}
-          onPress={() => setSelectedPolarityFilter('green')}
-        >
-          <Text
-            style={[
-              styles.polarityTabText,
-              selectedPolarityFilter === 'green' && {
-                color: COLORS.greenBright,
-                fontWeight: '800',
-              },
-            ]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.8}
-          >
-            🟢 Оферти ({greenCount})
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.polarityTab,
-            selectedPolarityFilter === 'red' && styles.polarityTabRedActive,
-          ]}
-          onPress={() => setSelectedPolarityFilter('red')}
-        >
-          <Text
-            style={[
-              styles.polarityTabText,
-              selectedPolarityFilter === 'red' && {
-                color: COLORS.redBright,
-                fontWeight: '800',
-              },
-            ]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.8}
-          >
-            🔴 Не ходи ({redCount})
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Категории (включително „Други“) */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.categoriesScroll}
-      >
-        {CATEGORIES.map((cat) => {
-          const active = selectedCategoryFilter === cat.id;
-          return (
-            <TouchableOpacity
-              key={cat.id}
-              style={[
-                styles.categoryChip,
-                active && styles.categoryChipActive,
-              ]}
-              onPress={() => setSelectedCategoryFilter(cat.id)}
-            >
-              <Ionicons
-                name={cat.icon as any}
-                size={14}
-                color={active ? COLORS.white : COLORS.textSecondary}
-              />
-              <Text
-                style={[
-                  styles.categoryChipText,
-                  active && styles.categoryChipTextActive,
-                ]}
-              >
-                {cat.shortLabel}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* 🛒 Вериги за супермаркети — внесените цени от Кауфланд, Метро, Билла…
-          Появява се само когато в базата има такива оферти, за да не пречи на
-          хората, които гледат само находките от хора. */}
-      {chainChips.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoriesScroll}
-        >
-          <TouchableOpacity
-            style={[styles.categoryChip, !selectedChain && styles.categoryChipActive]}
-            onPress={() => setSelectedChain(null)}
-          >
-            <Ionicons
-              name="cart-outline"
-              size={14}
-              color={!selectedChain ? COLORS.white : COLORS.textSecondary}
-            />
-            <Text style={[styles.categoryChipText, !selectedChain && styles.categoryChipTextActive]}>
-              Всички вериги
-            </Text>
-          </TouchableOpacity>
-          {chainChips.map((c) => {
-            const active = (selectedChain ?? '').toLowerCase() === c.name.toLowerCase();
-            /**
-             * Умно подсказване: щом написаното в търсачката съвпада с име на
-             * верига („кауфланд“), чипът светва с 🔍 — човекът вижда, че има
-             * филтър по верига, без да го търси.
-             */
-            const suggested =
-              !active &&
-              searchQuery.trim().length >= 3 &&
-              c.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
-            return (
-              <TouchableOpacity
-                key={c.name}
-                style={[
-                  styles.categoryChip,
-                  active && styles.categoryChipActive,
-                  suggested && styles.chainChipSuggested,
-                ]}
-                onPress={() => setSelectedChain(active ? null : c.name)}
-              >
-                <Text
-                  style={[styles.categoryChipText, active && styles.categoryChipTextActive]}
-                  numberOfLines={1}
-                >
-                  {suggested ? '🔍 ' : ''}
-                  {c.name} ({c.offers})
+                <Text style={styles.heroProductTitle} numberOfLines={1}>
+                  {currentProduct.title}
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      ) : null}
+                <Text style={styles.heroProductSubtitle} numberOfLines={1}>
+                  {currentProduct.subtitle}
+                </Text>
 
-      {/* Умно сортиране + GPS „Наблизо до мен“ + бутон за изчистване на филтрите */}
-      <View style={styles.sortAndResetRow}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.sortScroll}
-        >
+                <View style={styles.heroTagsRow}>
+                  <View style={styles.heroMetaTag}>
+                    <Ionicons name="qr-code-outline" size={12} color={COLORS.onSurfaceVariant} />
+                    <Text style={styles.heroMetaTagText}>{currentProduct.barcode}</Text>
+                  </View>
+                  <View style={styles.heroMetaTag}>
+                    <Text style={styles.heroMetaTagText}>{currentProduct.weight}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Price Highlights Summary Pill Grid */}
+            <View style={styles.priceSummaryGrid}>
+              <View style={styles.priceSummaryCol}>
+                <Text style={styles.priceSummaryLabelLowest}>Най-ниска</Text>
+                <Text style={styles.priceSummaryValLowest}>
+                  {currentProduct.lowestPrice.toFixed(2)}{' '}
+                  <Text style={styles.currencyUnitLowest}>лв.</Text>
+                </Text>
+              </View>
+
+              <View style={styles.priceSummaryCol}>
+                <Text style={styles.priceSummaryLabelAvg}>Средна</Text>
+                <Text style={styles.priceSummaryValAvg}>
+                  {currentProduct.avgPrice.toFixed(2)}{' '}
+                  <Text style={styles.currencyUnitNormal}>лв.</Text>
+                </Text>
+              </View>
+
+              <View style={styles.priceSummaryCol}>
+                <Text style={styles.priceSummaryLabelHighest}>Най-висока</Text>
+                <Text style={styles.priceSummaryValHighest}>
+                  {currentProduct.highestPrice.toFixed(2)}{' '}
+                  <Text style={styles.currencyUnitSecondary}>лв.</Text>
+                </Text>
+              </View>
+            </View>
+
+            {/* Maximum Savings Alert Banner */}
+            <TouchableOpacity
+              style={styles.maxSavingsBanner}
+              activeOpacity={0.85}
+              onPress={() => {
+                const bestOffer = currentProduct.offers[0];
+                if (bestOffer && !addedOffers[bestOffer.id]) {
+                  toggleOfferInList(bestOffer);
+                }
+                setIsBasketDrawerOpen(true);
+              }}
+            >
+              <View style={styles.maxSavingsLeft}>
+                <Ionicons name="wallet-outline" size={18} color={COLORS.primary} />
+                <Text style={styles.maxSavingsText} numberOfLines={1}>
+                  Възможна икономия до{' '}
+                  <Text style={styles.maxSavingsStrong}>
+                    {currentProduct.maxSaving.toFixed(2)} лв.
+                  </Text>{' '}
+                  на опаковка!
+                </Text>
+              </View>
+              <Ionicons name="arrow-forward" size={16} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 3. Store Price Comparison Header & Filters */}
+        <View style={styles.comparisonHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.comparisonTitle}>Цени по вериги в {displayCity}</Text>
+            <Text style={styles.comparisonSubtitle}>
+              {sortOrder === 'price_asc'
+                ? 'Сортирани от най-ниска към най-висока'
+                : 'Сортирани по най-голяма отстъпка'}
+            </Text>
+          </View>
+
           <TouchableOpacity
             style={[
-              styles.sortPill,
-              nearbySorted && {
-                backgroundColor: COLORS.greenSoftBg,
-                borderColor: COLORS.greenBorder,
-              },
+              styles.filterPillBtn,
+              (isFilterOpen || chainFilter !== 'ALL' || onlyVerifiedFilter) &&
+                styles.filterPillBtnActive,
             ]}
-            onPress={handleToggleNearby}
+            onPress={() => setIsFilterOpen((prev) => !prev)}
+            activeOpacity={0.8}
           >
             <Ionicons
-              name="navigate"
-              size={12}
-              color={nearbySorted ? COLORS.greenBright : COLORS.textMuted}
+              name="options-outline"
+              size={14}
+              color={
+                isFilterOpen || chainFilter !== 'ALL' || onlyVerifiedFilter
+                  ? COLORS.primary
+                  : COLORS.onSurfaceVariant
+              }
             />
             <Text
               style={[
-                styles.sortPillText,
-                nearbySorted && {
-                  color: COLORS.greenBright,
-                  fontWeight: '800',
+                styles.filterPillText,
+                (isFilterOpen || chainFilter !== 'ALL' || onlyVerifiedFilter) && {
+                  color: COLORS.primary,
                 },
               ]}
             >
-              📍 Около мен (GPS)
+              Филтър
             </Text>
           </TouchableOpacity>
+        </View>
 
-          {SORT_OPTIONS.map((opt) => {
-            const active = !nearbySorted && sortMode === opt.id;
-            return (
+        {/* Разгъваем панел за филтриране по верига и сортиране */}
+        {isFilterOpen && (
+          <View style={styles.filterDrawer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8 }}
+            >
+              {['ALL', 'KAUFLAND', 'LIDL', 'BILLA', 'ФАНТАСТИКО', 'Т-МАРКЕТ'].map((ch) => {
+                const active = chainFilter === ch;
+                return (
+                  <TouchableOpacity
+                    key={ch}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    onPress={() => setChainFilter(ch)}
+                  >
+                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                      {ch === 'ALL' ? 'Всички вериги' : ch}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <View style={styles.filterOptionsRow}>
               <TouchableOpacity
-                key={opt.id}
-                style={[styles.sortPill, active && styles.sortPillActive]}
-                onPress={() => {
-                  setNearbySorted(false);
-                  setSortMode(opt.id);
-                }}
+                style={[styles.filterChip, onlyVerifiedFilter && styles.filterChipActive]}
+                onPress={() => setOnlyVerifiedFilter((p) => !p)}
               >
                 <Ionicons
-                  name={opt.icon as any}
-                  size={12}
-                  color={active ? COLORS.accentCyan : COLORS.textMuted}
+                  name="checkmark-done-circle-outline"
+                  size={14}
+                  color={onlyVerifiedFilter ? COLORS.onPrimary : COLORS.primary}
+                />
+                <Text
+                  style={[styles.filterChipText, onlyVerifiedFilter && styles.filterChipTextActive]}
+                >
+                  Само потвърдени
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  sortOrder === 'discount_desc' && styles.filterChipActive,
+                ]}
+                onPress={() =>
+                  setSortOrder((p) => (p === 'price_asc' ? 'discount_desc' : 'price_asc'))
+                }
+              >
+                <Ionicons
+                  name="swap-vertical-outline"
+                  size={14}
+                  color={sortOrder === 'discount_desc' ? COLORS.onPrimary : COLORS.onSurfaceVariant}
                 />
                 <Text
                   style={[
-                    styles.sortPillText,
-                    active && styles.sortPillTextActive,
+                    styles.filterChipText,
+                    sortOrder === 'discount_desc' && styles.filterChipTextActive,
                   ]}
                 >
-                  {opt.label}
+                  По % отстъпка
                 </Text>
               </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.filterCompareLink}
+                onPress={() => router.push('/chains-compare' as never)}
+              >
+                <Text style={styles.filterCompareLinkText}>По категории →</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* 4. Retailers Comparison List */}
+        <View style={styles.retailersList}>
+          {visibleOffers.map((offer) => {
+            const chainStyle = getRetailChainStyle(offer.chain);
+            const isAdded = Boolean(addedOffers[offer.id]);
+
+            // Компактна карта (Фантастико, Т-Маркет)
+            if (offer.compact) {
+              return (
+                <View key={offer.id} style={styles.retailCardCompact}>
+                  <View style={styles.retailCompactLeft}>
+                    <View style={styles.chainHeaderRow}>
+                      <View style={[styles.chainPill, { backgroundColor: chainStyle.bg }]}>
+                        <Text style={[styles.chainPillText, { color: chainStyle.text }]}>
+                          {chainStyle.label}
+                        </Text>
+                      </View>
+                      <Text style={styles.branchText} numberOfLines={1}>
+                        {offer.branch}
+                      </Text>
+                    </View>
+                    {offer.promoText ? (
+                      <Text style={styles.compactSubText}>{offer.promoText}</Text>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.retailCompactRight}>
+                    <Text
+                      style={[
+                        styles.compactPriceText,
+                        offer.chain.includes('Т-МАРКЕТ') && { color: COLORS.secondary },
+                      ]}
+                    >
+                      {offer.price.toFixed(2)}{' '}
+                      <Text style={styles.compactCurrencyUnit}>лв.</Text>
+                    </Text>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.compactAddBtn,
+                        isAdded && { backgroundColor: COLORS.primaryFixed },
+                      ]}
+                      onPress={() => toggleOfferInList(offer)}
+                      activeOpacity={0.8}
+                      accessibilityLabel={`Добави ${offer.chain} в списъка`}
+                    >
+                      <Ionicons
+                        name={isAdded ? 'checkmark' : 'add'}
+                        size={18}
+                        color={isAdded ? COLORS.onPrimaryFixed : COLORS.onSurface}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            }
+
+            // Card 1: Best Deal (с градиент и горна лента „Най-изгодно“)
+            if (offer.isBestDeal) {
+              return (
+                <LinearGradient
+                  key={offer.id}
+                  colors={['rgba(111, 251, 190, 0.22)', '#ffffff', '#ffffff']}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={styles.retailCard}
+                >
+                  {/* Best Deal Top Ribbon */}
+                  <View style={styles.bestDealRibbon}>
+                    <View style={styles.bestDealBadgesLeft}>
+                      <View style={styles.bestDealBadge}>
+                        <Ionicons name="ribbon" size={13} color={COLORS.onPrimary} />
+                        <Text style={styles.bestDealBadgeText}>Най-изгодно</Text>
+                      </View>
+                      {offer.discountPct ? (
+                        <View style={styles.discountBadge}>
+                          <Text style={styles.discountBadgeText}>-{offer.discountPct}%</Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {offer.inStock && (
+                      <View style={styles.inStockRow}>
+                        <View style={styles.inStockDot} />
+                        <Text style={styles.inStockText}>В наличност</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.retailMainRow}>
+                    <View style={styles.retailLeftCol}>
+                      <View style={styles.chainHeaderRow}>
+                        <View style={[styles.chainPill, { backgroundColor: chainStyle.bg }]}>
+                          <Text style={[styles.chainPillText, { color: chainStyle.text }]}>
+                            {chainStyle.label}
+                          </Text>
+                        </View>
+                        <Text style={styles.branchText} numberOfLines={1}>
+                          {offer.branch}
+                        </Text>
+                      </View>
+
+                      {offer.promoText && (
+                        <View style={styles.promoLineRow}>
+                          <Ionicons
+                            name="book-outline"
+                            size={14}
+                            color={COLORS.tertiaryContainer}
+                          />
+                          <Text style={styles.promoLineText}>{offer.promoText}</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={styles.retailPriceCol}>
+                      {offer.oldPrice ? (
+                        <Text style={styles.oldPriceStrikethrough}>
+                          {offer.oldPrice.toFixed(2)} лв.
+                        </Text>
+                      ) : null}
+                      <Text style={styles.heroBestPrice}>
+                        {offer.price.toFixed(2)}{' '}
+                        <Text style={styles.heroBestCurrency}>лв.</Text>
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.retailFooterRow}>
+                    <View style={styles.verifiedReceiptRow}>
+                      <Ionicons name="checkmark-circle" size={14} color={COLORS.primary} />
+                      <Text style={styles.verifiedReceiptText}>
+                        {offer.verificationText || 'Касова бележка'}
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.addToListBtnPrimary,
+                        isAdded && { backgroundColor: COLORS.primaryFixed },
+                      ]}
+                      onPress={() => toggleOfferInList(offer)}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons
+                        name={isAdded ? 'checkmark' : 'add'}
+                        size={16}
+                        color={isAdded ? COLORS.onPrimaryFixed : COLORS.onPrimaryContainer}
+                      />
+                      <Text
+                        style={[
+                          styles.addToListBtnPrimaryText,
+                          isAdded && { color: COLORS.onPrimaryFixed },
+                        ]}
+                      >
+                        {isAdded ? 'Добавено' : 'В списъка'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </LinearGradient>
+              );
+            }
+
+            // Standard Full Card (Lidl, Billa)
+            return (
+              <View key={offer.id} style={styles.retailCard}>
+                <View style={styles.retailMainRow}>
+                  <View style={styles.retailLeftCol}>
+                    <View style={styles.chainHeaderRow}>
+                      <View style={[styles.chainPill, { backgroundColor: chainStyle.bg }]}>
+                        <Text style={[styles.chainPillText, { color: chainStyle.text }]}>
+                          {chainStyle.label}
+                        </Text>
+                      </View>
+                      <Text style={styles.branchText} numberOfLines={1}>
+                        {offer.branch}
+                      </Text>
+                    </View>
+
+                    {offer.promoText && (
+                      <View style={styles.promoLineRow}>
+                        <Ionicons
+                          name={offer.promoType === 'loyalty' ? 'pricetag-outline' : 'leaf-outline'}
+                          size={14}
+                          color={
+                            offer.promoType === 'loyalty' ? COLORS.tertiary : COLORS.primary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.promoLineText,
+                            offer.promoType === 'loyalty' && {
+                              color: COLORS.tertiary,
+                              fontWeight: '600',
+                            },
+                          ]}
+                        >
+                          {offer.promoText}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.retailPriceCol}>
+                    <Text style={styles.cardPriceValue}>
+                      {offer.price.toFixed(2)}{' '}
+                      <Text style={styles.cardPriceCurrency}>лв.</Text>
+                    </Text>
+                    {offer.savingText ? (
+                      <Text style={styles.savingMicroText}>{offer.savingText}</Text>
+                    ) : null}
+                    {offer.withoutCardText ? (
+                      <Text style={styles.withoutCardMicroText}>{offer.withoutCardText}</Text>
+                    ) : null}
+                  </View>
+                </View>
+
+                <View style={styles.retailFooterRowStandard}>
+                  <Text style={styles.updatedTimeText}>{offer.verificationText}</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.addToListBtnSecondary,
+                      isAdded && { backgroundColor: COLORS.primaryFixed },
+                    ]}
+                    onPress={() => toggleOfferInList(offer)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name={isAdded ? 'checkmark' : 'add'}
+                      size={16}
+                      color={isAdded ? COLORS.onPrimaryFixed : COLORS.onSurface}
+                    />
+                    <Text
+                      style={[
+                        styles.addToListBtnSecondaryText,
+                        isAdded && { color: COLORS.onPrimaryFixed },
+                      ]}
+                    >
+                      {isAdded ? 'Добавено' : 'В списъка'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             );
           })}
-        </ScrollView>
+        </View>
 
-        {hasActiveFilters && (
-          <TouchableOpacity
-            style={styles.resetFiltersBtn}
-            onPress={resetAllFilters}
-          >
-            <Ionicons name="refresh" size={12} color={COLORS.redBright} />
-            <Text style={styles.resetFiltersText}>Изчисти</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  );
-
-  return (
-      <SafeAreaView style={styles.safeArea}>
-        {/* ВАЖНО: подаваме ЕЛЕМЕНТ (renderHeader()), не самата функция. */}
-        <FlatList
-          ref={feedRef}
-          testID="feed-list"
-          data={filteredPosts}
-          keyExtractor={(item) => item.id}
-          onScroll={(e) => {
-            const y = e.nativeEvent.contentOffset.y;
-            setShowToTop((prev) => (prev === y > 900 ? prev : y > 900));
-          }}
-          scrollEventThrottle={64}
-          renderItem={({ item }) => (
-            <PostCard post={item} distanceKm={postDistances[item.id]} />
-          )}
-          ListHeaderComponent={renderHeader()}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          refreshing={isRefreshing}
-          onRefresh={() => void refreshAll()}
-          /**
-           * ⚠️ ТУК БЕШЕ ПРИЧИНАТА ЗА „ПОКАЗВА САМО НЯКОЛКО ОФЕРТИ“ (21.10.2026).
-           *
-           * Стояха 4 карти и прозорец от 5 екрана — тоест лентата държеше
-           * изчертани само ~4-5 карти и смяташе височината на цялото съдържание
-           * по тях: 60-те оферти даваха „съдържание“ от 3 300 px вместо ~48 000.
-           * Човек scrollваше два-три екрана и списъкът свършваше — надолу само
-           * черно, все едно няма нищо (точно както се оплака потребителят).
-           *
-           * Сега: 12 карти веднага + прозорец от 21 екрана → съдържанието се
-           * смята реално, скролът стига до края и „дръпни за още“ пълни
-           * следващата страница. Изрязването е изключено (Android).
-           */
-          initialNumToRender={12}
-          maxToRenderPerBatch={10}
-          updateCellsBatchingPeriod={40}
-          windowSize={21}
-          removeClippedSubviews={false}
-          onEndReached={() => {
-            // 1) Търсене по ТЕКСТ: сървърът вече върна най-добрите 60 —
-            //    повече страници не носим, за да остане бързо.
-            if (debouncedQuery) return;
-            // 2) Само ВЕРИГА (без текст): още резултати от сървъра. Преди тук
-            //    нищо не се теглеше и след 60-те оферти екранът оставаше празен.
-            if (selectedChain) {
-              void loadMoreSearch();
-              return;
-            }
-            // 3) Обикновена лента (с град/категория/полярност): следваща страница.
-            if (hasMorePosts) void loadMorePosts();
-          }}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={
-            isLoadingMore || searchLoadingMore ? (
-              <View style={{ paddingVertical: 18, alignItems: 'center' }}>
-                <ActivityIndicator size="small" color={COLORS.greenBright} />
+        {/* 5. Price History Interactive Chart Section */}
+        <View style={[styles.sectionPad, { marginTop: 20 }]}>
+          <View style={styles.historyCard}>
+            <View style={styles.historyHeaderRow}>
+              <View>
+                <Text style={styles.historyTitle}>История на цената</Text>
+                <Text style={styles.historySubtitle}>Последните 30 дни (динамика в лв.)</Text>
               </View>
-            ) : null
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyBox}>
-              <Ionicons name="search-outline" size={44} color={COLORS.textMuted} />
-              <Text style={styles.emptyTitle}>Няма намерени публикации</Text>
-              <Text style={styles.emptySub}>
-                Няма резултати за текущото търсене или град ({selectedCityFilter}).
-                Изчисти филтрите или качи първата снимка с цена!
+              <View style={styles.dropBadge}>
+                <Text style={styles.dropBadgeText}>-{currentProduct.historyDropPct}% спад</Text>
+              </View>
+            </View>
+
+            {renderTrendChart()}
+
+            <View style={styles.insightBox}>
+              <Ionicons name="trending-down" size={18} color={COLORS.primary} />
+              <Text style={styles.insightText}>
+                В момента цената е{' '}
+                <Text style={{ fontWeight: '700', color: COLORS.onSurface }}>
+                  близо до историческия минимум
+                </Text>{' '}
+                за последните 6 месеца.
               </Text>
-              {hasActiveFilters && (
+            </View>
+          </View>
+        </View>
+
+        {/* 6. Crowdsource & Community Verification Section */}
+        <View style={[styles.sectionPad, { marginTop: 20 }]}>
+          <View style={styles.communityCard}>
+            <View style={styles.communityTopRow}>
+              <View style={styles.communityIconCircle}>
+                <Ionicons name="people" size={20} color={COLORS.onPrimaryFixedVariant} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.communityTitle}>Общност „Спести & Открий“</Text>
+                <View style={styles.communityVerifiedRow}>
+                  <View style={styles.communityLiveDot} />
+                  <Text style={styles.communityVerifiedText}>
+                    {currentProduct.lastVerifiedText}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Live community receipt contribution button */}
+            <TouchableOpacity
+              style={styles.scanReceiptBtn}
+              onPress={() => setIsQuickPhotoOpen(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="camera" size={20} color={COLORS.primary} />
+              <Text style={styles.scanReceiptBtnText}>Снимай етикет / касова бележка</Text>
+            </TouchableOpacity>
+
+            {/* Sentiment Upvote/Downvote Pill Row */}
+            <View style={styles.sentimentRow}>
+              <Text style={styles.sentimentPrompt}>Точна ли е тази цена?</Text>
+              <View style={styles.sentimentBtns}>
                 <TouchableOpacity
-                  style={styles.emptyResetBtn}
-                  onPress={resetAllFilters}
+                  style={[
+                    styles.votePill,
+                    currentVote === 'up' && styles.votePillUpActive,
+                  ]}
+                  onPress={() =>
+                    setUserVote((prev) => ({
+                      ...prev,
+                      [currentProduct.id]: prev[currentProduct.id] === 'up' ? null : 'up',
+                    }))
+                  }
+                  activeOpacity={0.8}
                 >
-                  <Text style={styles.emptyResetBtnText}>
-                    Покажи всички публикации
+                  <Ionicons
+                    name={currentVote === 'up' ? 'thumbs-up' : 'thumbs-up-outline'}
+                    size={15}
+                    color={currentVote === 'up' ? COLORS.primary : COLORS.onSurfaceVariant}
+                  />
+                  <Text
+                    style={[
+                      styles.votePillText,
+                      currentVote === 'up' && { color: COLORS.primary },
+                    ]}
+                  >
+                    {displayUpvotes}
                   </Text>
                 </TouchableOpacity>
-              )}
+
+                <TouchableOpacity
+                  style={[
+                    styles.votePill,
+                    currentVote === 'down' && styles.votePillDownActive,
+                  ]}
+                  onPress={() =>
+                    setUserVote((prev) => ({
+                      ...prev,
+                      [currentProduct.id]: prev[currentProduct.id] === 'down' ? null : 'down',
+                    }))
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={currentVote === 'down' ? 'thumbs-down' : 'thumbs-down-outline'}
+                    size={15}
+                    color={currentVote === 'down' ? COLORS.error : COLORS.onSurfaceVariant}
+                  />
+                  <Text
+                    style={[
+                      styles.votePillText,
+                      currentVote === 'down' && { color: COLORS.error },
+                    ]}
+                  >
+                    {displayDownvotes}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          }
-        />
+          </View>
+        </View>
+
+        {/* 7. Sticky Bottom Basket CTA Bar */}
+        <View style={[styles.sectionPad, { marginTop: 24 }]}>
+          <TouchableOpacity
+            style={styles.basketCtaBtn}
+            onPress={() => {
+              if (basketItemsList.length === 0 && currentProduct.offers[0]) {
+                toggleOfferInList(currentProduct.offers[0]);
+              }
+              setIsBasketDrawerOpen(true);
+            }}
+            activeOpacity={0.9}
+          >
+            <View style={styles.basketCtaLeft}>
+              <Ionicons name="cart" size={22} color={COLORS.onPrimary} />
+              <Text style={styles.basketCtaText}>
+                {basketItemsList.length > 0
+                  ? `Пазарска кошница (${basketItemsList.length})`
+                  : 'Добави в пазарската кошница'}
+              </Text>
+            </View>
+            <View style={styles.basketCtaPill}>
+              <Text style={styles.basketCtaPillText}>
+                Спестяваш {dynamicSavings.toFixed(2)} лв.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* ================================================================ */}
+      {/* МОДАЛ: ИЗБОР НА ГРАД                                             */}
+      {/* ================================================================ */}
+      <Modal
+        visible={isCityModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsCityModalOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Избери град в България</Text>
+              <TouchableOpacity onPress={() => setIsCityModalOpen(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={COLORS.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalSearchBox}>
+              <Ionicons name="search" size={17} color={COLORS.primary} />
+              <TextInput
+                style={styles.modalSearchInput}
+                value={citySearch}
+                onChangeText={setCitySearch}
+                placeholder="Търси град..."
+                placeholderTextColor={COLORS.outline}
+              />
+            </View>
+
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {filteredCities.map((city) => {
+                const active =
+                  city === displayCity ||
+                  (city === 'Всички градове' && selectedCityFilter === 'Всички градове');
+                return (
+                  <TouchableOpacity
+                    key={city}
+                    style={[styles.cityOptionRow, active && styles.cityOptionRowActive]}
+                    onPress={() => {
+                      setSelectedCityFilter(city);
+                      setIsCityModalOpen(false);
+                      setCitySearch('');
+                    }}
+                  >
+                    <Ionicons
+                      name={active ? 'location' : 'location-outline'}
+                      size={17}
+                      color={active ? COLORS.primary : COLORS.onSurfaceVariant}
+                    />
+                    <Text
+                      style={[
+                        styles.cityOptionText,
+                        active && { color: COLORS.primary, fontWeight: '700' },
+                      ]}
+                    >
+                      {city}
+                    </Text>
+                    {active && (
+                      <Ionicons name="checkmark-circle" size={18} color={COLORS.primary} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ================================================================ */}
+      {/* МОДАЛ: ПАЗАРСКА КОШНИЦА И ИКОНОМИИ                               */}
+      {/* ================================================================ */}
+      <Modal
+        visible={isBasketDrawerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsBasketDrawerOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="cart" size={22} color={COLORS.primary} />
+                <Text style={styles.modalTitle}>Пазарска кошница</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsBasketDrawerOpen(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={COLORS.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
+
+            {basketItemsList.length === 0 ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center', gap: 8 }}>
+                <Ionicons name="basket-outline" size={38} color={COLORS.outline} />
+                <Text style={{ color: COLORS.onSurfaceVariant, fontSize: 14, textAlign: 'center' }}>
+                  Натисни „+ В списъка“ до избраната верига, за да добавиш артикули за сравнение.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
+                {basketItemsList.map(([id, item]) => {
+                  const st = getRetailChainStyle(item.chain);
+                  return (
+                    <View key={id} style={styles.basketModalRow}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={[styles.chainPill, { backgroundColor: st.bg }]}>
+                            <Text style={[styles.chainPillText, { color: st.text }]}>
+                              {st.label}
+                            </Text>
+                          </View>
+                          <Text style={styles.basketModalProdTitle} numberOfLines={1}>
+                            {item.productTitle}
+                          </Text>
+                        </View>
+                        {item.saving > 0 && (
+                          <Text style={styles.basketModalSaving}>
+                            Спестяваш {item.saving.toFixed(2)} лв. спрямо най-високата цена
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={styles.basketModalPrice}>{item.price.toFixed(2)} лв.</Text>
+                      <TouchableOpacity
+                        onPress={() =>
+                          setAddedOffers((prev) => {
+                            const next = { ...prev };
+                            delete next[id];
+                            return next;
+                          })
+                        }
+                        hitSlop={8}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            <View style={styles.basketModalSummary}>
+              <Text style={styles.basketModalSummaryLabel}>Обща прогнозна икономия:</Text>
+              <Text style={styles.basketModalSummaryVal}>{dynamicSavings.toFixed(2)} лв.</Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <TouchableOpacity
+                style={styles.basketModalPrimaryBtn}
+                onPress={() => {
+                  setIsBasketDrawerOpen(false);
+                  setSmartToolsTab('basket');
+                  setIsSmartToolsOpen(true);
+                }}
+              >
+                <Ionicons name="sparkles" size={16} color={COLORS.onPrimary} />
+                <Text style={styles.basketModalPrimaryText}>
+                  Сравни целия списък по вериги
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ================================================================ */}
+      {/* МОДАЛ: БАРКОД СКЕНЕР И БЪРЗО ТЪРСЕНЕ                             */}
+      {/* ================================================================ */}
+      <Modal
+        visible={isBarcodeModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsBarcodeModalOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="barcode-outline" size={22} color={COLORS.primary} />
+                <Text style={styles.modalTitle}>Баркод & Скенер на цени</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsBarcodeModalOpen(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={COLORS.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ color: COLORS.onSurfaceVariant, fontSize: 13, lineHeight: 19, marginBottom: 12 }}>
+              Избери продукт по баркод за моментално сравнение или снимай етикет / касова бележка от магазина:
+            </Text>
+
+            {CATALOG_PRODUCTS.map((prod) => (
+              <TouchableOpacity
+                key={prod.id}
+                style={styles.suggestionRow}
+                onPress={() => {
+                  handleSelectProduct(prod);
+                  setIsBarcodeModalOpen(false);
+                }}
+              >
+                <Ionicons name="qr-code-outline" size={18} color={COLORS.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.suggestionName}>{prod.title}</Text>
+                  <Text style={styles.suggestionMeta}>EAN: {prod.barcode} • {prod.weight}</Text>
+                </View>
+                <Text style={{ color: COLORS.primary, fontWeight: '800', fontSize: 13 }}>
+                  {prod.lowestPrice.toFixed(2)} лв.
+                </Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={[styles.scanReceiptBtn, { marginTop: 12 }]}
+              onPress={() => {
+                setIsBarcodeModalOpen(false);
+                setIsQuickPhotoOpen(true);
+              }}
+            >
+              <Ionicons name="camera" size={19} color={COLORS.primary} />
+              <Text style={styles.scanReceiptBtnText}>Снимай етикет или касова бележка</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <QuickPricePhotoModal
         visible={isQuickPhotoOpen}
-        initialImageUri={quickInitialPhoto}
         onClose={() => setIsQuickPhotoOpen(false)}
       />
-
-      {/* ↑ Обратно най-горе — появява се, щом човекът е слязъл надолу,
-          за да не се налага да изтегля целия поток, за да търси пак. */}
-      {showToTop && (
-        <TouchableOpacity
-          style={styles.toTop}
-          activeOpacity={0.85}
-          onPress={() => scrollFeedToTop(true)}
-          accessibilityLabel="Обратно най-горе"
-        >
-          <Ionicons name="arrow-up" size={19} color={COLORS.textPrimary} />
-          <Text style={styles.toTopText}>Нагоре</Text>
-        </TouchableOpacity>
-      )}
 
       <SmartToolsModal
         visible={isSmartToolsOpen}
@@ -1423,594 +1583,1188 @@ export default function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
-  /* „↑ Нагоре“ — виси над лентата с табовете, за да не пречи на нищо. */
-  toTop: {
-    position: 'absolute',
-    right: 14,
-    bottom: 86,
-    zIndex: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 13,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: 'rgba(11,20,36,0.94)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,211,238,0.55)',
-    shadowColor: '#000',
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
-  toTopText: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
-  sellCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    padding: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.greenBorder,
-    backgroundColor: 'rgba(34,197,94,0.09)',
-    marginBottom: 10,
-  },
-  sellIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.greenPrimary,
-  },
-  sellTitle: { color: COLORS.textPrimary, fontSize: 14.5, fontWeight: '900' },
-  sellSub: { color: COLORS.textSecondary, fontSize: 11.5, marginTop: 2, lineHeight: 15 },
-  sellMine: { color: COLORS.greenBright, fontSize: 11.5, fontWeight: '800' },
-  sellLinks: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 7,
-    paddingHorizontal: 3,
-  },
-  sellHow: { color: COLORS.accentCyan, fontSize: 11.5, fontWeight: '800' },
-  sellBtn: {
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: COLORS.greenPrimary,
-  },
-  sellBtnText: { color: COLORS.black, fontSize: 13, fontWeight: '900' },
-  guestCard: {
-    marginHorizontal: 2,
-    marginTop: 12,
-    padding: 16,
-    borderRadius: 22,
-    backgroundColor: COLORS.indigoSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.accentCyanBorder,
-  },
-  guestRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
-  guestIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: COLORS.accentCyan,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  guestTitle: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '900', letterSpacing: -0.2 },
-  guestSub: { color: COLORS.textSecondary, fontSize: 12.8, lineHeight: 18.5, marginTop: 4 },
-  guestButtons: { flexDirection: 'row', gap: 9, marginTop: 13, flexWrap: 'wrap' },
-  guestPrimary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 15,
-    paddingVertical: 9.5,
-    borderRadius: 999,
-    backgroundColor: COLORS.greenPrimary,
-  },
-  guestPrimaryText: { color: COLORS.white, fontSize: 13, fontWeight: '900' },
-  guestGhost: {
-    paddingHorizontal: 15,
-    paddingVertical: 9.5,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-  },
-  guestGhostText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '800' },
-  // Търсене по ID на оферта
-  codeHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    marginTop: 8,
-    paddingHorizontal: 4,
-  },
-  codeHintText: { flex: 1, color: COLORS.textMuted, fontSize: 11.5, lineHeight: 16 },
-  howItWorks: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.accentCyanBorder,
-    backgroundColor: COLORS.accentCyanSoftBg,
-    maxWidth: '100%',
-  },
-  howItWorksTitle: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '800', letterSpacing: -0.2 },
-  howItWorksSub: { color: COLORS.textMuted, fontSize: 11, marginTop: 1.5, flexShrink: 1 },
-  codeJump: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 8,
-    backgroundColor: COLORS.goldBright,
-    borderRadius: 14,
-    paddingVertical: 11,
-  },
-  codeJumpText: { color: COLORS.black, fontSize: 13, fontWeight: '900' },
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bgPrimary,
+    backgroundColor: COLORS.surface,
   },
-  listContent: {
-    paddingHorizontal: 14,
-    paddingBottom: 36,
+  header: {
+    backgroundColor: 'rgba(248, 249, 255, 0.88)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(226, 232, 240, 0.65)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 3,
+    zIndex: 40,
+    ...(Platform.OS === 'web'
+      ? ({
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        } as object)
+      : {}),
   },
-  headerContainer: {
-    paddingTop: 10,
-    marginBottom: 12,
-  },
-  topBar: {
+  headerInner: {
+    height: 64,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 10,
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
   },
-  topBarLeft: {
-    flex: 1,
-    marginRight: 4,
+  headerLeft: {
+    flexDirection: 'column',
+    justifyContent: 'center',
   },
-  brandRow: {
+  brandTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  logoBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    backgroundColor: COLORS.greenSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.greenBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
+    gap: 6,
   },
   brandTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 21,
-    fontWeight: '900',
-    letterSpacing: -0.6,
-    flexShrink: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 24,
+    letterSpacing: -0.3,
+    color: COLORS.onSurface,
   },
-  liveTag: {
-    backgroundColor: COLORS.accentCyanSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.accentCyanBorder,
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
+  bgPill: {
+    backgroundColor: COLORS.primaryFixed,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: 999,
-    flexShrink: 0,
   },
-  liveTagText: {
-    color: COLORS.accentCyan,
-    fontSize: 8.5,
-    fontWeight: '900',
+  bgPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 13,
     letterSpacing: 0.4,
+    color: COLORS.onPrimaryFixedVariant,
   },
-  brandSub: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: 3,
-  },
-  savedHighlight: {
-    color: COLORS.greenBright,
-    fontWeight: '900',
-  },
-  donateTopButton: {
+  locationBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: COLORS.goldBright,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    gap: 2,
+    marginTop: -1,
+    minHeight: 24,
+  },
+  locationBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+    letterSpacing: 0.2,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  bellBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  bellDot: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.tertiaryContainer,
+    borderWidth: 2,
+    borderColor: COLORS.surface,
+  },
+  avatarWrap: {
+    paddingLeft: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarImg: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(0, 108, 73, 0.22)',
+  },
+
+  mainScroll: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+  },
+  mainScrollContent: {
+    paddingBottom: 36,
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  sectionPad: {
+    paddingHorizontal: 16,
+  },
+
+  /* 1. Search & Barcode Quick Access Bar */
+  searchSection: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  searchPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.surfaceContainerLowest,
     borderRadius: 999,
-    flexShrink: 0,
-    shadowColor: COLORS.goldPrimary,
+    padding: 6,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  searchLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 12,
+    minWidth: 0,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '400',
+    color: COLORS.onSurface,
+    paddingVertical: 4,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {}),
+  },
+  barcodeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.surfaceContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  productSuggestionsCard: {
+    marginTop: 8,
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    gap: 6,
+    shadowColor: '#0f172a',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
     elevation: 4,
   },
-  supporterTopButton: {
-    backgroundColor: COLORS.goldSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.goldBorder,
-  },
-  donateTopButtonText: {
-    color: COLORS.black,
-    fontSize: 11.5,
-    fontWeight: '900',
-  },
-  universalSearchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    gap: 9,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  universalSearchInput: {
-    flex: 1,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    paddingVertical: 0,
-  },
-  clearSearchBtn: {
-    padding: 2,
-  },
-  quickSearchScroll: {
-    gap: 7,
-    paddingBottom: 10,
-  },
-  quickSearchTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4.5,
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-    paddingHorizontal: 11,
-    paddingVertical: 5.5,
-    borderRadius: 999,
-  },
-  quickSearchTagActive: {
-    backgroundColor: COLORS.greenSoftBg,
-    borderColor: COLORS.greenBorder,
-  },
-  quickSearchTagText: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  quickSearchTagTextActive: {
-    color: COLORS.greenBright,
-    fontWeight: '800',
-  },
-  quickUploadBar: {
+  suggestionsHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.greenBorder,
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    marginBottom: 10,
-    gap: 10,
+    marginBottom: 4,
   },
-  quickUploadLeft: {
-    flex: 1,
+  suggestionsTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.outline,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  suggestionsCloseText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  suggestionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceContainerLow,
   },
-  quickCameraCircle: {
+  suggestionRowActive: {
+    backgroundColor: 'rgba(111, 251, 190, 0.28)',
+    borderWidth: 1,
+    borderColor: COLORS.primaryContainer,
+  },
+  suggestionThumb: {
     width: 38,
     height: 38,
-    borderRadius: 13,
-    backgroundColor: COLORS.greenSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.greenBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: COLORS.surfaceContainer,
+  },
+  suggestionName: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+  },
+  suggestionMeta: {
+    fontSize: 11.5,
+    color: COLORS.onSurfaceVariant,
+    marginTop: 1,
+  },
+
+  /* 2. Hero Product Overview Card */
+  heroCard: {
+    marginVertical: 8,
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    position: 'relative',
+    overflow: 'hidden',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  heroGlow: {
+    position: 'absolute',
+    right: -40,
+    top: -40,
+    width: 144,
+    height: 144,
+    borderRadius: 72,
+    backgroundColor: 'rgba(111, 251, 190, 0.30)',
+    ...(Platform.OS === 'web' ? ({ filter: 'blur(32px)' } as object) : {}),
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    gap: 16,
+    zIndex: 2,
+  },
+  heroThumbContainer: {
+    position: 'relative',
     flexShrink: 0,
   },
-  quickUploadTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 13.5,
-    fontWeight: '800',
-    letterSpacing: -0.2,
+  heroThumbBox: {
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceContainerLow,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  quickUploadSub: {
-    color: COLORS.textSecondary,
+  heroThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  heroVerifiedSticker: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  heroVerifiedStickerText: {
+    color: COLORS.onPrimary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  heroMetaCol: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  heroBrandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 4,
+  },
+  heroBrandText: {
     fontSize: 11,
-    marginTop: 1.5,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    color: COLORS.primary,
   },
-  quickUploadActions: {
+  favoriteBtn: {
+    padding: 4,
+  },
+  heroProductTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 23,
+    color: COLORS.onSurface,
+  },
+  heroProductSubtitle: {
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 18,
+    color: COLORS.onSurfaceVariant,
+    marginTop: 2,
+  },
+  heroTagsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  heroMetaTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.surfaceContainer,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  heroMetaTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+    letterSpacing: 0.3,
+  },
+
+  /* Price Highlights Summary Pill Grid */
+  priceSummaryGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderRadius: 12,
+    padding: 12,
+  },
+  priceSummaryCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  priceSummaryLabelLowest: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primary,
+    letterSpacing: 0.3,
+  },
+  priceSummaryValLowest: {
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 24,
+    letterSpacing: -0.4,
+    color: COLORS.primary,
+    marginTop: 2,
+  },
+  currencyUnitLowest: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.primary,
+  },
+  priceSummaryLabelAvg: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.onSurfaceVariant,
+    letterSpacing: 0.3,
+  },
+  priceSummaryValAvg: {
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 24,
+    letterSpacing: -0.4,
+    color: COLORS.onSurface,
+    marginTop: 2,
+  },
+  currencyUnitNormal: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.onSurface,
+  },
+  priceSummaryLabelHighest: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.secondary,
+    letterSpacing: 0.3,
+  },
+  priceSummaryValHighest: {
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 24,
+    letterSpacing: -0.4,
+    color: COLORS.secondary,
+    marginTop: 2,
+  },
+  currencyUnitSecondary: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.secondary,
+  },
+
+  /* Maximum Savings Alert Banner */
+  maxSavingsBanner: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(111, 251, 190, 0.40)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  maxSavingsLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    flexShrink: 0,
-  },
-  quickIconBtnPrimary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: COLORS.greenBright,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  quickIconBtnPrimaryText: {
-    color: COLORS.black,
-    fontSize: 11.5,
-    fontWeight: '900',
-  },
-  quickIconBtnSecondary: {
-    width: 35,
-    height: 35,
-    borderRadius: 12,
-    backgroundColor: COLORS.bgCardElevated,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  polaritySwitcher: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 16,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-    marginBottom: 10,
-    gap: 4,
-  },
-  polarityTab: {
     flex: 1,
-    paddingVertical: 9,
-    paddingHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
+    minWidth: 0,
   },
-  polarityTabAllActive: {
-    backgroundColor: COLORS.bgCardElevated,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
+  maxSavingsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.onPrimaryFixedVariant,
+    flex: 1,
   },
-  polarityTabGreenActive: {
-    backgroundColor: COLORS.greenSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.greenBorder,
-  },
-  polarityTabRedActive: {
-    backgroundColor: COLORS.redSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.redBorder,
-  },
-  polarityTabText: {
-    color: COLORS.textSecondary,
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  polarityTabTextActive: {
-    color: COLORS.textPrimary,
+  maxSavingsStrong: {
     fontWeight: '800',
+    color: COLORS.onPrimaryFixedVariant,
   },
-  categoriesScroll: {
-    gap: 8,
-    paddingBottom: 10,
-  },
-  categoryChip: {
+
+  /* 3. Store Price Comparison Header & Filters */
+  comparisonHeader: {
+    paddingHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5.5,
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
+    justifyContent: 'space-between',
+  },
+  comparisonTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 24,
+    color: COLORS.onSurface,
+  },
+  comparisonSubtitle: {
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 18,
+    color: COLORS.onSurfaceVariant,
+  },
+  filterPillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.surfaceContainerHigh,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 999,
   },
-  categoryChipActive: {
-    backgroundColor: COLORS.accentIndigo,
-    borderColor: 'rgba(255, 255, 255, 0.24)',
+  filterPillBtnActive: {
+    backgroundColor: COLORS.primaryFixed,
   },
-  /* ⚖️ Бързи препратки под брояча: разлики между вериги + „Как работи“. */
-  quickLinksRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  quickLink: {
+  filterPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+    letterSpacing: 0.3,
+  },
+
+  filterDrawer: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 12,
+    padding: 10,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.surfaceContainerLow,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.primary,
+  },
+  filterChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+  },
+  filterChipTextActive: {
+    color: COLORS.onPrimary,
+  },
+  filterOptionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  filterCompareLink: {
+    marginLeft: 'auto',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  filterCompareLinkText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+
+  /* 4. Retailers Comparison List */
+  retailersList: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  retailCard: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  bestDealRibbon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  bestDealBadgesLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  bestDealBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  bestDealBadgeText: {
+    color: COLORS.onPrimary,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  discountBadge: {
+    backgroundColor: COLORS.errorContainer,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  discountBadgeText: {
+    color: COLORS.onErrorContainer,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  inStockRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
   },
-  quickLinkText: { color: COLORS.textSecondary, fontSize: 11.5, fontWeight: '800' },
-
-  /** Подсказване: написаното съвпада с тази верига („🔍 кауфланд“). */
-  chainChipSuggested: {
-    borderColor: COLORS.accentCyan,
-    backgroundColor: 'rgba(34,211,238,0.14)',
+  inStockDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.primaryContainer,
   },
-  /* 📊 Брояч на внесените цени от веригите — горе в потока, на видно място. */
-  chainStatsCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 10,
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-    borderRadius: 16,
-    backgroundColor: 'rgba(34,211,238,0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,211,238,0.35)',
+  inStockText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
-  chainStatsIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(34,211,238,0.16)',
-  },
-  chainStatsTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '900',
-    letterSpacing: -0.2,
-  },
-  chainStatsSub: {
-    color: COLORS.textSecondary,
-    fontSize: 11.5,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  categoryChipText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  categoryChipTextActive: {
-    color: COLORS.white,
-    fontWeight: '800',
-  },
-  sortAndResetRow: {
+  retailMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
-    gap: 6,
+    gap: 12,
   },
-  sortScroll: {
-    gap: 6,
+  retailLeftCol: {
+    flex: 1,
+    minWidth: 0,
   },
-  sortPill: {
+  chainHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4.5,
-    backgroundColor: 'rgba(17, 23, 40, 0.72)',
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
+    gap: 8,
+  },
+  chainPill: {
     paddingHorizontal: 10,
-    paddingVertical: 5.5,
+    paddingVertical: 3,
     borderRadius: 999,
   },
-  sortPillActive: {
-    backgroundColor: COLORS.accentCyanSoftBg,
-    borderColor: COLORS.accentCyanBorder,
-  },
-  sortPillText: {
-    color: COLORS.textMuted,
+  chainPillText: {
     fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.4,
   },
-  sortPillTextActive: {
-    color: COLORS.accentCyan,
-    fontWeight: '800',
+  branchText: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.onSurfaceVariant,
+    flexShrink: 1,
   },
-  resetFiltersBtn: {
+  promoLineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3.5,
-    backgroundColor: COLORS.redSoftBg,
-    borderWidth: 1,
-    borderColor: COLORS.redBorder,
-    paddingHorizontal: 10,
-    paddingVertical: 5.5,
-    borderRadius: 999,
+    gap: 6,
+    marginTop: 6,
+  },
+  promoLineText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.onSurfaceVariant,
+  },
+  retailPriceCol: {
+    alignItems: 'flex-end',
     flexShrink: 0,
   },
-  resetFiltersText: {
-    color: COLORS.redBright,
-    fontSize: 10.5,
-    fontWeight: '800',
+  oldPriceStrikethrough: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.secondary,
+    textDecorationLine: 'line-through',
   },
-  communityNudgeBanner: {
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
-    borderWidth: 1,
-    borderColor: COLORS.goldBorder,
-    borderRadius: 18,
-    padding: 12,
+  heroBestPrice: {
+    fontSize: 26,
+    fontWeight: '800',
+    lineHeight: 30,
+    letterSpacing: -0.7,
+    color: COLORS.primary,
+  },
+  heroBestCurrency: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  cardPriceValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 24,
+    letterSpacing: -0.4,
+    color: COLORS.onSurface,
+  },
+  cardPriceCurrency: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.onSurfaceVariant,
+  },
+  savingMicroText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
+    marginTop: 1,
+  },
+  withoutCardMicroText: {
+    fontSize: 10,
+    fontWeight: '400',
+    color: COLORS.onSurfaceVariant,
+    marginTop: 1,
+  },
+  retailFooterRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  retailFooterRowStandard: {
+    marginTop: 12,
+    paddingTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  verifiedReceiptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  verifiedReceiptText: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+  },
+  updatedTimeText: {
+    fontSize: 11,
+    color: COLORS.onSurfaceVariant,
+  },
+  addToListBtnPrimary: {
+    height: 36,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: COLORS.primaryContainer,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  addToListBtnPrimaryText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onPrimaryContainer,
+  },
+  addToListBtnSecondary: {
+    height: 36,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceContainer,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  addToListBtnSecondaryText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+  },
+
+  /* Compact Retail Cards (Fantastico, T-Market) */
+  retailCardCompact: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  retailCompactLeft: {
+    flex: 1,
+    minWidth: 0,
+  },
+  compactSubText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
     marginTop: 4,
   },
-  nudgeLeft: {
+  retailCompactRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexShrink: 0,
+  },
+  compactPriceText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    letterSpacing: -0.4,
+  },
+  compactCurrencyUnit: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.onSurfaceVariant,
+  },
+  compactAddBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* 5. Price History Interactive Chart Section */
+  historyCard: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  historyHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  historyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+  },
+  historySubtitle: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.onSurfaceVariant,
+  },
+  dropBadge: {
+    backgroundColor: COLORS.primaryFixed,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  dropBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onPrimaryFixedVariant,
+  },
+  chartContainer: {
+    marginTop: 16,
+    width: '100%',
+  },
+  chartAxisRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+  },
+  chartAxisLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: COLORS.onSurfaceVariant,
+  },
+  chartAxisLabelToday: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  nativeChartBox: {
+    height: 92,
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 24,
+  },
+  nativeChartGridLine: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+  nativeChartPointsRow: {
+    position: 'absolute',
+    inset: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  nativeChartPointCol: {
+    alignItems: 'center',
+  },
+  nativePeakLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#565E74',
+  },
+  nativePeakDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#565E74',
+    marginTop: 2,
+  },
+  nativeLowLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  nativeLowDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: COLORS.primaryContainer,
+    marginTop: 2,
+  },
+  insightBox: {
+    marginTop: 12,
+    backgroundColor: COLORS.surfaceContainerLow,
+    padding: 10,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  insightText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    color: COLORS.onSurfaceVariant,
+  },
+
+  /* 6. Crowdsource & Community Verification Section */
+  communityCard: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  communityTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  communityIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.primaryFixed,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  communityTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+  },
+  communityVerifiedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
+  communityLiveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.primary,
+  },
+  communityVerifiedText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+    lineHeight: 15,
+  },
+  scanReceiptBtn: {
+    width: '100%',
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceContainer,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  scanReceiptBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    letterSpacing: 0.2,
+  },
+  sentimentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 4,
+  },
+  sentimentPrompt: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+  },
+  sentimentBtns: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  votePill: {
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: COLORS.surfaceContainer,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  votePillUpActive: {
+    backgroundColor: COLORS.primaryFixed,
+  },
+  votePillDownActive: {
+    backgroundColor: COLORS.errorContainer,
+  },
+  votePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+  },
+
+  /* 7. Sticky Bottom Basket CTA Bar */
+  basketCtaBtn: {
+    width: '100%',
+    minHeight: 52,
+    borderRadius: 16,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#006c49',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  basketCtaLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  basketCtaText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: COLORS.onPrimary,
+    letterSpacing: 0.2,
+  },
+  basketCtaPill: {
+    backgroundColor: COLORS.primaryContainer,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  basketCtaPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.onPrimaryContainer,
+  },
+
+  /* Modals */
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(11, 28, 48, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+  },
+  modalSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 10,
+  },
+  modalSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.onSurface,
+  },
+  cityOptionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 10,
+    borderRadius: 10,
   },
-  nudgeIconBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    backgroundColor: COLORS.goldSoftBg,
+  cityOptionRowActive: {
+    backgroundColor: COLORS.surfaceContainerLow,
+  },
+  cityOptionText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.onSurface,
+  },
+  basketModalRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderSubtle,
   },
-  nudgeTitle: {
-    color: COLORS.goldBright,
-    fontSize: 12,
-    fontWeight: '800',
+  basketModalProdTitle: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    flex: 1,
   },
-  nudgeSubtitle: {
-    color: COLORS.textSecondary,
+  basketModalSaving: {
     fontSize: 11,
-    marginTop: 1.5,
+    color: COLORS.primary,
+    fontWeight: '600',
+    marginTop: 3,
   },
-  emptyBox: {
-    alignItems: 'center',
-    paddingVertical: 50,
-    paddingHorizontal: 24,
-  },
-  emptyTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 17,
+  basketModalPrice: {
+    fontSize: 15,
     fontWeight: '800',
+    color: COLORS.onSurface,
+  },
+  basketModalSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.surfaceContainerLow,
+    padding: 12,
+    borderRadius: 12,
     marginTop: 12,
   },
-  emptySub: {
-    color: COLORS.textSecondary,
+  basketModalSummaryLabel: {
     fontSize: 13,
-    textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 19,
+    fontWeight: '600',
+    color: COLORS.onSurfaceVariant,
   },
-  emptyResetBtn: {
-    marginTop: 14,
-    backgroundColor: COLORS.accentIndigo,
-    paddingHorizontal: 18,
-    paddingVertical: 10.5,
-    borderRadius: 999,
-  },
-  emptyResetBtnText: {
-    color: COLORS.white,
-    fontSize: 13,
+  basketModalSummaryVal: {
+    fontSize: 18,
     fontWeight: '800',
+    color: COLORS.primary,
+  },
+  basketModalPrimaryBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  basketModalPrimaryText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: COLORS.onPrimary,
   },
 });

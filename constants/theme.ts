@@ -1,52 +1,163 @@
 import { CategoryInfo, PlatformTag } from '@/types';
 
 export const COLORS = {
-  // 2026 Obsidian & Luminous Glass UI (Spatial Depth + Bento Architecture)
-  bgPrimary: '#060911',
-  bgSecondary: '#0C111E',
-  bgCard: '#111728',
-  bgCardElevated: '#172036',
-  bgGlass: 'rgba(17, 23, 40, 0.82)',
-  borderSubtle: 'rgba(255, 255, 255, 0.08)',
-  borderStrong: 'rgba(255, 255, 255, 0.16)',
+  // Spesti & Otkriy — Modern Utilitarian & Community-Centric Light Design System
+  surface: '#f8f9ff',
+  surfaceDim: '#cbdbf5',
+  surfaceBright: '#f8f9ff',
+  surfaceContainerLowest: '#ffffff',
+  surfaceContainerLow: '#eff4ff',
+  surfaceContainer: '#e5eeff',
+  surfaceContainerHigh: '#dce9ff',
+  surfaceContainerHighest: '#d3e4fe',
+  onSurface: '#0b1c30',
+  onSurfaceVariant: '#3c4a42',
+  inverseSurface: '#213145',
+  inverseOnSurface: '#eaf1ff',
+  outline: '#6c7a71',
+  outlineVariant: '#bbcabf',
+  surfaceTint: '#006c49',
+  primary: '#006c49',
+  onPrimary: '#ffffff',
+  primaryContainer: '#10b981',
+  onPrimaryContainer: '#00422b',
+  inversePrimary: '#4edea3',
+  primaryFixed: '#6ffbbe',
+  primaryFixedDim: '#4edea3',
+  onPrimaryFixed: '#002113',
+  onPrimaryFixedVariant: '#005236',
+  secondary: '#565e74',
+  onSecondary: '#ffffff',
+  secondaryContainer: '#dae2fd',
+  onSecondaryContainer: '#5c647a',
+  secondaryFixed: '#dae2fd',
+  secondaryFixedDim: '#bec6e0',
+  onSecondaryFixed: '#131b2e',
+  onSecondaryFixedVariant: '#3f465c',
+  tertiary: '#855300',
+  onTertiary: '#ffffff',
+  tertiaryContainer: '#e29100',
+  onTertiaryContainer: '#523200',
+  tertiaryFixed: '#ffddb8',
+  tertiaryFixedDim: '#ffb95f',
+  onTertiaryFixed: '#2a1700',
+  onTertiaryFixedVariant: '#653e00',
+  error: '#ba1a1a',
+  onError: '#ffffff',
+  errorContainer: '#ffdad6',
+  onErrorContainer: '#93000a',
 
-  // Текст (2026 Висококонтрастна типография с меки вторични тонове)
-  textPrimary: '#F8FAFC',
-  textSecondary: '#94A3B8',
-  textMuted: '#64748B',
+  // Семантични токени за всички екрани и компоненти (Light Utilitarian Theme)
+  bgPrimary: '#f8f9ff',
+  bgSecondary: '#eff4ff',
+  bgCard: '#ffffff',
+  bgCardElevated: '#e5eeff',
+  bgGlass: 'rgba(248, 249, 255, 0.90)',
+  borderSubtle: '#e2e8f0',
+  borderStrong: '#cbdbf5',
 
-  // 🟢 Зелена зона: Топ Оферти, Честни цени, Находки (2026 Neon Mint & Emerald)
-  greenPrimary: '#10B981',
-  greenBright: '#34D399',
-  greenDark: '#059669',
-  greenSoftBg: 'rgba(16, 185, 129, 0.12)',
-  greenBorder: 'rgba(52, 211, 153, 0.30)',
+  // Текст (Plus Jakarta Sans висококонтрастна скала)
+  textPrimary: '#0b1c30',
+  textSecondary: '#3c4a42',
+  textMuted: '#6c7a71',
 
-  // 🔴 Червена зона: Ценови Капани, Измами, Къде да НЕ се ходи (2026 Electric Coral-Rose)
-  redPrimary: '#F43F5E',
-  redBright: '#FB7185',
-  redDark: '#E11D48',
-  redSoftBg: 'rgba(244, 63, 94, 0.12)',
-  redBorder: 'rgba(251, 113, 133, 0.30)',
+  // 🟢 Зелена зона: Топ Оферти, Икономии, Потвърдени бележки (Emerald)
+  greenPrimary: '#006c49',
+  greenBright: '#006c49',
+  greenDark: '#005236',
+  greenSoftBg: '#ecfdf5',
+  greenBorder: '#a7f3d0',
 
-  // ✨ VIP Дарители & Верифицирана Касова Бележка (2026 Champagne Amber)
-  goldPrimary: '#F59E0B',
-  goldBright: '#FCD34D',
-  goldSoftBg: 'rgba(245, 158, 11, 0.13)',
-  goldBorder: 'rgba(252, 211, 77, 0.32)',
+  // 🔴 Червена зона: Ценови Капани, Надценки, Отстъпки % (Coral Red)
+  redPrimary: '#ba1a1a',
+  redBright: '#ba1a1a',
+  redDark: '#93000a',
+  redSoftBg: '#ffdad6',
+  redBorder: '#fecaca',
 
-  // Интерактивни акценти (AI & Радар — 2026 Electric Indigo & Bioluminescent Cyan)
-  accentIndigo: '#6366F1',
-  accentCyan: '#22D3EE',
-  accentPurple: '#A855F7',
-  // Меки варианти за фонове на баджове/стъпки
-  accentCyanSoftBg: 'rgba(34, 211, 238, 0.12)',
-  accentCyanBorder: 'rgba(34, 211, 238, 0.32)',
-  indigoSoftBg: 'rgba(99, 102, 241, 0.14)',
+  // ✨ Промоции, Клубни карти & Значки (Warm Amber)
+  goldPrimary: '#e29100',
+  goldBright: '#855300',
+  goldSoftBg: '#ffddb8',
+  goldBorder: '#fde68a',
+
+  // Интерактивни акценти
+  accentIndigo: '#006c49',
+  accentCyan: '#006c49',
+  accentPurple: '#565e74',
+  accentCyanSoftBg: '#eff4ff',
+  accentCyanBorder: '#cbdbf5',
+  indigoSoftBg: '#eff4ff',
 
   white: '#FFFFFF',
-  black: '#000000',
+  black: '#0b1c30',
 };
+
+/**
+ * Стандартизирани цветови тагове за търговските вериги според DESIGN.md и code.html
+ */
+export function getRetailChainStyle(chainName: string): {
+  bg: string;
+  text: string;
+  border: string;
+  label: string;
+} {
+  const norm = (chainName || '').toLowerCase();
+  if (norm.includes('kaufland') || norm.includes('кауфланд')) {
+    return {
+      bg: 'rgba(255, 218, 214, 0.45)',
+      text: '#ba1a1a',
+      border: '#ffe4e6',
+      label: 'KAUFLAND',
+    };
+  }
+  if (norm.includes('lidl') || norm.includes('лидл')) {
+    return {
+      bg: '#dae2fd',
+      text: '#131b2e',
+      border: '#dbeafe',
+      label: 'LIDL',
+    };
+  }
+  if (norm.includes('billa') || norm.includes('билла') || norm.includes('била')) {
+    return {
+      bg: '#ffddb8',
+      text: '#2a1700',
+      border: '#fef08a',
+      label: 'BILLA',
+    };
+  }
+  if (norm.includes('фантастико') || norm.includes('fantastico')) {
+    return {
+      bg: 'rgba(111, 251, 190, 0.40)',
+      text: '#005236',
+      border: '#a7f3d0',
+      label: 'ФАНТАСТИКО',
+    };
+  }
+  if (norm.includes('т-маркет') || norm.includes('t-market') || norm.includes('t market')) {
+    return {
+      bg: '#dce9ff',
+      text: '#3c4a42',
+      border: '#cbdbf5',
+      label: 'Т-МАРКЕТ',
+    };
+  }
+  if (norm.includes('метро') || norm.includes('metro')) {
+    return {
+      bg: '#eff6ff',
+      text: '#1d4ed8',
+      border: '#bfdbfe',
+      label: 'METRO',
+    };
+  }
+  return {
+    bg: '#dce9ff',
+    text: '#3c4a42',
+    border: '#cbdbf5',
+    label: (chainName || 'МАГАЗИН').toUpperCase(),
+  };
+}
 
 export const CATEGORIES: CategoryInfo[] = [
   {
@@ -141,7 +252,6 @@ export const PLATFORM_TAGS: PlatformTag[] = [
 
 export const CITIES = [
   'Всички градове',
-  // Най-големи и популярни градове най-отгоре за бърз достъп
   'София',
   'Пловдив',
   'Варна',
@@ -172,7 +282,6 @@ export const CITIES = [
   'Силистра',
   'Разград',
   'Смолян',
-  // Пълен азбучен списък на градовете и курортите в България
   'Айтос',
   'Аксаково',
   'Албена',
@@ -333,11 +442,6 @@ export const CITIES = [
   'Якоруда',
 ];
 
-/**
- * ВАЖНО (валута): България е в еврозоната и Stripe вече НЕ приема BGN —
- * връща „The currency bgn is no longer supported. Use eur instead.“
- * Затова даренията са в евро.
- */
 export const DONATION_TIERS = [
   {
     id: 'coffee',

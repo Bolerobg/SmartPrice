@@ -45,7 +45,7 @@ function unitFor(badge: { metric?: string | null }): string {
 export default function ProfileScreen() {
   const router = useRouter();
   const { userProfile, posts, openDonationModal, refreshAll, openAddToHome } = useApp();
-  const { logout, refreshProfile } = useAuth();
+  const { user, logout, refreshProfile } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'badges' | 'bookmarks' | 'donations'>(
     'badges'
@@ -103,6 +103,24 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {!user && (
+          <View style={styles.guestAuthBanner}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.guestAuthTitle}>Разглеждаш като гост</Text>
+              <Text style={styles.guestAuthSub}>
+                Влез в профила си, за да запазваш оферти, значки и точки доверие в „Спести & Открий“.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.guestAuthBtn}
+              onPress={() => router.push('/login' as never)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.guestAuthBtnText}>Вход</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Профилна карта */}
         <View style={styles.profileCard}>
           <View style={styles.profileTop}>
@@ -149,15 +167,15 @@ export default function ProfileScreen() {
 
         <View style={styles.raffleRow}>
           <TouchableOpacity
-            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.goldBright }]}
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.tertiaryContainer }]}
             onPress={() => router.push('/raffle' as never)}
             activeOpacity={0.88}
           >
-            <Ionicons name="gift" size={17} color={COLORS.black} />
-            <Text style={styles.storyCardBtnText}>Томболи</Text>
+            <Ionicons name="gift" size={17} color={COLORS.onPrimary} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.onPrimary }]}>Томболи</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.greenBorder }]}
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.surfaceContainerLowest, borderWidth: 1, borderColor: COLORS.greenBorder }]}
             onPress={() => router.push('/favorites' as never)}
             activeOpacity={0.88}
           >
@@ -169,7 +187,7 @@ export default function ProfileScreen() {
         {/* 🏷️ Продаване: моите обяви + вход към пускане на нова */}
         <View style={styles.raffleRow}>
           <TouchableOpacity
-            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.borderStrong }]}
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.surfaceContainerLowest, borderWidth: 1, borderColor: COLORS.borderStrong }]}
             onPress={() => router.push('/listings' as never)}
             activeOpacity={0.88}
           >
@@ -177,31 +195,31 @@ export default function ProfileScreen() {
             <Text style={[styles.storyCardBtnText, { color: COLORS.textPrimary }]}>Моите обяви</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.greenPrimary }]}
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.primary }]}
             onPress={() => router.push('/listings/new' as never)}
             activeOpacity={0.88}
           >
-            <Ionicons name="add-circle" size={16} color={COLORS.black} />
-            <Text style={[styles.storyCardBtnText, { color: COLORS.black }]}>Продавам нещо</Text>
+            <Ionicons name="add-circle" size={16} color={COLORS.onPrimary} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.onPrimary }]}>Продавам нещо</Text>
           </TouchableOpacity>
         </View>
 
         {/* 🎮 Тренировка на пъзела — без ограничения, за подготовка за томболата */}
         <View style={styles.raffleRow}>
           <TouchableOpacity
-            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.accentCyanBorder }]}
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.surfaceContainerLowest, borderWidth: 1, borderColor: COLORS.accentCyanBorder }]}
             onPress={() => router.push('/puzzle-demo' as never)}
             activeOpacity={0.88}
           >
-            <Ionicons name="game-controller" size={16} color={COLORS.accentCyan} />
-            <Text style={[styles.storyCardBtnText, { color: COLORS.accentCyan }]}>Тренировка · пъзелът</Text>
+            <Ionicons name="game-controller" size={16} color={COLORS.primary} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.primary }]}>Тренировка · пъзелът</Text>
           </TouchableOpacity>
         </View>
 
         {(userProfile.isAdmin || userProfile.role === 'admin') && (
           <View style={styles.raffleRow}>
             <TouchableOpacity
-              style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.bgCardElevated, borderWidth: 1, borderColor: COLORS.goldBorder }]}
+              style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.surfaceContainerLowest, borderWidth: 1, borderColor: COLORS.goldBorder }]}
               onPress={() => router.push('/admin/raffles' as never)}
               activeOpacity={0.88}
             >
@@ -217,8 +235,8 @@ export default function ProfileScreen() {
             onPress={() => setCardOpen(true)}
             activeOpacity={0.88}
           >
-            <Ionicons name="image" size={17} color={COLORS.black} />
-            <Text style={styles.storyCardBtnText}>
+            <Ionicons name="image" size={17} color={COLORS.onPrimary} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.onPrimary }]}>
               Карта „Спестих {userProfile.personalSavedBgn.toFixed(2)} €“ за Stories
             </Text>
           </TouchableOpacity>
@@ -256,9 +274,9 @@ export default function ProfileScreen() {
               style={styles.stripePrimaryBtn}
               onPress={() => openDonationModal()}
             >
-              <Ionicons name="heart" size={16} color={COLORS.black} />
+              <Ionicons name="heart" size={16} color={COLORS.onPrimary} />
               <Text style={styles.stripePrimaryBtnText}>
-                {userProfile.isSupporter ? 'Подкрепи отново' : 'Подкрепи SmartPrice'}
+                {userProfile.isSupporter ? 'Подкрепи отново' : 'Подкрепи проекта'}
               </Text>
             </TouchableOpacity>
 
@@ -607,20 +625,53 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 38,
+    paddingBottom: 110,
+  },
+  guestAuthBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderWidth: 1,
+    borderColor: COLORS.greenBorder,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+  },
+  guestAuthTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  guestAuthSub: {
+    color: COLORS.textSecondary,
+    fontSize: 11.5,
+    lineHeight: 16.5,
+    marginTop: 2,
+  },
+  guestAuthBtn: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  guestAuthBtnText: {
+    color: COLORS.onPrimary,
+    fontSize: 12.5,
+    fontWeight: '800',
   },
   profileCard: {
-    backgroundColor: COLORS.bgCard,
+    backgroundColor: COLORS.surfaceContainerLowest,
     borderRadius: 24,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
     padding: 18,
     marginBottom: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    elevation: 6,
+    shadowColor: COLORS.onSurface,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    elevation: 2,
   },
   profileTop: {
     flexDirection: 'row',
@@ -733,15 +784,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: COLORS.goldBright,
+    backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 10,
     borderRadius: 14,
   },
   stripePrimaryBtnText: {
-    color: COLORS.black,
+    color: COLORS.onPrimary,
     fontSize: 12.5,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   testNudgeBtn: {
     flex: 1,

@@ -3,24 +3,9 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { Tabs, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
-import { useApp } from '@/context/AppContext';
-import { useAuth } from '@/src/auth/AuthContext';
 import { AssistantFab } from '@/components/AssistantFab';
 
 export default function TabsLayout() {
-  const { isAuthenticated } = useAuth();
-  const { openAuthPrompt } = useApp();
-
-  // Гостът чете потока и класацията свободно, но „Сподели“ и „Профил“ искат
-  // профил. Вместо да го изхвърляме на екран за вход, му показваме поканата
-  // (с бутони „Регистрирай се“ / „Вече имам профил“).
-  const guardTab = (reason: string) => (e: { preventDefault: () => void }) => {
-    if (isAuthenticated) return;
-    e.preventDefault();
-    openAuthPrompt(reason);
-  };
-
-  // Кой таб е отворен — подаваме го на Ценко, за да е уместна подканата му.
   const pathname = usePathname();
   const assistantScreen = pathname.includes('radar')
     ? 'radar'
@@ -33,113 +18,110 @@ export default function TabsLayout() {
           : 'feed';
 
   return (
-    <View style={{ flex: 1 }}>
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarActiveTintColor: COLORS.greenBright,
-        tabBarInactiveTintColor: COLORS.textMuted,
-        tabBarLabelStyle: styles.tabBarLabel,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Поток',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="flame" size={size} color={color} />
-          ),
+    <View style={{ flex: 1, backgroundColor: COLORS.surface }}>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: styles.tabBar,
+          tabBarActiveTintColor: COLORS.primary,
+          tabBarInactiveTintColor: COLORS.onSurfaceVariant,
+          tabBarLabelStyle: styles.tabBarLabel,
+          tabBarItemStyle: styles.tabBarItem,
         }}
-      />
-      <Tabs.Screen
-        name="radar"
-        options={{
-          title: 'Радар',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="compass" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="add"
-        listeners={{ tabPress: guardTab('За да качиш находка, трябва профил. Отнема 30 секунди.') }}
-        options={{
-          title: 'Сподели',
-          tabBarIcon: ({ focused }) => (
-            <View
-              style={[
-                styles.centerAddButton,
-                focused && { transform: [{ scale: 1.06 }] },
-              ]}
-            >
-              <Ionicons name="scan" size={24} color={COLORS.white} />
-            </View>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="community"
-        options={{
-          title: 'Общност',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="trophy" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        listeners={{ tabPress: guardTab('Профилът пази значките, точките и любимите ти цени.') }}
-        options={{
-          title: 'Профил',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-circle" size={size} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="community"
+          options={{
+            title: 'Начало',
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons
+                name={focused ? 'home' : 'home-outline'}
+                size={22}
+                color={color}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Цени',
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons
+                name={focused ? 'pricetag' : 'pricetag-outline'}
+                size={22}
+                color={color}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="radar"
+          options={{
+            title: 'Места',
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons
+                name={focused ? 'compass' : 'compass-outline'}
+                size={23}
+                color={color}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'Профил',
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons
+                name={focused ? 'person-circle' : 'person-circle-outline'}
+                size={24}
+                color={color}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="add"
+          options={{
+            href: null,
+          }}
+        />
+      </Tabs>
 
-    {/* „Ценко“ — плаващ бутон на всеки таб. Вижда се над таб-бара и подканва
-        човека да пита, когато нещо не му е ясно. */}
-    <AssistantFab screen={assistantScreen} />
+      <AssistantFab screen={assistantScreen} bottom={Platform.OS === 'ios' ? 92 : 76} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: 'rgba(9, 13, 24, 0.96)',
+    backgroundColor: 'rgba(248, 249, 255, 0.94)',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-    height: Platform.OS === 'ios' ? 88 : 70,
-    paddingTop: 7,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 16,
+    borderTopColor: '#e2e8f0',
+    height: Platform.OS === 'ios' ? 84 : 64,
+    paddingTop: 6,
+    paddingBottom: Platform.OS === 'ios' ? 22 : 8,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    elevation: 12,
+    ...(Platform.OS === 'web'
+      ? ({
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+        } as object)
+      : {}),
+  },
+  tabBarItem: {
+    minHeight: 48,
+    paddingVertical: 2,
   },
   tabBarLabel: {
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: -0.1,
+    letterSpacing: 0.2,
     marginTop: 2,
-  },
-  centerAddButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 18,
-    backgroundColor: COLORS.greenPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Platform.OS === 'ios' ? 16 : 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.32)',
-    shadowColor: COLORS.greenBright,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.48,
-    shadowRadius: 14,
-    elevation: 10,
   },
 });
