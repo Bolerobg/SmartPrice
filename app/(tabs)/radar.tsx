@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
+import { Platform,
   ActivityIndicator,
   FlatList,
   SafeAreaView,
@@ -188,6 +188,16 @@ export default function RadarScreen() {
     const t = setTimeout(() => setQuery(searchQuery.trim()), 400);
     return () => clearTimeout(t);
   }, [searchQuery]);
+
+  /**
+   * ⚠️ На телефон в браузър (PWA) натискането на картите „Къде да НЕ се ходи“ /
+   * „Честни Места“ понякога не сработваше (RN-Web touch) — човекът натиска
+   * „Честни Места“, а списъкът си остава червеният. Затова добавяме и „click“.
+   */
+  const webClick = (fn: () => void) =>
+    Platform.OS === 'web'
+      ? ({ onClick: fn } as unknown as Record<string, unknown>)
+      : {};
 
   const loadList = useCallback(
     async (offset: number, replace: boolean) => {
@@ -482,6 +492,7 @@ export default function RadarScreen() {
                   radarMode === 'red_hall' && styles.modeCardRedActive,
                 ]}
                 onPress={() => setRadarMode('red_hall')}
+                {...webClick(() => setRadarMode('red_hall'))}
                 activeOpacity={0.85}
               >
                 <View style={styles.modeHeader}>
@@ -511,6 +522,7 @@ export default function RadarScreen() {
                   radarMode === 'green_gems' && styles.modeCardGreenActive,
                 ]}
                 onPress={() => setRadarMode('green_gems')}
+                {...webClick(() => setRadarMode('green_gems'))}
                 activeOpacity={0.85}
               >
                 <View style={styles.modeHeader}>
