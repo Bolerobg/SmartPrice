@@ -272,6 +272,10 @@ export default function FeedScreen() {
         chain: selectedChain ?? undefined,
         city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
         polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
+        // 🟢 „Изгодно“ показва САМО находки от хора — каталогът на
+        // веригите/онлайн магазините си остава в картата „Онлайн магазини“,
+        // иначе 108 000 каталогни продукта заливат екрана.
+        excludeCatalog: selectedPolarityFilter === 'green',
         category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
         limit: 60,
       })
@@ -310,6 +314,10 @@ export default function FeedScreen() {
         chain: selectedChain ?? undefined,
         city: selectedCityFilter !== 'Всички градове' ? selectedCityFilter : undefined,
         polarity: selectedPolarityFilter === 'all' ? undefined : selectedPolarityFilter,
+        // 🟢 „Изгодно“ показва САМО находки от хора — каталогът на
+        // веригите/онлайн магазините си остава в картата „Онлайн магазини“,
+        // иначе 108 000 каталогни продукта заливат екрана.
+        excludeCatalog: selectedPolarityFilter === 'green',
         category: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
         limit: 60,
         offset: serverResults.length,
@@ -508,7 +516,7 @@ export default function FeedScreen() {
       limit: 1,
     };
     Promise.all([
-      api.feed({ ...base, polarity: 'green' }),
+      api.feed({ ...base, polarity: 'green', excludeCatalog: true }),
       api.feed({ ...base, polarity: 'red' }),
     ])
       .then(([g, r]) => {
@@ -1155,7 +1163,7 @@ export default function FeedScreen() {
             adjustsFontSizeToFit
             minimumFontScale={0.8}
           >
-            🟢 Оферти ({greenCount.toLocaleString('bg-BG')})
+            🟢 Изгодно ({greenCount.toLocaleString('bg-BG')})
           </Text>
         </TouchableOpacity>
 
@@ -1178,7 +1186,7 @@ export default function FeedScreen() {
             adjustsFontSizeToFit
             minimumFontScale={0.8}
           >
-            🔴 Не ходи ({redCount.toLocaleString('bg-BG')})
+            🔴 Внимание, не ходи ({redCount.toLocaleString('bg-BG')})
           </Text>
         </TouchableOpacity>
       </View>
