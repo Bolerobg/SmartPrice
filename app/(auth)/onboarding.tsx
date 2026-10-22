@@ -18,7 +18,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { goBack } from '@/src/lib/navigation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS } from '@/constants/theme';
+import { COLORS, THEME_MODE } from '@/constants/theme';
 import { useAuth } from '@/src/auth/AuthContext';
 
 // ВАЖНО: версията е в името. Като добавим нов екран (сега са 13), вдигаме
@@ -30,6 +30,8 @@ interface Page {
   key: string;
   emoji: string;
   gradient: [string, string];
+  /** Тъмната версия — ползва се само при тъмна тема. */
+  gradientDark?: [string, string];
   eyebrow: string;
   title: string;
   body: string;
@@ -792,7 +794,8 @@ export default function OnboardingScreen() {
       {
         key: 'welcome',
         emoji: '🛒',
-        gradient: ['#1E1B4B', '#0B0F1A'],
+        gradient: ['#EEF2FF', '#F8F9FF'],
+        gradientDark: ['#1E1B4B', '#0B0F1A'],
         eyebrow: 'ДОБРЕ ДОШЪЛ',
         title: 'SmartPrice',
         body:
@@ -802,7 +805,8 @@ export default function OnboardingScreen() {
       {
         key: 'finds',
         emoji: '✅',
-        gradient: ['#052E2B', '#0B0F1A'],
+        gradient: ['#E8F6EE', '#F8F9FF'],
+        gradientDark: ['#052E2B', '#0B0F1A'],
         eyebrow: 'ТОП НАХОДКИ',
         title: 'Къде си струва',
         body:
@@ -812,7 +816,8 @@ export default function OnboardingScreen() {
       {
         key: 'flags',
         emoji: '🚩',
-        gradient: ['#3B0A16', '#0B0F1A'],
+        gradient: ['#FCEBEE', '#F8F9FF'],
+        gradientDark: ['#3B0A16', '#0B0F1A'],
         eyebrow: 'ЧЕРВЕНИ ФЛАГОВЕ',
         title: 'Къде те минават',
         body:
@@ -822,7 +827,8 @@ export default function OnboardingScreen() {
       {
         key: 'ocr',
         emoji: '🧾',
-        gradient: ['#1E1B4B', '#0B0F1A'],
+        gradient: ['#EEF2FF', '#F8F9FF'],
+        gradientDark: ['#1E1B4B', '#0B0F1A'],
         eyebrow: 'AI СКЕНЕР',
         title: 'Снимай бележката',
         body:
@@ -832,7 +838,8 @@ export default function OnboardingScreen() {
       {
         key: 'history',
         emoji: '📊',
-        gradient: ['#052E2B', '#0B0F1A'],
+        gradient: ['#E8F6EE', '#F8F9FF'],
+        gradientDark: ['#052E2B', '#0B0F1A'],
         eyebrow: 'ЖИВИ ЦЕНИ',
         title: 'Цената не е снимка',
         body:
@@ -842,7 +849,8 @@ export default function OnboardingScreen() {
       {
         key: 'badges',
         emoji: '🏅',
-        gradient: ['#3B2A05', '#0B0F1A'],
+        gradient: ['#FDF3E3', '#F8F9FF'],
+        gradientDark: ['#3B2A05', '#0B0F1A'],
         eyebrow: 'ЗНАЧКИ И КЛАСАЦИЯ',
         title: 'Помагаш и получаваш',
         body:
@@ -852,7 +860,8 @@ export default function OnboardingScreen() {
       {
         key: 'raffle',
         emoji: '🎁',
-        gradient: ['#1E1B4B', '#0B0F1A'],
+        gradient: ['#EEF2FF', '#F8F9FF'],
+        gradientDark: ['#1E1B4B', '#0B0F1A'],
         eyebrow: 'ТОМБОЛА',
         title: 'Нареди пъзела най-бързо',
         body:
@@ -862,7 +871,8 @@ export default function OnboardingScreen() {
       {
         key: 'share',
         emoji: '📤',
-        gradient: ['#1E1B4B', '#0B0F1A'],
+        gradient: ['#EEF2FF', '#F8F9FF'],
+        gradientDark: ['#1E1B4B', '#0B0F1A'],
         eyebrow: 'СПОДЕЛЯНЕ',
         title: 'Изпрати находката на приятел',
         body:
@@ -872,7 +882,8 @@ export default function OnboardingScreen() {
       {
         key: 'listing',
         emoji: '🏷️',
-        gradient: ['#052E2B', '#0B0F1A'],
+        gradient: ['#E8F6EE', '#F8F9FF'],
+        gradientDark: ['#052E2B', '#0B0F1A'],
         eyebrow: 'ПРОДАВАМ',
         title: 'Пусни обява за нещо свое',
         body:
@@ -882,7 +893,8 @@ export default function OnboardingScreen() {
       {
         key: 'offerid',
         emoji: '🔖',
-        gradient: ['#083344', '#0B0F1A'],
+        gradient: ['#E8F4FA', '#F8F9FF'],
+        gradientDark: ['#083344', '#0B0F1A'],
         eyebrow: 'ТЪРСИ ПО ID',
         title: 'Всяка оферта има свой ID',
         body:
@@ -892,7 +904,8 @@ export default function OnboardingScreen() {
       {
         key: 'tools',
         emoji: '🧭',
-        gradient: ['#1E1B4B', '#0B0F1A'],
+        gradient: ['#EEF2FF', '#F8F9FF'],
+        gradientDark: ['#1E1B4B', '#0B0F1A'],
         eyebrow: 'ИНСТРУМЕНТИ',
         title: 'Всичко останало',
         body:
@@ -902,7 +915,8 @@ export default function OnboardingScreen() {
       {
         key: 'community',
         emoji: '🤝',
-        gradient: ['#3B2A05', '#0B0F1A'],
+        gradient: ['#FDF3E3', '#F8F9FF'],
+        gradientDark: ['#3B2A05', '#0B0F1A'],
         eyebrow: 'ОБЩНОСТ',
         title: 'Прозрачност, не реклами',
         body:
@@ -912,7 +926,8 @@ export default function OnboardingScreen() {
       {
         key: 'support',
         emoji: '💛',
-        gradient: ['#083344', '#0B0F1A'],
+        gradient: ['#E8F4FA', '#F8F9FF'],
+        gradientDark: ['#083344', '#0B0F1A'],
         eyebrow: 'НЕЗАВИСИМОСТ',
         title: 'Ти решаваш дали да подкрепиш',
         body:
@@ -987,7 +1002,7 @@ export default function OnboardingScreen() {
       >
         {pages.map((page) => (
           <View key={page.key} style={{ width: pageWidth }}>
-            <LinearGradient colors={page.gradient} style={styles.page}>
+            <LinearGradient colors={THEME_MODE === 'dark' ? (page.gradientDark ?? page.gradient) : page.gradient} style={styles.page}>
               {/* Вертикален скрол: на по-нисък екран съдържанието се събира
                   без да се реже. Преди тук нямаше вертикален скрол и текстът
                   се отрязваше на малки телефони. */}
@@ -1113,7 +1128,7 @@ const demo = StyleSheet.create({
     borderWidth: 1,
     padding: 15,
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: COLORS.surfaceContainerLow,
   },
   cardGreen: { borderColor: 'rgba(34,197,94,0.45)' },
   cardRed: { borderColor: 'rgba(239,68,68,0.45)' },
@@ -1158,7 +1173,7 @@ const demo = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: COLORS.surfaceContainerLow,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -1178,8 +1193,8 @@ const demo = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderColor: COLORS.outlineVariant,
+    backgroundColor: COLORS.surfaceContainerLow,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1276,9 +1291,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: COLORS.outlineVariant,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: COLORS.outlineVariant,
   },
   flex: { flex: 1, backgroundColor: COLORS.bgPrimary },
   page: { flex: 1 },
@@ -1291,9 +1306,9 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: COLORS.surfaceContainerLowest,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: COLORS.outlineVariant,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
