@@ -228,6 +228,14 @@ export default function RadarScreen() {
       ? ({ onClick: fn } as unknown as Record<string, unknown>)
       : {};
 
+  /**
+   * ⚠️ ЖИВО ХВАНАТ БЪГ (22.10.2026): при смяна на режима „Честни места“ показваше
+   * ЧЕРВЕНИЯ списък. Причината: изчакалата заявка се пускаше през СТАРИЯ затворен
+   * `loadList` (от предишния режим), затова тръгваше пак червена заявка, а
+   * заглавието вече беше зелено. Затова пазим най-новата функция в ref.
+   */
+  const loadListRef = useRef<((offset: number, replace: boolean) => Promise<void>) | null>(null);
+
   const loadList = useCallback(
     async (offset: number, replace: boolean) => {
       if (busyRef.current) {
@@ -286,13 +294,20 @@ export default function RadarScreen() {
         const pending = pendingRef.current;
         pendingRef.current = null;
         if (pending) {
-          // Пусни изчакалата заявка (напр. новия режим) веднага.
-          setTimeout(() => void loadList(pending.offset, pending.replace), 0);
+          // Пусни изчакалата заявка (напр. новия режим) веднага — през НАЙ-НОВАТА
+          // функция, за да не тръгне със стария режим (виж бележката горе).
+          const latest = loadListRef.current ?? loadList;
+          setTimeout(() => void latest(pending.offset, pending.replace), 0);
         }
       }
     },
     [radarMode, activeCategory, activeCity, query]
   );
+
+  // Винаги сочим към най-новата loadList (виж бележката при loadListRef).
+  useEffect(() => {
+    loadListRef.current = loadList;
+  }, [loadList]);
 
   // Нови филтри (или търсене) → първа страница отначало.
   useEffect(() => {
