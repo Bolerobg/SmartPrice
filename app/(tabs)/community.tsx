@@ -257,6 +257,34 @@ export default function CommunityScreen() {
             {visiblePosts.map((post) => (
               <PostCard key={post.id} post={post} />
             ))}
+
+            {/*
+              ⚠️ ЖИВО (22.10.2026): при смяна на чипа („Топ находки“ / „Червени
+              флагове“) екранът можеше да остане ПРАЗЕН — изглеждаше все едно
+              табът не показва нищо. Ако няма попадения, казваме го с думи и
+              даваме бутон да се види всичко.
+            */}
+            {visiblePosts.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyTitle}>
+                  {feedPolarity === 'green'
+                    ? 'Още няма топ находки'
+                    : feedPolarity === 'red'
+                      ? 'Още няма червени флагове'
+                      : 'Още няма сигнали'}
+                </Text>
+                <Text style={styles.emptyHint}>
+                  Покажи всички сигнали — или добави своя находка, за да помогнеш на следващите.
+                </Text>
+                <TouchableOpacity
+                  style={styles.emptyBtn}
+                  activeOpacity={0.85}
+                  onPress={() => setFeedPolarity('all')}
+                >
+                  <Text style={styles.emptyBtnText}>Покажи всички сигнали</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
         ) : (
           <View>
@@ -464,6 +492,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.bgPrimary,
   },
+  emptyBox: {
+    backgroundColor: COLORS.bgCardElevated,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    padding: 16,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  emptyTitle: { color: COLORS.textPrimary, fontSize: 15.5, fontWeight: '800' },
+  emptyHint: {
+    color: COLORS.textMuted,
+    fontSize: 12.5,
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  emptyBtn: {
+    marginTop: 12,
+    backgroundColor: COLORS.greenPrimary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  emptyBtnText: { color: COLORS.onPrimary, fontSize: 13.5, fontWeight: '800' },
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 12,
