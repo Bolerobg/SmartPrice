@@ -158,13 +158,13 @@ const styles = StyleSheet.create({
   },
   // Кръглият бутон „Сподели“ в средата — истинският вход за качване.
   centerAddButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 18,
+    width: 46,
+    height: 46,
+    borderRadius: 16,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Platform.OS === 'ios' ? 8 : 2,
+    marginBottom: Platform.OS === 'ios' ? 20 : 14,
     borderWidth: 1.5,
     borderColor: COLORS.surfaceContainerLowest,
     shadowColor: COLORS.primary,
