@@ -736,8 +736,9 @@ export default function PostDetailScreen() {
             )}
           </View>
 
-          {/* История на цената + „Беше ли на място?“ */}
-          <PriceHistoryCard post={post} />
+          {/* История на цената + „Беше ли на място?“ — САМО за оферти с цена.
+              При места от Google Maps цена не се следи, затова картата не се показва. */}
+          {isMapPlace ? null : <PriceHistoryCard post={post} />}
 
           {/*
             🛒 Оферта от ВЕРИГА (внесена цена): казваме честно как стои историята.
