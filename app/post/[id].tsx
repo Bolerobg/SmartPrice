@@ -138,7 +138,16 @@ export default function PostDetailScreen() {
    * тогава не показваме бутон за външния сайт, защото линкът води до чуждия каталог,
    * а не до продукта в магазина.
    */
-  const hasShopLink = Boolean(post?.shopUrl);
+  /**
+   * 📍 Място, внесено от Google Maps (картата „Еврото“ или обиколката).
+   *
+   * Това НЕ е магазин: няма продукт и няма цена, която да се провери. Затова
+   * му даваме свои бутони — „Виж къде е на картата“ и „Навигация до там“ —
+   * вместо „Провери цената в магазина“ (което за място няма смисъл).
+   */
+  const isMapPlace = post?.source === 'maps' || post?.source === 'maps-roam';
+
+  const hasShopLink = Boolean(post?.shopUrl) && !isMapPlace;
   /**
    * 🛒 Оферта, внесена от каталозите на веригите (Метро, Кауфланд…).
    *
@@ -147,6 +156,7 @@ export default function PostDetailScreen() {
    */
   const isCatalogImport =
     post?.source === 'scraper' || post?.platformTag === 'Супермаркет';
+
 
   // Още теглим от сървъра — не показваме „не е намерена“ преждевременно.
   if (!post && !remoteTried) {
@@ -277,7 +287,9 @@ export default function PostDetailScreen() {
               style={[styles.navPolarityText, { color: accentColor }]}
               numberOfLines={1}
             >
-              {isGreen ? '🟢 ТОП НАХОДКА' : '🔴 ЧЕРВЕН ФЛАГ • НЕ ХОДИ'}
+              {isMapPlace
+                ? (isGreen ? '📍 ЧЕСТНО МЯСТО' : '📍 ЛОШИ ОТЗИВИ • ВНИМАВАЙ')
+                : (isGreen ? '🟢 ТОП НАХОДКА' : '🔴 ЧЕРВЕН ФЛАГ • НЕ ХОДИ')}
             </Text>
           </View>
 
@@ -475,7 +487,7 @@ export default function PostDetailScreen() {
           </View>
 
           {/* Ценова карта */}
-          <View style={styles.priceComparisonCard}>
+          <View style={[styles.priceComparisonCard, isMapPlace && { display: 'none' }]}>
             <View style={{ flex: 1 }}>
               <Text style={styles.priceBoxLabel}>
                 {isCatalogImport
@@ -535,11 +547,13 @@ export default function PostDetailScreen() {
                     letterSpacing: 0.4,
                   }}
                 >
-                  {hasShopLink
-                    ? 'ОНЛАЙН МАГАЗИН'
-                    : isCatalogImport
-                      ? 'ВЕРИГА • ГРАД'
-                      : 'МЕСТОПОЛОЖЕНИЕ НА ОБЕКТА • GOOGLE MAPS'}
+                  {isMapPlace
+                    ? 'МЯСТО ОТ GOOGLE MAPS'
+                    : hasShopLink
+                      ? 'ОНЛАЙН МАГАЗИН'
+                      : isCatalogImport
+                        ? 'ВЕРИГА • ГРАД'
+                        : 'МЕСТОПОЛОЖЕНИЕ НА ОБЕКТА • GOOGLE MAPS'}
                 </Text>
                 <Text
                   style={{
@@ -553,7 +567,7 @@ export default function PostDetailScreen() {
                 </Text>
                 {/* Само за физически обекти: адресът. За онлайн не показваме сайта —
                     по желание на потребителя (името на магазина не се показва в UI). */}
-                {!post.sourceUrl || isCatalogImport ? (
+                {!post.sourceUrl || isCatalogImport || isMapPlace ? (
                   <Text
                     style={{
                       color: COLORS.textSecondary,
@@ -561,9 +575,11 @@ export default function PostDetailScreen() {
                       marginTop: 2,
                     }}
                   >
-                    {isCatalogImport
-                      ? `📍 ${post.placeName} • гр. ${post.city}`
-                      : `📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`}
+                    {isMapPlace
+                      ? `📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`
+                      : isCatalogImport
+                        ? `📍 ${post.placeName} • гр. ${post.city}`
+                        : `📍 ${post.address ? `${post.address}, ` : ''}гр. ${post.city}`}
                   </Text>
                 ) : null}
                 {post.locationAutoDetected && (
@@ -593,7 +609,79 @@ export default function PostDetailScreen() {
                 При внесени от агрегатор цени (supermarketbg.eu) няма как да дадем
                 линк към конкретния магазин, затова по-добре без бутон, отколкото
                 бутон, който изхвърля човека в чуждия сайт. */}
-            {!hasShopLink && isCatalogImport ? null : (
+            {isMapPlace ? (
+              <View style={{ gap: 8 }}>
+                <Text style={{ color: COLORS.textSecondary, fontSize: 12.5, lineHeight: 18 }}>
+                  Това е място, не онлайн магазин — цена не се проверява. Виж го на картата
+                  или пусни навигация до там.
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() =>
+                    openInGoogleMaps({
+                      placeName: post.placeName,
+                      address: post.address,
+                      city: post.city,
+                      latitude: post.latitude,
+                      longitude: post.longitude,
+                      googleMapsUrl: post.googleMapsUrl,
+                    })
+                  }
+                  style={{
+                    backgroundColor: 'rgba(59, 130, 246, 0.18)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(59, 130, 246, 0.5)',
+                    borderRadius: 12,
+                    paddingVertical: 11,
+                    paddingHorizontal: 14,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Ionicons name="map-outline" size={17} color="#60A5FA" />
+                  <Text style={{ color: '#60A5FA', fontSize: 13, fontWeight: '800' }}>
+                    Виж къде е на картата
+                  </Text>
+                </TouchableOpacity>
+                {post.latitude && post.longitude ? (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      const url = `https://www.google.com/maps/dir/?api=1&destination=${post.latitude},${post.longitude}`;
+                      Linking.openURL(url).catch(() =>
+                        openInGoogleMaps({
+                          placeName: post.placeName,
+                          address: post.address,
+                          city: post.city,
+                          latitude: post.latitude,
+                          longitude: post.longitude,
+                          googleMapsUrl: post.googleMapsUrl,
+                        })
+                      );
+                    }}
+                    style={{
+                      backgroundColor: COLORS.greenSoftBg,
+                      borderWidth: 1,
+                      borderColor: COLORS.greenBorder,
+                      borderRadius: 12,
+                      paddingVertical: 11,
+                      paddingHorizontal: 14,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons name="navigate-outline" size={17} color={COLORS.greenBright} />
+                    <Text style={{ color: COLORS.greenBright, fontSize: 13, fontWeight: '800' }}>
+                      Навигация до там
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : !hasShopLink && isCatalogImport ? null : (
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => {
