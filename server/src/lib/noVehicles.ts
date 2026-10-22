@@ -125,6 +125,26 @@ const CAR_BRANDS = [
 /** Думи, които показват имот — при тях марка в името не значи кола. */
 const REAL_ESTATE_WORDS = ['апартамент', 'наем', 'парцел', 'имоти', 'комплекс', 'брокер', 'кв.м', 'кв. м'];
 
+/**
+ * Думи за ДЕТСКИ/велосипедни неща — „детска акумулаторна кола Mercedes“,
+ * „велосипед BMX“, „гуми за колело“ НЕ са автомобили и се показват.
+ * Затова тези обяви не се пипат.
+ */
+const NOT_A_CAR_WORDS = [
+  'акумулаторн',
+  'велосипед',
+  'колело',
+  'детск',
+  'играчка',
+  'тротинет',
+  'самокат',
+  'bmx',
+  'бмх',
+];
+
+/** „12V/24V“, „180W“ — така са описани само акумулаторните играчки. */
+const TOY_POWER = /\b(?:6|12|24)\s?в\b|\b\d{2,3}\s?w\b/;
+
 const ESCAPE = /[.*+?^${}()|[\]\\]/g;
 
 /** Регекс за цяла дума (кирилицата и цифрите не броят за граница). */
@@ -139,6 +159,8 @@ export function isVehicleListing(...parts: Array<string | null | undefined>): bo
     .join(' ')
     .toLowerCase();
   if (!text) return false;
+  // Детски акумулаторни коли, велосипеди и „гуми за колело“ не са автомобили.
+  if (NOT_A_CAR_WORDS.some((w) => text.includes(w)) || TOY_POWER.test(text)) return false;
   if (CAR_WORDS.some((w) => wordRe(w).test(text))) return true;
   const brand = CAR_BRANDS.some((b) => wordRe(b).test(text));
   if (!brand) return false;
