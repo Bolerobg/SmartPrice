@@ -172,21 +172,64 @@ const VERSION_JS = `<script id="smartprice-version">
     (document.body || document.documentElement).appendChild(el);
     return el;
   }
-  function check(){
+  // ВАЖНО (22.10.2026): човекът с добавеното на екрана приложение не натискаше
+  // „Нова версия“ и оставаше на СТАРИЯ код със стари бъгове (напр. „Честни места“
+  // показваше червения списък). Затова: когато приложението се върне на екрана
+  // (или се отвори наново) и НИЩО не е писано/фокусирано, обновяваме САМИ.
+  // Ако има писане — само показваме съобщението, за да не се губи текст.
+  function busyWriting(){
+    try {
+      var el = document.activeElement;
+      if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return true;
+      var fields = document.querySelectorAll('input,textarea');
+      for (var i = 0; i < fields.length; i++) {
+        if ((fields[i].value || '').length > 0) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+  var applied = {};
+  function applyNow(v){
+    if (applied[v]) return;
+    applied[v] = true;
+    try { sessionStorage.setItem('sp_updated_to', v); } catch (e) {}
+    try {
+      if (window.caches && caches.keys) {
+        caches.keys().then(function(keys){
+          return Promise.all(keys.map(function(k){ return caches.delete(k); }));
+        }).then(go)['catch'](go);
+        setTimeout(go, 800);
+        return;
+      }
+    } catch (e) {}
+    go();
+  }
+  function go(){
+    try {
+      var u = location.href.replace(/([?&])_v=\d+/g, '').replace(/[?&]$/, '');
+      u += (u.indexOf('?') === -1 ? '?' : '&') + '_v=' + Date.now();
+      location.replace(u);
+    } catch (e) { location.reload(); }
+  }
+  function check(auto){
     fetch('/version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(j){
         if (!j || !j.v || j.v === BUILD) return;
+        // при връщане на екрана и без писане → обновяваме сами (без натискане)
+        if (auto && !busyWriting()) { applyNow(j.v); return; }
         if (shown) return;
         shown = true;
         pill();
       })['catch'](function(){});
   }
-  setInterval(check, 60000);
-  document.addEventListener('visibilitychange', check);
-  window.addEventListener('focus', check);
-  window.addEventListener('pageshow', check);
-  setTimeout(check, 4000);
+  setInterval(function(){ check(false); }, 60000);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) check(true);
+  });
+  window.addEventListener('focus', function(){ check(true); });
+  window.addEventListener('pageshow', function(){ check(true); });
+  setTimeout(function(){ check(false); }, 4000);
 })();
 </script>`;
 
