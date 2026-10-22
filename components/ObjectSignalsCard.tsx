@@ -42,10 +42,18 @@ export function ObjectSignalsCard({ postId }: { postId: string }) {
       <Text style={styles.meta}>
         {formatNumber(o.signals_count)} сигнала
         {o.reporters_count > 1 ? ' от ' + formatNumber(o.reporters_count) + ' души' : ''}
-        {o.avg_price != null ? ' · средно ' + formatMoney(o.avg_price) : ''}
-        {o.min_price != null && o.max_price != null
+        {/*
+          📍 ПИТФОЛ (22.10.2026): местата от Google Maps нямат реална цена —
+          при тях сме сложили 0.01 € само защото базата изисква стойност.
+          Затова НЕ показваме „средно 0.01 € · 0.01 €–0.01 €“ (подвежда).
+        */}
+        {(o.min_price ?? 0) > 0.01 && o.avg_price != null
+          ? ' · средно ' + formatMoney(o.avg_price)
+          : ''}
+        {(o.min_price ?? 0) > 0.01 && o.min_price != null && o.max_price != null
           ? ' · ' + formatMoney(o.min_price) + '–' + formatMoney(o.max_price)
           : ''}
+        {(o.min_price ?? 0) <= 0.01 ? ' · няма посочена цена' : ''}
         {o.helped_total > 0 ? ' · помогнало ' + formatNumber(o.helped_total) + '×' : ''}
       </Text>
       <TouchableOpacity
