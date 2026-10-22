@@ -78,6 +78,11 @@ export default function TabsLayout() {
           }}
           options={{
             title: 'Сподели',
+            // Надписът под големия кръгъл бутон се подрязваше на телефон — затова
+            // го махаме (стандартно за централен бутон); за екранни четци остава
+            // accessibilityLabel.
+            tabBarShowLabel: false,
+            tabBarAccessibilityLabel: 'Сподели',
             tabBarIcon: ({ focused }) => (
               <View
                 style={[
