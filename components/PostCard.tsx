@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Image,
   StyleSheet,
@@ -94,16 +94,44 @@ const PostCardInner: React.FC<PostCardProps> = ({ post, distanceKm }) => {
   // безшумно и пращаше само текст, без линк към офертата.
   const handleShare = () => openShare(post);
 
+  /**
+   * ⚡ Оптимистично гласуване (22.10.2026).
+   *
+   * ЖИВО: човекът натиска „Топ Удар“ / „Струва си“, броячът не помръдва и
+   * изглежда, че бутонът не работи (сървърът отговаря след секунди, а списъци
+   * като Радара пазят СВОЕ копие и не се обновяват от контекста). Затова
+   * отброяваме веднага на екрана и после потвърждаваме със сървъра.
+   */
+  const [localReactions, setLocalReactions] = useState(post.reactions);
+  const [localMine, setLocalMine] = useState<ReactionKey | null>(post.userReaction ?? null);
+
+  useEffect(() => {
+    setLocalReactions(post.reactions);
+    setLocalMine(post.userReaction ?? null);
+  }, [post.reactions, post.userReaction]);
+
+  const reactOptimistic = (key: ReactionKey) => {
+    const before = localMine;
+    setLocalReactions((prev) => {
+      const next = { ...prev } as typeof prev;
+      if (before && before !== key) next[before] = Math.max(0, (next[before] ?? 0) - 1);
+      next[key] = Math.max(0, (next[key] ?? 0) + (before === key ? -1 : 1));
+      return next;
+    });
+    setLocalMine(before === key ? null : key);
+    void toggleReaction(post.id, key);
+  };
+
   const renderReactions = () => {
     if (isGreen) {
       const greenButtons: { key: ReactionKey; emoji: string; label: string; count: number }[] = [
-        { key: 'topDeal', emoji: '🔥', label: 'Топ Удар', count: post.reactions.topDeal },
-        { key: 'worthIt', emoji: '👍', label: 'Струва си', count: post.reactions.worthIt },
-        { key: 'doubt', emoji: '🤔', label: 'Съмнително', count: post.reactions.doubt },
+        { key: 'topDeal', emoji: '🔥', label: 'Топ Удар', count: localReactions.topDeal },
+        { key: 'worthIt', emoji: '👍', label: 'Струва си', count: localReactions.worthIt },
+        { key: 'doubt', emoji: '🤔', label: 'Съмнително', count: localReactions.doubt },
       ];
 
       return greenButtons.map((btn) => {
-        const active = post.userReaction === btn.key;
+        const active = localMine === btn.key;
         return (
           <TouchableOpacity
             key={btn.key}
@@ -114,7 +142,7 @@ const PostCardInner: React.FC<PostCardProps> = ({ post, distanceKm }) => {
                 borderColor: COLORS.greenPrimary,
               },
             ]}
-            onPress={() => toggleReaction(post.id, btn.key)}
+            onPress={() => reactOptimistic(btn.key)}
             activeOpacity={0.75}
           >
             <Text style={styles.reactionEmoji}>{btn.emoji}</Text>
@@ -143,13 +171,13 @@ const PostCardInner: React.FC<PostCardProps> = ({ post, distanceKm }) => {
     }
 
     const redButtons: { key: ReactionKey; emoji: string; label: string; count: number }[] = [
-      { key: 'pureRobbery', emoji: '🚨', label: 'Чист Обир', count: post.reactions.pureRobbery },
-      { key: 'avoid', emoji: '😤', label: 'Избягвай', count: post.reactions.avoid },
-      { key: 'exaggerated', emoji: '⚖️', label: 'Пресилено', count: post.reactions.exaggerated },
+      { key: 'pureRobbery', emoji: '🚨', label: 'Чист Обир', count: localReactions.pureRobbery },
+      { key: 'avoid', emoji: '😤', label: 'Избягвай', count: localReactions.avoid },
+      { key: 'exaggerated', emoji: '⚖️', label: 'Пресилено', count: localReactions.exaggerated },
     ];
 
     return redButtons.map((btn) => {
-      const active = post.userReaction === btn.key;
+      const active = localMine === btn.key;
       return (
         <TouchableOpacity
           key={btn.key}
@@ -160,7 +188,7 @@ const PostCardInner: React.FC<PostCardProps> = ({ post, distanceKm }) => {
               borderColor: COLORS.redPrimary,
             },
           ]}
-          onPress={() => toggleReaction(post.id, btn.key)}
+          onPress={() => reactOptimistic(btn.key)}
           activeOpacity={0.75}
         >
           <Text style={styles.reactionEmoji}>{btn.emoji}</Text>
