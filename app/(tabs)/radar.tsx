@@ -40,7 +40,36 @@ export default function RadarScreen() {
   // самата лента на радара се тегли отделно, филтрирана на сървъра.
   const { posts } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
-  const [radarMode, setRadarMode] = useState<'red_hall' | 'green_gems'>('red_hall');
+  /**
+   * Кой списък показваме: „Къде да НЕ се ходи“ (червено) или „Честни места“ (зелено).
+   *
+   * ВАЖНО (22.10.2026): досега изборът се нулираше при всяко отваряне и човекът
+   * пак попадаше на червения списък, дори след като е натиснал „Честни Места“.
+   * Затова го помним в устройството и го възстановяваме.
+   */
+  const RADAR_MODE_KEY = 'sp_radar_mode';
+  const [radarMode, setRadarMode] = useState<'red_hall' | 'green_gems'>(() => {
+    try {
+      if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+        const saved = localStorage.getItem(RADAR_MODE_KEY);
+        if (saved === 'green_gems' || saved === 'red_hall') return saved;
+      }
+    } catch {
+      /* няма значение — остава червеният */
+    }
+    return 'red_hall';
+  });
+
+  const chooseMode = useCallback((mode: 'red_hall' | 'green_gems') => {
+    setRadarMode(mode);
+    try {
+      if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+        localStorage.setItem(RADAR_MODE_KEY, mode);
+      }
+    } catch {
+      /* не пречи на разглеждането */
+    }
+  }, []);
   const [activeCategory, setActiveCategory] = useState<CategoryId>('all');
   const [activeCity, setActiveCity] = useState<string>('Всички градове');
 
@@ -491,8 +520,8 @@ export default function RadarScreen() {
                   styles.modeCard,
                   radarMode === 'red_hall' && styles.modeCardRedActive,
                 ]}
-                onPress={() => setRadarMode('red_hall')}
-                {...webClick(() => setRadarMode('red_hall'))}
+                onPress={() => chooseMode('red_hall')}
+                {...webClick(() => chooseMode('red_hall'))}
                 activeOpacity={0.85}
               >
                 <View style={styles.modeHeader}>
@@ -521,8 +550,8 @@ export default function RadarScreen() {
                   styles.modeCard,
                   radarMode === 'green_gems' && styles.modeCardGreenActive,
                 ]}
-                onPress={() => setRadarMode('green_gems')}
-                {...webClick(() => setRadarMode('green_gems'))}
+                onPress={() => chooseMode('green_gems')}
+                {...webClick(() => chooseMode('green_gems'))}
                 activeOpacity={0.85}
               >
                 <View style={styles.modeHeader}>
