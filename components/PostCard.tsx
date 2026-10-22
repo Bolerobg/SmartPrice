@@ -56,6 +56,16 @@ const PostCardInner: React.FC<PostCardProps> = ({ post, distanceKm }) => {
 
   const isGreen = post.polarity === 'green';
   /**
+   * 📍 Място от Google Maps (картата „Еврото“ или обиколката).
+   * При тях НЯМА цена — в базата стои 0.01 € само защото схемата изисква число.
+   * Затова вместо „ПЛАТЕНА ТОП ЦЕНА 0.01 €“ показваме присъда: заслужава си
+   * или не — това е смисълът за едно място.
+   */
+  const isMapPlace = post.source === 'maps' || post.source === 'maps-roam';
+  const googleRating = isMapPlace
+    ? (post.description ?? '').match(/Google рейтинг\s*([\d.,]+)/)?.[1] ?? null
+    : null;
+  /**
    * 🛒 Цена, внесена от каталозите на веригите (Метро, Кауфланд…): няма „платена“
    * цена и НЯМА линк навън — затова на картата не показваме нито „платена“,
    * нито бутон към Google Maps (мястото е верига, не обект на улицата).
@@ -525,27 +535,47 @@ const PostCardInner: React.FC<PostCardProps> = ({ post, distanceKm }) => {
           {/* Ценови овърлей долу на снимката */}
           <View style={styles.priceOverlayBar}>
             <View style={styles.priceLeftCol}>
-              <Text style={styles.priceOverlayLabel} numberOfLines={1}>
-                {isCatalogShop
-                  ? 'ЦЕНА В ВЕРИГАТА'
-                  : isGreen
-                    ? 'ПЛАТЕНА ТОП ЦЕНА'
-                    : 'ПЛАТЕНА СУМА (КАПАН)'}
-              </Text>
-              <View style={styles.priceNumbersRow}>
-                <Text style={[styles.priceMainValue, { color: accentColor }]}>
-                  {post.pricePaid.toFixed(2)} {post.currency}
-                </Text>
-                {post.referencePrice && (
-                  <Text style={styles.referencePriceText} numberOfLines={1}>
-                    {isGreen ? 'вместо ' : 'реална: '}
-                    {post.referencePrice.toFixed(2)} {post.currency}
+              {isMapPlace ? (
+                <>
+                  <Text style={styles.priceOverlayLabel} numberOfLines={1}>
+                    {isGreen ? 'МЯСТО НА КАРТАТА • ДОБРО' : 'МЯСТО НА КАРТАТА • ВНИМАВАЙ'}
                   </Text>
-                )}
-              </View>
+                  <View style={styles.priceNumbersRow}>
+                    <Text style={[styles.priceMainValue, { color: accentColor, fontSize: 18 }]}>
+                      {isGreen ? '✅ Заслужава си' : '🚩 По-добре не ходи'}
+                    </Text>
+                    {googleRating ? (
+                      <Text style={styles.referencePriceText} numberOfLines={1}>
+                        Google ★{googleRating}
+                      </Text>
+                    ) : null}
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.priceOverlayLabel} numberOfLines={1}>
+                    {isCatalogShop
+                      ? 'ЦЕНА В ВЕРИГАТА'
+                      : isGreen
+                        ? 'ПЛАТЕНА ТОП ЦЕНА'
+                        : 'ПЛАТЕНА СУМА (КАПАН)'}
+                  </Text>
+                  <View style={styles.priceNumbersRow}>
+                    <Text style={[styles.priceMainValue, { color: accentColor }]}>
+                      {post.pricePaid.toFixed(2)} {post.currency}
+                    </Text>
+                    {post.referencePrice && (
+                      <Text style={styles.referencePriceText} numberOfLines={1}>
+                        {isGreen ? 'вместо ' : 'реална: '}
+                        {post.referencePrice.toFixed(2)} {post.currency}
+                      </Text>
+                    )}
+                  </View>
+                </>
+              )}
             </View>
 
-            {priceDiffPercent !== null && (
+            {priceDiffPercent !== null && !isMapPlace && (
               <View
                 style={[
                   styles.diffBadge,
