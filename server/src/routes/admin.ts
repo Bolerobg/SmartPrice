@@ -299,6 +299,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     items: z.array(importItemSchema).max(200).default([]),
   });
 
+  /** Държави/градове извън България — такива сравнения не се публикуват. */
+  const FOREIGN_LOCATION_RE =
+    /(Милано|Италия|Гърция|Румъния|Сърбия|Турция|Германия|Австрия|Франция|Испания|Португалия|Нидерландия|Белгия|Полша|Унгария|Чехия|Словакия|Хърватия|Словения|Лондон|Великобритания|Англия|Швеция|Дания|Финландия|Норвегия|Швейцария|САЩ|Америка|Канада|Дубай|ОАЕ|Кипър|Малта|Ирландия)/i;
+
   app.post('/api/admin/import/receipts', async (req) => {
     const admin = await requireAdminPanel(req);
     const input = z
@@ -315,6 +319,23 @@ export default async function adminRoutes(app: FastifyInstance) {
 
     for (const p of input.posts) {
       try {
+        /**
+         * 🌍 СРАВНЕНИЯ САМО В БЪЛГАРИЯ (заявка 22.10.2026).
+         *
+         * Роботът/ИИ понякога правеше „Сравнение на цени… в Милано и … в София“
+         * — сравнение с чужда държава, което няма смисъл за потребителя тук и
+         * подвежда (различни пазари, ДДС, грамаж). Затова такива постове НЕ се
+         * публикуват: отпадат с причина, за да се вижда в дневника на вноса.
+         */
+        const haystack = `${p.title} ${p.description ?? ''}`;
+        if (FOREIGN_LOCATION_RE.test(haystack)) {
+          skipped.push({
+            title: p.title,
+            reason: 'сравнение извън България — не се публикува (само български вериги и градове)',
+          });
+          continue;
+        }
+
         const perUnit =
           p.unitQuantity && p.unitType
             ? Number(((p.pricePaid / p.unitQuantity) * (p.unitType === 'kg' || p.unitType === 'l' ? 1000 : 1)).toFixed(4))
