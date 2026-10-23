@@ -315,6 +315,252 @@ export async function deleteLead(id: number): Promise<boolean> {
 
 /* ================================================= търсене в Google Maps */
 
+/* ============================================= 🗺️ маршрут за един ден */
+
+/** Разстояние по права линия между две точки, в километри (формула на хаверсинуса). */
+function kmBetween(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const la1 = (aLat * Math.PI) / 180;
+  const la2 = (bLat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+export interface RouteStop {
+  order: number;
+  lead: Lead;
+  /** Колко километра е от предишната спирка (по права линия). */
+  kmFromPrev: number;
+}
+
+export interface DayRoute {
+  city: string;
+  stops: RouteStop[];
+  totalKm: number;
+  /** Готов линк за навигация в Google Maps с всички спирки. */
+  mapsUrl: string;
+  /** Списък за копиране — за дни без интернет. */
+  text: string;
+  withCoords: number;
+  skippedNoCoords: number;
+  message?: string;
+}
+
+/**
+ * 🗺️ Подрежда спирките в маршрут за един ден.
+ *
+ * Как: тръгва от зададена точка (или от първия обект) и винаги отива до
+ * НАЙ-БЛИЗКИЯ непосетен обект („най-близък съсед“). Не е математически
+ * оптималният маршрут, но е това, което човек прави с кола — и е много по-добро
+ * от списък по азбучен ред. Разстоянията са по права линия (с кола ще са
+ * ~20-30% повече — казано е честно в текста).
+ */
+export async function planDayRoute(params: {
+  city: string;
+  maxStops?: number;
+  startLat?: number | null;
+  startLng?: number | null;
+  onlyNotInApp?: boolean | undefined;
+  onlyWithPhone?: boolean | undefined;
+}): Promise<DayRoute> {
+  const maxStops = Math.min(10, Math.max(1, params.maxStops ?? 8));
+  const all = await listLeads({
+    city: params.city,
+    onlyNotInApp: params.onlyNotInApp ?? true,
+    onlyWithPhone: params.onlyWithPhone ?? false,
+    limit: 500,
+  });
+
+  const withCoords = all.items.filter((l) => l.latitude != null && l.longitude != null);
+  const skippedNoCoords = all.items.length - withCoords.length;
+
+  if (!withCoords.length) {
+    return {
+      city: params.city,
+      stops: [],
+      totalKm: 0,
+      mapsUrl: '',
+      text: '',
+      withCoords: 0,
+      skippedNoCoords,
+      message:
+        'Няма обекти с координати в този град. Обектите от Google Maps ги имат; ' +
+        'добавените на ръка — не (за тях може само по адрес).',
+    };
+  }
+
+  let lat = params.startLat ?? withCoords[0]!.latitude!;
+  let lng = params.startLng ?? withCoords[0]!.longitude!;
+
+  const left = [...withCoords];
+  const stops: RouteStop[] = [];
+  let totalKm = 0;
+
+  while (left.length && stops.length < maxStops) {
+    let bestIdx = 0;
+    let bestKm = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < left.length; i++) {
+      const d = kmBetween(lat, lng, left[i]!.latitude!, left[i]!.longitude!);
+      if (d < bestKm) {
+        bestKm = d;
+        bestIdx = i;
+      }
+    }
+    const next = left.splice(bestIdx, 1)[0]!;
+    lat = next.latitude!;
+    lng = next.longitude!;
+    totalKm += bestKm;
+    stops.push({ order: stops.length + 1, lead: next, kmFromPrev: Number(bestKm.toFixed(2)) });
+  }
+
+  const coordsOf = (l: Lead) => `${l.latitude},${l.longitude}`;
+  const first = stops[0]!.lead;
+  const last = stops[stops.length - 1]!.lead;
+  const middle = stops.slice(1, -1).map((s) => coordsOf(s.lead));
+  const mapsUrl =
+    'https://www.google.com/maps/dir/?api=1' +
+    `&origin=${coordsOf(first)}&destination=${coordsOf(last)}` +
+    (middle.length ? `&waypoints=${middle.join('|')}` : '') +
+    '&travelmode=driving';
+
+  const text = [
+    `🧭 Маршрут за деня — ${params.city} (${stops.length} спирки, ~${totalKm.toFixed(1)} км по права линия)`,
+    '',
+    ...stops.map(
+      (s) =>
+        `${s.order}. ${s.lead.name}${s.lead.address ? ' — ' + s.lead.address : ''}` +
+        `${s.lead.phone ? ' · ' + s.lead.phone : ''}` +
+        (s.order > 1 ? `  (${s.kmFromPrev} км от предишната)` : '')
+    ),
+    '',
+    'Навигация: ' + mapsUrl,
+  ].join('\n');
+
+  return {
+    city: params.city,
+    stops,
+    totalKm: Number(totalKm.toFixed(1)),
+    mapsUrl,
+    text,
+    withCoords: withCoords.length,
+    skippedNoCoords,
+  };
+}
+
+/* ============================================= 📊 доклад за обиколките */
+
+export interface LeadsReport {
+  total: number;
+  byStatus: Record<string, number>;
+  visited7: number;
+  new7: number;
+  followUp: Lead[];
+  spent7: number;
+  runs7: number;
+  lines: string[];
+}
+
+/**
+ * 📊 Как върви ходенето по обекти.
+ *
+ * Числата, които имат значение за решение: колко е посетено, колко се
+ * интересуват, колко СА СТАНАЛИ търговци (реалният резултат) и колко пари е
+ * похарчено за намирането им. Плюс списък „върни се при тези“ — интересът
+ * изстива, ако не се върнеш до седмица.
+ */
+export async function leadsReport(): Promise<LeadsReport> {
+  await refreshLeadFlags();
+
+  const s = await one<Record<string, string>>(
+    `select count(*)::text as total,
+            count(*) filter (where status = 'new')::text as s_new,
+            count(*) filter (where status = 'contacted')::text as s_contacted,
+            count(*) filter (where status = 'interested')::text as s_interested,
+            count(*) filter (where status = 'refused')::text as s_refused,
+            count(*) filter (where status = 'joined')::text as s_joined,
+            count(*) filter (where contacted_at > now() - interval '7 days')::text as visited7,
+            count(*) filter (where created_at > now() - interval '7 days')::text as new7
+       from leads`,
+    []
+  );
+
+  const spend = await one<Record<string, string>>(
+    `select coalesce(sum(real_usd), 0)::text as spent, count(*)::text as runs
+       from leads_search_runs
+      where status = 'done' and started_at > now() - interval '7 days'`,
+    []
+  );
+
+  const followUp = await many<Record<string, unknown>>(
+    `select * from leads
+      where status = 'interested'
+        and coalesce(contacted_at, created_at) < now() - interval '7 days'
+      order by contacted_at asc nulls first
+      limit 10`,
+    []
+  );
+
+  const byStatus = {
+    new: Number(s?.s_new ?? 0),
+    contacted: Number(s?.s_contacted ?? 0),
+    interested: Number(s?.s_interested ?? 0),
+    refused: Number(s?.s_refused ?? 0),
+    joined: Number(s?.s_joined ?? 0),
+  };
+  const total = Number(s?.total ?? 0);
+  const visited7 = Number(s?.visited7 ?? 0);
+  const new7 = Number(s?.new7 ?? 0);
+  const spent7 = Number(spend?.spent ?? 0);
+  const runs7 = Number(spend?.runs ?? 0);
+
+  const pct = total > 0 ? Math.round((byStatus.joined / total) * 100) : 0;
+  const lines = [
+    '🧭 Обиколки — докладът за седмицата',
+    '',
+    `Общо обекти в списъка: ${total}`,
+    `🆕 непосетени: ${byStatus.new}`,
+    `📞 говорено (тази седмица): ${visited7}`,
+    `🤝 проявяват интерес: ${byStatus.interested}`,
+    `🎉 станали търговци: ${byStatus.joined} (${pct}% от списъка)`,
+    `❌ отказали: ${byStatus.refused}`,
+    '',
+    `Нови обекти, намерени тази седмица: ${new7}`,
+    `Похарчено за намирането им: $${spent7.toFixed(2)} (${runs7} търсения)`,
+  ];
+
+  if (followUp.length) {
+    lines.push('', '⏰ Върни се при тези (интересът изстива):');
+    for (const l of followUp.map(mapLead)) {
+      lines.push(`  • ${l.name}${l.city ? ' — ' + l.city : ''}${l.phone ? ' · ' + l.phone : ''}`);
+    }
+  } else if (byStatus.interested) {
+    lines.push('', '⏰ Няма изстиващи — всички заинтересовани са говорени скоро.');
+  }
+
+  if (visited7 === 0 && !byStatus.joined) {
+    lines.push(
+      '',
+      '⚠️ Тази седмица няма нито един отбелязан разговор. Без обиколки списъкът си стои.',
+      'Отвори панела → 🧭 Обиколки и тръгни от най-близките 5.'
+    );
+  } else if (byStatus.joined) {
+    lines.push('', '💰 Всеки станал търговец = 19 €/мес, ако плати плана.');
+  }
+
+  return {
+    total,
+    byStatus,
+    visited7,
+    new7,
+    followUp: followUp.map(mapLead),
+    spent7,
+    runs7,
+    lines,
+  };
+}
+
 async function lastRunCost(token: string): Promise<number> {
   try {
     const res = await fetch('https://api.apify.com/v2/actor-runs?limit=1', {

@@ -32,8 +32,10 @@ import {
   deleteLead,
   leadsBudget,
   leadsCsv,
+  leadsReport,
   listLeads,
   listSearchRuns,
+  planDayRoute,
   refreshLeadFlags,
   setLeadStatus,
   startLeadsSearch,
@@ -2192,6 +2194,36 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/leads.csv', async (req) => {
     await requireAdminPanel(req);
     return { csv: await leadsCsv() };
+  });
+
+  /** 🗺️ Маршрут за един ден — подредени спирки + готов линк в Google Maps. */
+  app.post('/api/admin/leads/route', async (req) => {
+    await requireAdminPanel(req);
+    const input = z
+      .object({
+        city: z.string().trim().min(2).max(80),
+        maxStops: z.coerce.number().int().min(1).max(10).default(8),
+        startLat: z.coerce.number().min(-90).max(90).optional(),
+        startLng: z.coerce.number().min(-180).max(180).optional(),
+        onlyNotInApp: z
+          .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
+          .optional()
+          .transform((v) => v === true || v === 'true' || v === '1'),
+      })
+      .parse(req.body ?? {});
+    return await planDayRoute({
+      city: input.city,
+      maxStops: input.maxStops,
+      startLat: input.startLat ?? null,
+      startLng: input.startLng ?? null,
+      onlyNotInApp: input.onlyNotInApp,
+    });
+  });
+
+  /** 📊 Докладът за обиколките (ползва се и от седмичния доклад в Telegram). */
+  app.get('/api/admin/leads/report', async (req) => {
+    await requireAdminPanel(req);
+    return await leadsReport();
   });
 
 }

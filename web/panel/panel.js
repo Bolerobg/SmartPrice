@@ -4869,6 +4869,22 @@ async function renderObykolki(box, force = false) {
     </div>
 
     <div class="card" style="margin-bottom:14px">
+      <div class="card-title">🗺️ Маршрут за един ден</div>
+      <div class="toolbar" style="margin-bottom:10px">
+        <input id="lr-city" placeholder="Град (напр. Пловдив)" value="${esc(f.city)}" maxlength="60" style="width:170px" />
+        <select id="lr-max">
+          <option value="5">5 спирки</option>
+          <option value="8" selected>8 спирки</option>
+          <option value="10">10 спирки</option>
+        </select>
+        <button class="btn btn-primary" id="lr-go">Направи маршрут</button>
+        <button class="btn" id="lr-copy" style="display:none">📋 Копирай списъка</button>
+        <a class="btn" id="lr-maps" style="display:none" target="_blank" rel="noopener">🧭 Отвори в Google Maps</a>
+      </div>
+      <div id="lr-out" class="hint">Избери град — подреждам обектите по близост, за да не кръжиш напразно. Работи само за обекти с координати (тези от Google Maps ги имат).</div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
       <div class="card-title">➕ Добави обект на ръка (видян на улицата)</div>
       <div class="toolbar" style="margin-bottom:10px">
         <input id="ldn-name" placeholder="Име на обекта *" maxlength="120" style="width:220px" />
@@ -5057,6 +5073,45 @@ async function renderObykolki(box, force = false) {
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) { toast(e.message, 'error'); }
+  };
+
+  // 🗺️ Маршрут за деня: подрежда спирките по близост и дава готов линк.
+  let routeText = '';
+  $('#lr-go').onclick = async () => {
+    const city = $('#lr-city').value.trim() || f.city;
+    if (city.length < 2) { toast('Напиши град за маршрута.', 'warn'); return; }
+    $('#lr-go').disabled = true;
+    try {
+      const r = await api('/leads/route', { method: 'POST', body: { city, maxStops: Number($('#lr-max').value) } });
+      if (!r.stops || !r.stops.length) {
+        $('#lr-out').innerHTML = `<span class="warn">${esc(r.message || 'Няма обекти с координати в този град.')}</span>`;
+        $('#lr-copy').style.display = 'none';
+        $('#lr-maps').style.display = 'none';
+        return;
+      }
+      routeText = r.text;
+      $('#lr-out').innerHTML =
+        `<div><strong>${num(r.stops.length)} спирки · ~${r.totalKm} км по права линия</strong>` +
+        `${r.skippedNoCoords ? ` · <span class="dim">${num(r.skippedNoCoords)} обекта без координати останаха извън маршрута</span>` : ''}</div>` +
+        `<ol style="margin:8px 0 0 18px">` +
+        r.stops.map((s) => `<li><strong>${esc(s.lead.name)}</strong>${s.lead.address ? ' — ' + esc(s.lead.address) : ''}` +
+          `${s.lead.phone ? ` · <a href="tel:${esc(s.lead.phone.replace(/[^\d+]/g, ''))}">${esc(s.lead.phone)}</a>` : ''}` +
+          `${s.order > 1 ? ` <span class="dim">(${s.kmFromPrev} км)</span>` : ''}</li>`).join('') +
+        `</ol>`;
+      const maps = $('#lr-maps');
+      maps.href = r.mapsUrl;
+      maps.style.display = '';
+      $('#lr-copy').style.display = '';
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      $('#lr-go').disabled = false;
+    }
+  };
+
+  $('#lr-copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(routeText); toast('Маршрутът е копиран.', 'ok'); }
+    catch { alert(routeText); }
   };
 
   // Ако търсенето още тече — проверяваме пак след малко (във фона е).
