@@ -12,6 +12,7 @@ import { isAggregatorSourceUrl } from '../lib/mappers.js';
 import { priceDuel } from '../lib/priceDuel.js';
 import { compareBasket } from '../lib/basket.js';
 import { chainDifferences } from '../lib/objects.js';
+import { clearCache } from '../lib/ttlCache.js';
 
 const CATEGORIES = [
   'restaurants',
@@ -146,6 +147,16 @@ async function loadOnePost(postId: string, userId: string | null) {
 }
 
 export default async function postRoutes(app: FastifyInstance) {
+  /**
+   * ⚡ Нова находка → изчистваме кешираните списъци с обекти, за да види човекът
+   * СВОЯТА находка веднага (иначе кешът от 5 минути щеше да му покаже стария
+   * брой сигнали и той щеше да си помисли, че не се е качила).
+   */
+  app.addHook('onResponse', async (req) => {
+    if (req.method === 'POST' && (req.url === '/api/posts' || req.url.startsWith('/api/posts?'))) {
+      clearCache('objects-list');
+    }
+  });
   // ---------------------------------------------------------------- Лента
   app.get('/api/posts', async (req) => {
     const q = listQuerySchema.parse(req.query);

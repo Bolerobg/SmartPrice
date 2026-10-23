@@ -31,6 +31,7 @@ import { requireUserId } from '../lib/auth.js';
 import { badRequest, notFound, unavailable } from '../lib/errors.js';
 import { ALERT_EMAIL } from '../lib/security.js';
 import { sendAdminAlertEmail } from '../lib/email.js';
+import { clearCache } from '../lib/ttlCache.js';
 import {
   FREE_REPLIES_PER_MONTH,
   PLAN_MONTHS,
@@ -77,6 +78,15 @@ function stripe(): Stripe {
 }
 
 export default async function businessRoutes(app: FastifyInstance): Promise<void> {
+  /**
+   * ⚡ Промяна по офертите на търговеца → изчистваме кеша на публичните оферти,
+   * за да се види новата промоция веднага (кешът иначе пази до 60 s).
+   */
+  app.addHook('onResponse', async (req) => {
+    if (req.method !== 'GET' && req.url.includes('/offers')) {
+      clearCache('offers:');
+    }
+  });
   /* ------------------------------------------------- заявка „това е моят обект“ */
   app.post('/api/business/claim', async (req) => {
     const userId = requireUserId(req);

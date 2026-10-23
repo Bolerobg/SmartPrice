@@ -34,7 +34,7 @@ export default async function objectRoutes(app: FastifyInstance): Promise<void> 
      * задръстваха връзките към базата. Данните се менят от хора — 60 s закъснение
      * не се усеща, а базата диша.
      */
-    const res = await cached(`objects-list:${JSON.stringify(input)}`, 60_000, () =>
+    const res = await cached(`objects-list:${JSON.stringify(input)}`, 5 * 60_000, () =>
       searchObjects(input)
     );
     return {
