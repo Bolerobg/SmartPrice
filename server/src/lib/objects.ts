@@ -7,6 +7,7 @@
  * Обектът се разпознава по (място + град); слугът идва от изгледа `v_objects`.
  */
 import { many, one } from '../db.js';
+import { cached } from './ttlCache.js';
 import { businessForVenue, type BusinessPublic } from './business.js';
 
 /** Обогатени данни от Google Maps (рейтинг, отзиви, работно време, телефон). */
@@ -207,7 +208,17 @@ export async function cheapestShopsByCategory(options?: {
   const minSaving = Math.max(1, Math.min(50, Number(options?.minSavingPct ?? 5) || 5));
   const limit = Math.max(1, Math.min(200, Number(options?.limit ?? 60) || 60));
 
-  const rows = await many<{
+  /**
+   * ⚡ Кеш 10 минути: брои percentile върху ВСИЧКИ магазински цени (~1.5-2 s) и се
+   * вика при всяко отваряне на „Онлайн магазини“. Цените се внасят веднъж дневно,
+   * затова резултатът не може да е „остарял“ по-рано от това. `cached` слива и
+   * едновременните заявки в една — това спира задръстването на базата.
+   */
+  const rows = await cached(
+    `best-value:${minPosts}:${minWinnerPosts}:${minSaving}:${limit}:${JSON.stringify(options?.categories ?? null)}`,
+    10 * 60_000,
+    () =>
+    many<{
     category: string;
     slug: string;
     place_name: string;
@@ -270,7 +281,7 @@ export async function cheapestShopsByCategory(options?: {
       minWinnerPosts,
       options?.categories && options.categories.length ? options.categories : null,
     ]
-  );
+  ));
 
   return rows.map((r) => ({
     category: r.category,

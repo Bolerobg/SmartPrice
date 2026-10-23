@@ -12,6 +12,7 @@ import {
   slugForPost,
 } from '../lib/objects.js';
 import { notFound } from '../lib/errors.js';
+import { cached } from '../lib/ttlCache.js';
 
 export default async function objectRoutes(app: FastifyInstance): Promise<void> {
   /** Списък/търсене на обекти: колко сигнала, колко души, средна цена. */
@@ -27,7 +28,15 @@ export default async function objectRoutes(app: FastifyInstance): Promise<void> 
         offset: z.coerce.number().int().min(0).max(5000).default(0),
       })
       .parse(req.query ?? {});
-    const res = await searchObjects(input);
+    /**
+     * ⚡ Кеш 60 s + сливане на едновременните. Списъкът с обекти (Радар/Търсене) се
+     * вика при всяко местене на екрана; при няколко души наведнъж тези заявки
+     * задръстваха връзките към базата. Данните се менят от хора — 60 s закъснение
+     * не се усеща, а базата диша.
+     */
+    const res = await cached(`objects-list:${JSON.stringify(input)}`, 60_000, () =>
+      searchObjects(input)
+    );
     return {
       ...res,
       query: input.q ?? '',
@@ -82,7 +91,11 @@ export default async function objectRoutes(app: FastifyInstance): Promise<void> 
         offset: z.coerce.number().int().min(0).max(5000).default(0),
       })
       .parse(req.query ?? {});
-    return searchObjectOffers(params.slug, input);
+    // ⚡ Кеш 60 s — при голяма верига (хиляди оферти) тази заявка е тежка, а
+    // офертите рядко се менят в рамките на минута.
+    return await cached(`offers:${params.slug}:${JSON.stringify(input)}`, 60_000, () =>
+      searchObjectOffers(params.slug, input)
+    );
   });
 
   app.get('/api/objects/:slug', async (req) => {
