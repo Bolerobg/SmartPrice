@@ -19,6 +19,8 @@ import { useRouter } from 'expo-router';
 import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { api, ApiError } from '@/src/api/client';
+import { isOfflineError, loadCache, saveCache } from '@/src/lib/offlineCache';
+import { OfflineNotice } from '@/components/OfflineNotice';
 import type { PostItem } from '@/types';
 
 /**
@@ -34,6 +36,8 @@ export default function FavoritesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 📶 Дата на запазеното, което показваме (null = онлайн). */
+  const [offlineAt, setOfflineAt] = useState<string | null>(null);
   const [editing, setEditing] = useState<PostItem | null>(null);
   const [noteText, setNoteText] = useState('');
 
@@ -42,9 +46,20 @@ export default function FavoritesScreen() {
       const res = await api.bookmarks();
       setItems(res.items || []);
       setError(null);
+      // 📶 Запазваме ги — любимите са най-полезното нещо в магазин без сигнал.
+      void saveCache('favorites', res.items || []);
+      setOfflineAt(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Не успях да заредя любимите.');
-      setItems([]);
+      // 📶 Няма връзка? Показваме запазените любими, ясно обозначени с дата.
+      const cached = isOfflineError(err) ? await loadCache<PostItem[]>('favorites') : null;
+      if (cached?.data?.length) {
+        setItems(cached.data);
+        setOfflineAt(cached.at);
+        setError(null);
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Не успях да заредя любимите.');
+        setItems([]);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -147,6 +162,9 @@ export default function FavoritesScreen() {
         </Text>
 
         {loading ? <ActivityIndicator color={COLORS.greenBright} style={{ marginTop: 30 }} /> : null}
+
+        {/* 📶 Показваме запазените любими и казваме честно от кога са. */}
+        <OfflineNotice at={offlineAt} />
 
         {!loading && error ? (
           <View style={styles.empty}>

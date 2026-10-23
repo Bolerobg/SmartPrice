@@ -26,6 +26,7 @@ import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { FounderBanner } from '@/components/FounderBanner';
 import { PushPromptBanner } from '@/components/PushPromptBanner';
+import { OfflineNotice } from '@/components/OfflineNotice';
 import { ListingNudgeModal } from '@/components/ListingNudgeModal';
 import { PuzzleDemoNudge } from '@/components/PuzzleDemoNudge';
 import {
@@ -1012,6 +1013,9 @@ export default function FeedScreen() {
       {/* 🔔 Поканата за известия идва СЛЕД като човекът е ползвал приложението
           няколко пъти (сървърът брои) — не веднага, за да не дразни. */}
       <PushPromptBanner />
+
+      {/* 📶 Ако няма връзка, казваме честно, че показваме запазеното и от кога. */}
+      <OfflineNotice />
 
       {/* 🎁 Красивият модел „и ти можеш да продаваш“ — показва се рядко. */}
       <ListingNudgeModal

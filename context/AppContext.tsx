@@ -12,6 +12,7 @@ import React, {
 } from 'react';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
+import { isOfflineError, loadCache, saveCache } from '@/src/lib/offlineCache';
 
 import {
   api,
@@ -100,6 +101,8 @@ export interface CreatePostInput {
 
 interface AppContextValue {
   posts: PostItem[];
+  /** 📶 Дата на запазеното, което показваме (null = онлайн). */
+  offlineAt: string | null;
   userProfile: UserProfile;
   leaderboard: LeaderboardUser[];
   /** Ранглиста с избрано подреждане (за табовете в Общност). */
@@ -204,6 +207,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const { profile: authProfile, setProfile: setAuthProfile } = useAuth();
 
   const [posts, setPosts] = useState<PostItem[]>([]);
+  /**
+   * 📶 Офлайн ли сме и от кога е запазеното, което показваме.
+   * null = онлайн. Дата = показваме кеш и екранът казва „от кога“ (никаква
+   * преструвка, че старата цена е актуална).
+   */
+  const [offlineAt, setOfflineAt] = useState<string | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardUser[]>([]);
   const [priceAlerts, setPriceAlerts] = useState<AlertWithMatches[]>([]);
   const [communityStats, setCommunityStats] = useState<CommunityStats | null>(null);
@@ -320,7 +329,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     setPosts(feed.items);
     setHasMorePosts(Boolean(feed.hasMore));
+    // 📶 Запазваме лентата, за да има какво да покажем в магазина без сигнал.
+    void saveCache('feed', feed.items);
+    setOfflineAt(null);
   }, [selectedPolarityFilter, selectedCategoryFilter, selectedCityFilter]);
+
+  /**
+   * 📶 Показване на запазеното, когато няма връзка.
+   *
+   * Връща true, ако има какво да покажем (тогава екранът не бива да пише
+   * „грешка“ — има съдържание, само е от по-рано и го казваме изрично).
+   */
+  const fallbackToCache = useCallback(async (): Promise<boolean> => {
+    const cached = await loadCache<PostItem[]>('feed');
+    if (cached?.data?.length) {
+      setPosts(cached.data);
+      setOfflineAt(cached.at);
+      return true;
+    }
+    return false;
+  }, []);
 
   const loadMorePosts = useCallback(async () => {
     if (!hasMorePosts || isLoadingMore || isLoading) return;
@@ -413,7 +441,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setPriceAlerts([]);
         }
       } catch (err) {
-        if (!cancelled) setError(messageOf(err));
+        if (cancelled) return;
+        // 📶 Няма връзка? Показваме запазеното, вместо празен екран с грешка.
+        if (isOfflineError(err) && (await fallbackToCache())) {
+          setError(null);
+          return;
+        }
+        setError(messageOf(err));
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -428,7 +462,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isLoading) return;
     let cancelled = false;
     loadFeed().catch((err) => {
-      if (!cancelled) setError(messageOf(err));
+      if (cancelled) return;
+      // 📶 Пак: при липса на връзка показваме кеша, а не грешка.
+      if (isOfflineError(err)) {
+        void fallbackToCache().then((ok) => {
+          if (!cancelled) setError(ok ? null : messageOf(err));
+        });
+        return;
+      }
+      setError(messageOf(err));
     });
     return () => {
       cancelled = true;
@@ -800,6 +842,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const value = useMemo<AppContextValue>(
     () => ({
       posts,
+      offlineAt,
       userProfile,
       leaderboard,
       fetchLeaderboard,
@@ -864,6 +907,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }),
     [
       posts,
+      offlineAt,
       userProfile,
       leaderboard,
       fetchLeaderboard,
