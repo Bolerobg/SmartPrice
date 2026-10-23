@@ -162,8 +162,43 @@ export interface DigestResult {
  * `dryRun: true` изчислява всичко и връща примерни текстове, БЕЗ да праща —
  * така може да се провери, че числата са истински, преди да стигне до хора.
  */
-export async function sendWeeklyDigest(options: { dryRun?: boolean; days?: number } = {}): Promise<DigestResult> {
+export async function sendWeeklyDigest(
+  options: {
+    dryRun?: boolean;
+    days?: number;
+    trigger?: 'auto' | 'manual' | 'dry';
+    /** true само при пуск след рестарт на сървъра (виж предпазната мярка долу). */
+    startupGuard?: boolean;
+  } = {}
+): Promise<DigestResult> {
   const days = options.days ?? DIGEST_WINDOW_DAYS;
+  const trigger = options.trigger ?? (options.dryRun ? 'dry' : 'auto');
+
+  /**
+   * 🛡️ Предпазна мярка срещу ПОВТОРЕНИЕ.
+   *
+   * Планировчикът пуска дайджест и при старт, ако последният е стар — но при
+   * няколко рестарта (деплой) човек може да получи няколко известия за едно и
+   * също нещо. Затова: пускът СЛЕД РЕСТАРТ не минава, ако последният дайджест е
+   * преди по-малко от 5 дни. Редовният понеделнишки пуск НЕ се спира от това —
+   * иначе тестов пуск би потиснал истинския за седмицата.
+   */
+  if (!options.dryRun && options.startupGuard === true) {
+    const last = await getSetting('push_digest_last_run', '');
+    const age = last ? Date.now() - new Date(last).getTime() : Number.POSITIVE_INFINITY;
+    if (age < 5 * 24 * 60 * 60 * 1000) {
+      return {
+        cities: 0,
+        findings: 0,
+        targeted: 0,
+        sent: 0,
+        gone: 0,
+        failed: 0,
+        note: 'Твърде скоро след последния дайджест — прескачам (пази от повторение при рестарт).',
+      };
+    }
+  }
+
   const all = await buildCityDigests(days);
   const fallback = nationalDigest(all);
   const findings = all.reduce((s, d) => s + d.total, 0);
@@ -188,6 +223,16 @@ export async function sendWeeklyDigest(options: { dryRun?: boolean; days?: numbe
   }
 
   if (options.dryRun) {
+    // Пробите също се записват в историята — за да се вижда кой какво е проверявал.
+    await logDigestRow(trigger, days, {
+      cities: all.length,
+      findings,
+      targeted: users.length,
+      sent: 0,
+      gone: 0,
+      failed: 0,
+      note: `Проба: ${all.length} града, ${findings} находки, ${users.length} абонирани души — нищо не е пратено.`,
+    });
     return {
       cities: all.length,
       findings,
@@ -221,23 +266,44 @@ export async function sendWeeklyDigest(options: { dryRun?: boolean; days?: numbe
     `Изпратено до ${users.length} души (${sent} устройства): ` +
     `${all.length} града, ${findings} находки.`;
 
-  await one(
-    `insert into push_digest_log (trigger, window_days, cities, findings, targeted, sent, gone, failed, note)
-     values ('auto', $1, $2, $3, $4, $5, $6, $7, $8) returning id`,
-    [days, all.length, findings, users.length, sent, gone, failed, note]
-  ).catch(() => undefined);
+  await logDigestRow(trigger, days, {
+    cities: all.length,
+    findings,
+    targeted: users.length,
+    sent,
+    gone,
+    failed,
+    note,
+  });
 
   await setSetting('push_digest_last_run', new Date().toISOString());
 
   return { cities: all.length, findings, targeted: users.length, sent, gone, failed, note, sample };
 }
 
-/** Записва и ръчен/пробен пуск, за да се вижда в панела кой какво е правил. */
-export async function logDigestRun(result: DigestResult, trigger: 'manual' | 'dry', days = DIGEST_WINDOW_DAYS): Promise<void> {
+/**
+ * ЕДИНСТВЕНОТО място, което пише в историята на пусковете.
+ *
+ * Защо е отделна функция: преди и `sendWeeklyDigest`, и админ маршрутът
+ * пишеха ред — затова един пуск се виждаше ДВА пъти в панела ('auto' + 'manual').
+ */
+async function logDigestRow(
+  trigger: 'auto' | 'manual' | 'dry',
+  days: number,
+  data: {
+    cities: number;
+    findings: number;
+    targeted: number;
+    sent: number;
+    gone: number;
+    failed: number;
+    note: string;
+  }
+): Promise<void> {
   await one(
     `insert into push_digest_log (trigger, window_days, cities, findings, targeted, sent, gone, failed, note)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
-    [trigger, days, result.cities, result.findings, result.targeted, result.sent, result.gone, result.failed, result.note]
+    [trigger, days, data.cities, data.findings, data.targeted, data.sent, data.gone, data.failed, data.note]
   ).catch(() => undefined);
 }
 

@@ -24,7 +24,6 @@ import { retrainCenko, lastRetrain, logRetrain } from '../lib/cenkoKnowledge.js'
 import { getSetting, setSetting } from '../lib/settings.js';
 import {
   digestInfo,
-  logDigestRun,
   sendWeeklyDigest,
   setDigestEnabled,
 } from '../lib/digest.js';
@@ -1975,8 +1974,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       })
       .parse(req.body ?? {});
 
-    const res = await sendWeeklyDigest({ dryRun: input.dryRun, days: input.days });
-    await logDigestRun(res, input.dryRun ? 'dry' : 'manual', input.days);
+    // Историята се пише вътре в sendWeeklyDigest (едно място — иначе един пуск
+    // се виждаше два пъти в панела: 'auto' + 'manual').
+    const res = await sendWeeklyDigest({
+      dryRun: input.dryRun,
+      days: input.days,
+      trigger: input.dryRun ? 'dry' : 'manual',
+    });
     await audit({
       admin,
       action: input.dryRun ? 'digest.dry' : 'digest.send',

@@ -49,14 +49,14 @@ function msUntilNextMonday(): number {
 }
 
 export function startDigestScheduler(log: (message: string) => void): void {
-  const run = async (why: string) => {
+  const run = async (why: string, startupGuard = false) => {
     try {
       const enabled = (await getSetting('push_digest_enabled', 'on')) !== 'off';
       if (!enabled) {
         log('📨 Седмичният дайджест е изключен от панела — прескачам.');
         return;
       }
-      const res = await sendWeeklyDigest();
+      const res = await sendWeeklyDigest({ startupGuard });
       log(`📨 ${why}: ${res.note}`);
     } catch (err) {
       log(`Дайджестът не мина: ${(err as Error)?.message ?? err}`);
@@ -69,7 +69,9 @@ export function startDigestScheduler(log: (message: string) => void): void {
       const last = await getSetting('push_digest_last_run', '');
       const age = last ? Date.now() - new Date(last).getTime() : Number.POSITIVE_INFINITY;
       if (age > STALE_MS) {
-        await run('Закъснял дайджест — пращам сега');
+        // startupGuard: не пращаме, ако последният дайджест е бил преди <5 дни
+        // (пази от повторение при няколко рестарта/деплоя един след друг).
+        await run('Закъснял дайджест — пращам сега', true);
       }
       scheduleNext();
     })();
