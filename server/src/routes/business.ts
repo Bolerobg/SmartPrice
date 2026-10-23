@@ -16,6 +16,7 @@ import { badRequest } from '../lib/errors.js';
 import { ALERT_EMAIL } from '../lib/security.js';
 import { sendAdminAlertEmail } from '../lib/email.js';
 import {
+  UUID_RE,
   addBusinessReply,
   businessForPost,
   businessForVenue,
@@ -95,7 +96,7 @@ export default async function businessRoutes(app: FastifyInstance): Promise<void
     const userId = requireUserId(req);
     const params = z.object({ id: z.string().trim().regex(/^\d+$/) }).parse(req.params);
     const input = z
-      .object({ postId: z.string().trim().regex(/^\d+$/), body: z.string().trim().max(1600) })
+      .object({ postId: z.string().trim().regex(UUID_RE, 'Невалидна оферта.'), body: z.string().trim().max(1600) })
       .parse(req.body ?? {});
 
     const reply = await addBusinessReply({
@@ -111,7 +112,7 @@ export default async function businessRoutes(app: FastifyInstance): Promise<void
   app.get('/api/business/replies', async (req) => {
     const q = z
       .object({
-        postId: z.string().trim().regex(/^\d+$/).optional(),
+        postId: z.string().trim().regex(UUID_RE).optional(),
         postIds: z.string().trim().max(400).optional(),
       })
       .parse(req.query ?? {});
@@ -129,7 +130,9 @@ export default async function businessRoutes(app: FastifyInstance): Promise<void
 
   /* --------------------------------------- кой търговец е собственик (публично) */
   app.get('/api/business/for-post', async (req) => {
-    const q = z.object({ postId: z.string().trim().regex(/^\d+$/) }).parse(req.query ?? {});
+    const q = z
+      .object({ postId: z.string().trim().regex(UUID_RE) })
+      .parse(req.query ?? {});
     return { business: await businessForPost(q.postId) };
   });
 
@@ -141,7 +144,9 @@ export default async function businessRoutes(app: FastifyInstance): Promise<void
   /* --------------------------------------- проверка, че съм собственик (за UI) */
   app.get('/api/business/can-reply', async (req) => {
     const userId = requireUserId(req);
-    const q = z.object({ postId: z.string().trim().regex(/^\d+$/) }).parse(req.query ?? {});
+    const q = z
+      .object({ postId: z.string().trim().regex(UUID_RE) })
+      .parse(req.query ?? {});
     const mine = await loadMyBusinesses(userId);
     const biz = await businessForPost(q.postId);
     if (!biz) return { canReply: false, businessId: null, reason: 'no_business' };

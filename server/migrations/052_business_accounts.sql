@@ -9,7 +9,9 @@
 create table if not exists business_accounts (
   id             bigserial primary key,
   -- Кой профил от приложението представлява бизнеса.
-  owner_user_id  bigint not null references profiles(id) on delete cascade,
+  -- ВАЖНО: profiles.id / posts.id са UUID (виж миграция 001) — не bigint,
+  -- иначе външният ключ не може да се създаде и API-то не стартира.
+  owner_user_id  uuid not null references profiles(id) on delete cascade,
 
   -- Обектът се разпознава по ТОЧНО съЩИЯ слуг като в v_objects:
   -- md5(lower(btrim(place_name)) || '|' || lower(btrim(city)))
@@ -56,7 +58,7 @@ create index if not exists business_accounts_tax_id_idx on business_accounts (re
 create table if not exists business_replies (
   id           bigserial primary key,
   business_id  bigint not null references business_accounts(id) on delete cascade,
-  post_id      bigint not null references posts(id) on delete cascade,
+  post_id      uuid not null references posts(id) on delete cascade,
   body         text not null,
   created_at   timestamptz not null default now()
 );

@@ -12,6 +12,13 @@
 import { many, one, tx } from '../db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 
+/**
+ * Профилите (`profiles.id`) и офертите (`posts.id`) в SmartPrice са UUID —
+ * НЕ числови. Затова външните ключове тук са `uuid`, а не `bigint` (грешка,
+ * която веднъж спря API-то: „foreign key constraint cannot be implemented“).
+ */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Само цифри — ЕИК идва от касова бележка с интервали и водещи нули. */
 export function normalizeTaxId(value: string | null | undefined): string {
   return String(value ?? '').replace(/\D/g, '');
@@ -326,14 +333,16 @@ export async function repliesForPost(postId: string): Promise<BusinessReply[]> {
 export async function repliesForPosts(
   postIds: string[]
 ): Promise<Record<string, BusinessReply[]>> {
-  const list = [...new Set(postIds.map((p) => String(p)).filter((p) => /^\d+$/.test(p)))];
+  const list = [
+    ...new Set(postIds.map((p) => String(p).trim()).filter((p) => UUID_RE.test(p))),
+  ];
   if (list.length === 0) return {};
   const rows = await many<BusinessReply>(
     `select br.id, br.post_id::text, br.body, br.created_at::text,
             b.id::text as business_id, b.legal_name, b.place_name, b.city
        from business_replies br
        join business_accounts b on b.id = br.business_id
-      where br.post_id = any($1::bigint[]) and b.status = 'verified'
+      where br.post_id = any($1::uuid[]) and b.status = 'verified'
       order by br.created_at desc`,
     [list]
   );
