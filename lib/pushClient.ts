@@ -51,7 +51,35 @@ export async function pushStatus(): Promise<'on' | 'off' | 'unsupported'> {
   if (!pushSupported()) return 'unsupported';
   if (w.Notification.permission !== 'granted') return 'off';
   const sub = await currentSubscription();
-  return sub ? 'on' : 'off';
+  if (!sub) return 'off';
+  // 🩹 Самовъзстановяване: браузърът помни абонамента, но сървърът може да го е
+  // загубил (възстановен бекъп, изчистена база, премахнат абонамент). Тогава
+  // човекът вижда „включени“, а известия не идват и НИКОЙ не го пита пак.
+  // Затова при всяка проверка тихо записваме абонамента на сървъра наново.
+  void registerOnServer(sub);
+  return 'on';
+}
+
+/**
+ * Записва (или обновява) съществуващ абонамент на сървъра.
+ * Идемпотентно: сървърът прави upsert по endpoint.
+ */
+async function registerOnServer(sub: any): Promise<boolean> {
+  try {
+    const json = sub.toJSON();
+    const res = await fetch(API_URL + '/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+      body: JSON.stringify({
+        endpoint: json.endpoint,
+        keys: json.keys,
+        userAgent: String(w.navigator?.userAgent || '').slice(0, 200),
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Иска разрешение, абонира браузъра и записва абонамента на сървъра. */
