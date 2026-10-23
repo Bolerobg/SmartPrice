@@ -6,7 +6,7 @@
  * под сигналите за неговия обект.
  *
  * ВАЖНО: обектът се разпознава по СЪЩИЯ слуг като в `v_objects` —
- *   md5(lower(btrim(place_name)) || '|' || lower(btrim(city)))
+ *   md5(lower(btrim(coalesce(place_name, '')) || '|' || lower(btrim(coalesce(city, '')))))
  * Ако някога се смени формулата в миграция 036, трябва да се смени и тук.
  */
 import { many, one, tx } from '../db.js';
@@ -134,7 +134,7 @@ async function taxIdMatchesVenue(slug: string, taxId: string): Promise<boolean> 
        from posts p
        join receipts r on r.post_id = p.id
       where p.status = 'published'
-        and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1
+        and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1
         and regexp_replace(coalesce(r.merchant_tax_id, ''), '\\D', '', 'g') = $2`,
     [slug, taxId]
   );
@@ -315,7 +315,7 @@ export async function businessForPost(postId: string): Promise<BusinessPublic | 
        from business_accounts b
        join posts p on p.id = $1
       where b.status = 'verified'
-        and b.venue_slug = md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city)))
+        and b.venue_slug = md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, '')))))
       limit 1`,
     [postId]
   );
@@ -386,7 +386,7 @@ export async function addBusinessReply(params: {
   const owns = await one<{ ok: number }>(
     `select 1 as ok from posts
       where id = $1 and status = 'published'
-        and md5(lower(btrim(place_name)) || '|' || lower(btrim(city))) = $2`,
+        and md5(lower(btrim(coalesce(place_name, '')) || '|' || lower(btrim(coalesce(city, ''))))) = $2`,
     [params.postId, row.venue_slug]
   );
   if (!owns) throw badRequest('Този сигнал не е за твоя обект.');
@@ -828,11 +828,11 @@ export async function venueStats(businessId: string): Promise<VenueStats | null>
       `select
          (select count(*)::text from posts p
            where p.status = 'published'
-             and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1) as signals,
+             and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1) as signals,
          (select count(*)::text from business_replies br where br.business_id = $2) as replies,
          (select count(*)::text from posts p
            where p.status = 'published' and p.created_at > now() - interval '30 days'
-             and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1) as recent,
+             and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1) as recent,
          (select rating::float from place_enrichment where slug = $1) as rating`,
       [row.venue_slug, row.id]
     ),

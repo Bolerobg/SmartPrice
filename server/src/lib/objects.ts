@@ -221,7 +221,7 @@ export async function cheapestShopsByCategory(options?: {
     next_place_name: string | null;
   }>(
     `with shop_posts as (
-       select md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) as slug,
+       select md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) as slug,
               p.place_name,
               coalesce(nullif(btrim(coalesce(p.custom_category_label, '')), ''), p.category) as category,
               p.price_paid::float as price
@@ -594,7 +594,7 @@ export async function loadObject(slug: string): Promise<{
          from posts p
          left join receipts r on r.post_id = p.id
         where p.status = 'published'
-          and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1
+          and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1
         order by p.created_at desc
         limit 80`,
       [key]
@@ -603,7 +603,7 @@ export async function loadObject(slug: string): Promise<{
       `select p.id::text, p.price_paid::float as price, p.title, p.created_at::text, p.polarity, p.image_url
          from posts p
         where p.status = 'published'
-          and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1
+          and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1
         order by p.created_at asc
         limit 200`,
       [key]
@@ -616,7 +616,7 @@ export async function loadObject(slug: string): Promise<{
               count(*)::int as posts
          from posts p
         where p.status = 'published'
-          and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1
+          and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1
         group by 1
         order by 1 asc`,
       [key]
@@ -670,7 +670,7 @@ export async function loadObject(slug: string): Promise<{
            from posts p
           where p.status = 'published'
             and p.price_paid > 0
-            and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1
+            and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1
           group by 1
           order by 2 desc
           limit 12`,
@@ -719,7 +719,7 @@ export async function loadObject(slug: string): Promise<{
 /** Слугът на обекта, към който принадлежи даден пост (за бутона в офертата). */
 export async function slugForPost(postId: string): Promise<string | null> {
   const row = await one<{ slug: string }>(
-    `select md5(lower(btrim(place_name)) || '|' || lower(btrim(city))) as slug
+    `select md5(lower(btrim(coalesce(place_name, '')) || '|' || lower(btrim(coalesce(city, ''))))) as slug
        from posts where id = $1`,
     [postId]
   );
@@ -779,7 +779,7 @@ export async function searchObjectOffers(
                  or upper(replace(p.public_code, '-', '')) like upper(replace(${p}, '-', '')))`;
   }
   const where = `p.status = 'published'
-      and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1${search}`;
+      and md5(lower(btrim(coalesce(p.place_name, '')) || '|' || lower(btrim(coalesce(p.city, ''))))) = $1${search}`;
 
   const items = await many<ObjectSignal>(
     `select p.id::text, p.source, p.title, p.description, p.polarity, p.category, p.price_paid::float,

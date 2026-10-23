@@ -1815,7 +1815,7 @@ export default async function adminRoutes(app: FastifyInstance) {
                     and (bo.valid_until is null or bo.valid_until >= current_date)) as offers_live,
                 (select count(*)::int from posts po
                   where po.status = 'published'
-                    and md5(lower(btrim(po.place_name)) || '|' || lower(btrim(po.city))) = b.venue_slug) as signals_count
+                    and md5(lower(btrim(coalesce(po.place_name, '')) || '|' || lower(btrim(coalesce(po.city, ''))))) = b.venue_slug) as signals_count
            from business_accounts b
            left join profiles p on p.id = b.owner_user_id
           where ($1 = 'all' or b.status = $1)
