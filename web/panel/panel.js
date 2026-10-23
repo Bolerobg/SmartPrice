@@ -237,6 +237,7 @@ const PAGES = {
   referrals: ['Покани', 'Кой кого е поканил и кой е получил точки'],
   favorites: ['Любими', 'Кои оферти хората пазят най-често'],
   businesses: ['Бизнеси', 'Заявки „това е моят обект“: проверка, абонамент, официални отговори'],
+  digest: ['Известия', 'Седмичен дайджест „находки в твоя град“ + ръчно известие до всички'],
   security: ['Сигурност', 'Ненормална активност и аларми по имейл'],
   emails: ['Имейли', 'Изпратени писма и ръчно писмо до потребител'],
   audit: ['Дневник', 'Всяко действие на админ — кой, какво, кога'],
@@ -329,6 +330,7 @@ async function render(page, force = false) {
     if (page === 'referrals') return await renderReferrals(box, force);
     if (page === 'favorites') return await renderFavorites(box, force);
     if (page === 'businesses') return await renderBusinesses(box, force);
+    if (page === 'digest') return await renderDigest(box, force);
     if (page === 'security') return await renderSecurity(box, force);
     if (page === 'emails') return await renderEmails(box, force);
     if (page === 'audit') return await renderAudit(box, force);
@@ -4776,6 +4778,160 @@ async function renderBusinesses(box, force = false) {
       }
       render('businesses', true);
     });
+  });
+}
+
+/* ---------------------------------------------------------- известия */
+
+/**
+ * 📨 Известия — седмичният дайджест и ръчните съобщения.
+ *
+ * Защо съществува: приложението имаше Web Push, но нищо не го задействаше само.
+ * Тук се вижда колко души са абонирани, пуска се дайджестът (с проба — БЕЗ да
+ * праща, за да се проверят числата и текстът) и се пуска ръчно съобщение.
+ */
+async function renderDigest(box, force = false) {
+  const info = await api('/digest/info');
+  const last = info.last_run ? dt(info.last_run) : 'още не е пускан';
+  const sample = cache.digestSample || [];
+
+  box.innerHTML = `
+    <div class="grid grid-4" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Абонирани устройства</div><div class="kpi-value cyan">${num(info.devices)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Абонирани хора</div><div class="kpi-value">${num(info.users)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Находки (7 дни)</div><div class="kpi-value green">${num(info.findings_ready)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Града с находки</div><div class="kpi-value gold">${num(info.cities_ready)}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">📨 Седмичен дайджест „находки в твоя град“</div>
+      <div class="toolbar" style="margin-bottom:10px">
+        <span class="pill ${info.enabled ? 'pill-green' : 'pill-dim'}">${info.enabled ? 'включен' : 'изключен'}</span>
+        <button class="btn" id="dg-toggle">${info.enabled ? 'Изключи автоматичното' : 'Включи автоматичното'}</button>
+        <button class="btn" id="dg-dry">🔍 Проба (без пращане)</button>
+        <button class="btn btn-danger" id="dg-send">📤 Пусни сега до хората</button>
+      </div>
+      <div class="hint">
+        Последен пуск: <strong>${esc(last)}</strong> · Пуска се сам всеки <strong>понеделник 09:00</strong>
+        българско време (вътре в API-то — не иска cron на сървъра). Всеки абониран получава
+        <strong>само своя град</strong>; ако там няма нищо — най-доброто от страната. Максимум 1 известие на седмица.
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">🧪 Как ще изглежда известието (проба)</div>
+      ${
+        sample.length
+          ? `<div class="table-wrap"><table><thead><tr><th>Град</th><th>Заглавие</th><th>Текст</th></tr></thead><tbody>
+              ${sample
+                .map(
+                  (s) => `<tr><td>${esc(s.city)}</td><td>${esc(s.title)}</td><td class="dim">${esc(s.body)}</td></tr>`
+                )
+                .join('')}</tbody></table></div>`
+          : '<div class="empty">Натисни „🔍 Проба (без пращане)“, за да видиш точните текстове и числа.</div>'
+      }
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">📢 Ръчно известие до всички</div>
+      <div class="toolbar">
+        <input class="grow" id="bc-title" placeholder="Заглавие (напр. „Нови цени в Кауфланд“)" maxlength="80" />
+        <input class="grow" id="bc-body" placeholder="Текст (до 200 знака)" maxlength="200" />
+        <input id="bc-url" placeholder="/ (адрес)" maxlength="300" style="width:120px" />
+        <button class="btn" id="bc-send">Изпрати</button>
+      </div>
+      <div class="hint">Стига само до хората, които са разрешили известия. Мъртвите абонаменти се чистят сами.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📜 История на пусковете</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Кога</th><th>Вид</th><th>Градове</th><th>Находки</th><th>Хора</th><th>Пратени</th><th>Мъртви</th><th>Бележка</th></tr></thead>
+        <tbody>
+        ${
+          (info.history || []).length
+            ? info.history
+                .map((h) => {
+                  const kind =
+                    h.trigger === 'dry' ? ['проба', 'pill-dim'] : h.trigger === 'manual' ? ['ръчно', 'pill-gold'] : ['автоматично', 'pill-green'];
+                  return `<tr>
+                    <td class="mono dim nowrap">${dt(h.run_at)}</td>
+                    <td><span class="pill ${kind[1]}">${kind[0]}</span></td>
+                    <td>${num(h.cities)}</td>
+                    <td>${num(h.findings)}</td>
+                    <td>${num(h.targeted)}</td>
+                    <td>${num(h.sent)}</td>
+                    <td>${num(h.gone)}</td>
+                    <td class="dim">${esc(h.note || '')}</td>
+                  </tr>`;
+                })
+                .join('')
+            : '<tr><td colspan="8" class="empty">Още няма пускове</td></tr>'
+        }
+        </tbody></table></div>
+      <div class="hint" style="margin-top:10px">
+        ⚠️ За да получава някой известия, трябва да е натиснал „🔔 Включи известията“ в профила си
+        (на iPhone — приложението трябва да е сложено на началния екран, иначе Safari не дава известия).
+      </div>
+    </div>`;
+
+  $('#dg-toggle').addEventListener('click', async () => {
+    try {
+      const res = await api('/digest/toggle', { method: 'POST', body: { enabled: !info.enabled } });
+      toast(res.enabled ? 'Автоматичният дайджест е включен' : 'Автоматичният дайджест е изключен');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    render('digest', true);
+  });
+
+  $('#dg-dry').addEventListener('click', async () => {
+    try {
+      const res = await api('/digest/run', { method: 'POST', body: { dryRun: true, days: 7 } });
+      cache.digestSample = res.sample || [];
+      toast(res.note);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    render('digest', true);
+  });
+
+  $('#dg-send').addEventListener('click', async () => {
+    if (
+      !confirm(
+        'Да пусна ли седмичния дайджест ДО ХОРАТА сега?\n\nВсеки абониран получава известие за находките в своя град.'
+      )
+    )
+      return;
+    try {
+      const res = await api('/digest/run', { method: 'POST', body: { dryRun: false, days: 7 } });
+      toast(res.note);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    render('digest', true);
+  });
+
+  $('#bc-send').addEventListener('click', async () => {
+    const title = $('#bc-title').value.trim();
+    const body = $('#bc-body').value.trim();
+    if (title.length < 3 || body.length < 3) {
+      toast('Нужни са заглавие и текст', 'error');
+      return;
+    }
+    if (!confirm('Да изпратя ли това известие до всички абонирани?')) return;
+    try {
+      const res = await api('/push/broadcast', {
+        method: 'POST',
+        body: { title, body, url: $('#bc-url').value.trim() || '/' },
+      });
+      toast(res.message);
+      $('#bc-title').value = '';
+      $('#bc-body').value = '';
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    render('digest', true);
   });
 }
 

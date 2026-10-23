@@ -23,6 +23,13 @@ import { invalidateKnowledgeCache } from './assistant.js';
 import { retrainCenko, lastRetrain, logRetrain } from '../lib/cenkoKnowledge.js';
 import { getSetting, setSetting } from '../lib/settings.js';
 import {
+  digestInfo,
+  logDigestRun,
+  sendWeeklyDigest,
+  setDigestEnabled,
+} from '../lib/digest.js';
+import { sendPushToAll } from '../lib/push.js';
+import {
   sendAccountDeletedEmail,
   sendAccountSuspendedEmail,
   sendAdminAlertEmail,
@@ -1946,6 +1953,80 @@ export default async function adminRoutes(app: FastifyInstance) {
       ip: req.ip,
     });
     return { ok: true };
+  });
+
+  /* --------------------------------------- 📨 Известия (седмичен дайджест)
+   * Двигателят за задържане: хората, които са разрешили известия, получават
+   * веднъж седмично „най-добрите находки в твоя град“. Тук се вижда кой колко
+   * е получил, пуска се на ръка (проба или истинско) и се включва/изключва.
+   */
+
+  app.get('/api/admin/digest/info', async (req) => {
+    await requireAdminPanel(req);
+    return await digestInfo();
+  });
+
+  app.post('/api/admin/digest/run', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        dryRun: z.boolean().default(true),
+        days: z.coerce.number().int().min(1).max(30).default(7),
+      })
+      .parse(req.body ?? {});
+
+    const res = await sendWeeklyDigest({ dryRun: input.dryRun, days: input.days });
+    await logDigestRun(res, input.dryRun ? 'dry' : 'manual', input.days);
+    await audit({
+      admin,
+      action: input.dryRun ? 'digest.dry' : 'digest.send',
+      targetType: 'push',
+      details: { cities: res.cities, findings: res.findings, targeted: res.targeted, sent: res.sent },
+      ip: req.ip,
+    });
+    return res;
+  });
+
+  app.post('/api/admin/digest/toggle', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+    await setDigestEnabled(input.enabled);
+    await audit({
+      admin,
+      action: 'digest.toggle',
+      targetType: 'push',
+      details: { enabled: input.enabled },
+      ip: req.ip,
+    });
+    return { ok: true, enabled: input.enabled };
+  });
+
+  /** Ръчно известие до всички (напр. „пуснахме нова версия“). */
+  app.post('/api/admin/push/broadcast', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        title: z.string().trim().min(3).max(80),
+        body: z.string().trim().min(3).max(200),
+        url: z.string().trim().max(300).optional(),
+      })
+      .parse(req.body ?? {});
+
+    const res = await sendPushToAll({
+      title: input.title,
+      body: input.body,
+      url: input.url || '/',
+      tag: 'admin-broadcast',
+    });
+    await audit({
+      admin,
+      action: 'push.broadcast',
+      targetType: 'push',
+      targetLabel: input.title,
+      details: res,
+      ip: req.ip,
+    });
+    return { ...res, message: `Пратено до ${res.sent} устройства (мъртви: ${res.gone}).` };
   });
 
 }

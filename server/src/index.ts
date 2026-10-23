@@ -11,6 +11,7 @@ import { prewarmBrowser } from './lib/render.js';
 import { closePool, one } from './db.js';
 import { runMigrations } from './migrate.js';
 import { startCenkoTrainer } from './lib/cenkoScheduler.js';
+import { startDigestScheduler } from './lib/digestScheduler.js';
 import { startSocialScheduler } from './lib/socialScheduler.js';
 import { sendError } from './lib/errors.js';
 
@@ -305,6 +306,8 @@ async function main() {
   // Самообучението на Ценко (AI съветникът): наръчникът от файла + живите
   // факти от базата. Веднъж на ден в 03:30 и веднага, ако знанието е старо.
   startCenkoTrainer((message) => app.log.info(message));
+  // 📨 Седмичен дайджест по известия (понеделник 09:00) — връща хората в приложението
+  startDigestScheduler((message) => app.log.info(message));
   // 🤖 Седмичното проучване на TikTok/Instagram. Включва се от панела
   // (🎬 Социални мрежи → 🤖 Автоматизация) — по подразбиране е ИЗКЛЮЧЕНО.
   startSocialScheduler((message) => app.log.info(message));
