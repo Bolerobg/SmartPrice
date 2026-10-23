@@ -106,13 +106,28 @@ export function digestPayload(d: CityDigest, scope: 'city' | 'country'): PushPay
     scope === 'city'
       ? `🔥 ${count} находк${count === 1 ? 'а' : 'и'} в ${d.city} тази седмица`
       : `🔥 Най-добрите находки тази седмица`;
-  const money = best ? `${best.title.slice(0, 60)} — ${best.price.toFixed(2)} €` : '';
-  const body = [money, best?.place_name ? `в ${best.place_name}` : '']
-    .filter(Boolean)
-    .join(' · ');
+
+  /**
+   * ВАЖНО: заглавието на оферта често вече съдържа цената и мястото
+   * („Капки за нос Отривин Плюс с цена 7.37 € в аптека Ремидиум“). Ако ги
+   * залепим пак, човекът чете „7.37 € … — 7.37 € · в Аптека Ремидиум“.
+   * Затова добавяме цена/място САМО ако още ги няма в заглавието.
+   */
+  const base = best ? best.title.trim().slice(0, 90) : '';
+  const extras: string[] = [];
+  if (best && base && !/€/.test(base)) extras.push(`${best.price.toFixed(2)} €`);
+  if (best?.place_name && !base.toLowerCase().includes(best.place_name.toLowerCase())) {
+    extras.push(`в ${best.place_name}`);
+  }
+  const body = base
+    ? extras.length
+      ? `${base} · ${extras.join(' · ')}`
+      : base
+    : 'Виж какво намериха хората тази седмица.';
+
   return {
     title,
-    body: body || 'Виж какво намериха хората тази седмица.',
+    body,
     url: '/?from=digest',
     tag: 'weekly-digest',
   };
