@@ -4848,6 +4848,19 @@ async function renderObykolki(box, force = false) {
     </div>
 
     <div class="card" style="margin-bottom:14px">
+      <div class="card-title">📄 Листовка за обектите (PDF, 6 страници)</div>
+      <div class="toolbar" style="margin-bottom:10px">
+        <a class="btn btn-primary" href="/panel/assets/targovci/SmartPrice-za-targovci-6-strani.pdf" download>⬇️ Свали PDF за търговците</a>
+        <a class="btn" href="/panel/assets/targovci/SmartPrice-za-targovci-6-strani.pdf" target="_blank" rel="noopener">🖨️ Отвори за печат</a>
+      </div>
+      <div class="hint">
+        Документът, който даваш на обекта: защо да влезе, как става за 3 минути, какво вижда
+        клиентът, таблото и колко струва. <strong>Без последната страница</strong> („Готови текстове“ —
+        тя е само за теб). Снимките вътре са от реалното приложение, не рисунки.
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
       <div class="card-title">🔎 Намери нови обекти в Google Maps</div>
       <div class="toolbar" style="margin-bottom:10px">
         <input id="ld-city" placeholder="Град (напр. Пловдив)" maxlength="60" style="width:170px" />

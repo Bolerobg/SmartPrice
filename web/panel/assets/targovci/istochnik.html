@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<title>SmartPrice за търговци</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "DejaVu Sans", Arial, sans-serif;
+    color: #10201b;
+    background: #ffffff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page {
+    width: 210mm; height: 297mm;
+    padding: 16mm 15mm;
+    page-break-after: always;
+    position: relative;
+    overflow: hidden;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---------- корица ---------- */
+  .cover {
+    background: linear-gradient(150deg, #006c49 0%, #0b8f63 45%, #4edea3 100%);
+    color: #ffffff;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 24mm 18mm;
+  }
+  .cover .big { font-size: 46pt; font-weight: 900; line-height: 1.05; margin: 0 0 4mm 0; }
+  .cover .sub { font-size: 17pt; font-weight: 700; opacity: .95; margin: 0 0 14mm 0; line-height: 1.35; }
+  .cover .who { font-size: 12pt; opacity: .9; }
+  .cover .badgebox {
+    margin-top: 16mm; background: rgba(255,255,255,.16);
+    border: 1.5px solid rgba(255,255,255,.5); border-radius: 5mm;
+    padding: 7mm; font-size: 12.5pt; line-height: 1.6;
+  }
+
+  h1 { font-size: 22pt; margin: 0 0 3mm 0; font-weight: 900; }
+  h2 { font-size: 15pt; margin: 0 0 3mm 0; font-weight: 900; }
+  h3 { font-size: 12.5pt; margin: 5mm 0 2mm 0; font-weight: 800; }
+  p, li, td, th { font-size: 11.4pt; line-height: 1.55; }
+  .lead { font-size: 12.5pt; color: #35463f; margin: 0 0 5mm 0; }
+  .kicker {
+    display: inline-block; background: #eafaf3; color: #006c49;
+    border: 1px solid #a7f3d0; border-radius: 999px;
+    padding: 1.5mm 4mm; font-size: 10.5pt; font-weight: 800; margin-bottom: 4mm;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 3mm 0 4mm 0; }
+  th { background: #006c49; color: #fff; text-align: left; padding: 2.6mm 3mm; font-size: 10.8pt; }
+  td { border-bottom: 1px solid #e2e8f0; padding: 2.6mm 3mm; vertical-align: top; }
+  tr:nth-child(even) td { background: #f7fbf9; }
+  td.k { width: 42%; font-weight: 800; }
+
+  .shot { text-align: center; margin: 3mm 0 4mm 0; }
+  .shot img { max-width: 66mm; max-height: 160mm; border: 1px solid #d7e3dc; border-radius: 3mm; }
+  .shot .cap { font-size: 9.6pt; color: #6c7a71; margin-top: 2mm; }
+  /*
+   * ВАЖНО: flex + процентна ширина не работи при печат — Chrome смачква снимката
+   * до няколко пиксела (проверено на 23.10.2026). Затова фиксирана ширина.
+   */
+  .shot-row { display: flex; gap: 7mm; align-items: flex-start; }
+  .shot-row > .shot { flex: 0 0 66mm; width: 66mm; margin: 0; }
+  .shot-row > .shot img { width: 66mm; height: auto; max-height: 158mm; object-fit: contain; }
+  .shot-row > div:not(.shot) { flex: 1 1 auto; min-width: 0; }
+
+  .box { border-radius: 3.5mm; padding: 4mm 4.5mm; margin: 4mm 0; font-size: 11pt; line-height: 1.55; }
+  .tip { background: #eafaf3; border: 1.5px solid #a7f3d0; }
+  .warn { background: #fff8e6; border: 1.5px solid #fde68a; }
+  .money { background: #eef4ff; border: 1.5px solid #cbdbf5; }
+  .box b { font-weight: 900; }
+
+  ul { margin: 2mm 0 3mm 0; padding-left: 6mm; }
+  li { margin-bottom: 1.6mm; }
+
+  .steps { counter-reset: s; margin: 3mm 0; padding: 0; list-style: none; }
+  .steps li {
+    counter-increment: s; position: relative; padding-left: 11mm; margin-bottom: 3mm; font-size: 11.4pt;
+  }
+  .steps li:before {
+    content: counter(s); position: absolute; left: 0; top: 0;
+    width: 7.5mm; height: 7.5mm; border-radius: 999px;
+    background: #006c49; color: #fff; font-weight: 900; font-size: 10.5pt;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .two { display: flex; gap: 6mm; }
+  .two > div { flex: 1; }
+  .price { font-size: 27pt; font-weight: 900; color: #006c49; }
+  .price small { font-size: 12pt; font-weight: 700; color: #35463f; }
+  .copy {
+    background: #f7fbf9; border: 1px dashed #a7f3d0; border-radius: 3mm;
+    padding: 4mm; font-size: 11pt; line-height: 1.6; white-space: pre-wrap;
+  }
+  .footer {
+    position: absolute; bottom: 8mm; left: 15mm; right: 15mm;
+    font-size: 9.2pt; color: #8a938f; border-top: 1px solid #e2e8f0; padding-top: 2mm;
+    display: flex; justify-content: space-between;
+  }
+  .gold { color: #b8860b; font-weight: 800; }
+</style>
+</head>
+<body>
+
+<!-- ============ 1. КОРИЦА ============ -->
+<section class="page cover">
+  <div class="big">SmartPrice<br>за търговци</div>
+  <div class="sub">Твоят обект. Твоят глас. Твоите клиенти.</div>
+  <div class="who">Как да влезеш, какво получаваш и колко струва</div>
+  <div class="badgebox">
+    <b>Накратко:</b><br>
+    ✅ Значка <b>„Проверен търговец“</b> на твоя обект<br>
+    💬 <b>Официален отговор</b> под всеки сигнал за теб<br>
+    🏷️ <b>Оферти</b>, които виждат всички, които отварят обекта<br>
+    📊 <b>Статистика</b> — колко души те гледат<br>
+    <span class="gold">💰 19 € / месец (или 228 € / година)</span>
+  </div>
+</section>
+
+<!-- ============ 2. ЗАЩО ============ -->
+<section class="page">
+  <h1>Защо да го направиш</h1>
+  <p class="lead">В SmartPrice хората качват цени и сигнали за обекти — „тук е скъпо“, „тук е изгодно“.
+  Досега се чуваше само тяхната страна. Сега твоят обект може да има <b>собствен глас</b>.</p>
+
+  <table>
+    <tr><th>Какво получаваш</th><th>Защо ти е полезно</th></tr>
+    <tr><td class="k">💬 Право на отговор</td>
+        <td>Под всеки сигнал за твоя обект пишеш официално: „проверихме, коригирахме“, „това е стара снимка“.
+        Клиентът вижда, че фирмата отговаря, а не само оплаквания.</td></tr>
+    <tr><td class="k">✅ Значка „Проверен търговец“</td>
+        <td>Казва на хората: това не е анонимен профил, а истинският собственик. Дава доверие.</td></tr>
+    <tr><td class="k">🏷️ Оферти</td>
+        <td>Пускаш промоция с цена и срок — виждат я всички, които отворят обекта ти.</td></tr>
+    <tr><td class="k">📊 Статистика</td>
+        <td>Колко души гледат обекта, колко сигнала има, каква е оценката. Знаеш какво става.</td></tr>
+  </table>
+
+  <div class="box warn">
+    <b>⚠️ Честно:</b> значката не се дава на всеки. Трябва да докажеш, че обектът е твой
+    (ЕИК на фирмата или документ). Фалшива заявка се премахва.
+  </div>
+
+  <div class="box tip">
+    <b>💡 Най-силното доказателство:</b> ако ЕИК, който напишеш, съвпадне с касова бележка,
+    която вече е разчетена за този обект — <b>одобряваме веднага</b>, без да чакаш.
+  </div>
+
+  <div class="footer"><span>SmartPrice · за търговци</span><span>стр. 2</span></div>
+</section>
+
+<!-- ============ 3. КАК СЕ ЗАЯВЯВАШ ============ -->
+<section class="page">
+  <h1>Как се заявяваш (3 минути)</h1>
+  <ol class="steps">
+    <li>Отвори своя обект в приложението (от „Радар“ или от оферта за него).</li>
+    <li>Натисни бутона <b>🏢 „Това е моят бизнес“</b>.</li>
+    <li>Попълни фирмата и ЕИК, ако го имаш. Прикачи касова бележка или документ — ускорява проверката.</li>
+    <li>Ако ЕИК съвпадне с вече разчетена бележка за обекта → <b>си Проверен търговец веднага</b>.
+        Иначе заявката отива при екипа и отговорът идва на имейла до 1 работен ден.</li>
+  </ol>
+
+  <div class="shot-row">
+    <div class="shot">
+      <img src="shot3_register.png" alt="Формата за заявка">
+    </div>
+    <div>
+      <h3>Какво пишеш в полетата</h3>
+      <table>
+        <tr><td class="k">Име на фирмата *</td><td>Както е по документи, напр. „Храни Иванов“ ЕООД</td></tr>
+        <tr><td class="k">ЕИК / Булстат</td><td>9 или 13 цифри. Може и празно, но тогава проверката е ръчна.</td></tr>
+        <tr><td class="k">Имейл за връзка *</td><td>Там получаваш отговора. Служебен имейл, не личен.</td></tr>
+        <tr><td class="k">Телефон</td><td>По избор — ако екипът трябва да уточни нещо.</td></tr>
+        <tr><td class="k">Доказателство</td><td>Касова бележка, фактура или документ, на който се вижда фирмата и обектът.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="box tip">
+    <b>💡 Един обект = един проверен търговец.</b> Ако обектът вече е заявен от някой друг,
+    системата ще ти каже и можеш да пишеш на екипа.
+  </div>
+
+  <div class="footer"><span>SmartPrice · за търговци</span><span>стр. 3</span></div>
+</section>
+
+<!-- ============ 4. КАКВО ВИЖДА КЛИЕНТЪТ ============ -->
+<section class="page">
+  <h1>Какво вижда клиентът</h1>
+  <p class="lead">Ето как изглежда твоят обект за човека, който го отваря от телефона си:</p>
+
+  <div class="shot-row">
+    <div class="shot">
+      <img src="shot1_venue.png" alt="Обектът със значка и оферти">
+      <div class="cap">Значка „✅ Проверен търговец“ + твоите оферти, ясно отделени</div>
+    </div>
+    <div>
+      <h3>Какво вижда</h3>
+      <ul>
+        <li><b>✅ Проверен търговец: „Твоята фирма“ ЕООД</b> — точно под името на обекта.</li>
+        <li><b>🏷️ Оферти от търговеца</b> — твоите промоции с нова цена, зачеркната стара цена и срок.</li>
+        <li><b>💬 Официален отговор</b> — под сигнал, за който си отговорил, с името на фирмата ти.</li>
+      </ul>
+      <div class="box warn">
+        <b>⚠️ Важно за доверието:</b> твоите оферти <b>не влизат</b> в общата лента с находки.
+        Там хората пишат какво са намерили те — ако сложим платени промоции вътре, никой няма да вярва
+        на приложението. Затова офертата стои в <b>твоя обект</b>, където човекът вече е при теб.
+      </div>
+    </div>
+  </div>
+
+  <div class="footer"><span>SmartPrice · за търговци</span><span>стр. 4</span></div>
+</section>
+
+<!-- ============ 5. ТАБЛОТО ============ -->
+<section class="page">
+  <h1>Твоето табло</h1>
+  <p class="lead">Всичко на едно място — не е нужно да питаш никого какво става с обекта ти.</p>
+
+  <div class="shot-row">
+    <div class="shot">
+      <img src="shot2_dashboard.png" alt="Таблото на търговеца">
+    </div>
+    <div>
+      <h3>Какво виждаш</h3>
+      <table>
+        <tr><td class="k">💰 Планът</td><td>Активен ли е, до кога, и бутон да го удължиш.</td></tr>
+        <tr><td class="k">👀 Гледания днес / 30 дни</td><td>Колко души са отворили обекта ти. Това е най-честният знак, че някой те търси.</td></tr>
+        <tr><td class="k">🚩 Сигнала</td><td>Колко сигнала има за обекта.</td></tr>
+        <tr><td class="k">★ Оценка</td><td>Оценката от Google Maps, ако я имаме.</td></tr>
+        <tr><td class="k">🏷️ Оферти</td><td>Пускаш, скриваш или триеш оферта с два бутона.</td></tr>
+        <tr><td class="k">💬 Сигнали без отговор</td><td>Показва „N без отговор“ и бутон „Отговори“ — за да не изпуснеш оплакване.</td></tr>
+      </table>
+      <div class="box tip">
+        <b>💡</b> Ако един сигнал е с „✅ отговорено“, значи вече си отговорил — не се повтаря,
+        за да не се превърне в спам.
+      </div>
+    </div>
+  </div>
+
+  <div class="footer"><span>SmartPrice · за търговци</span><span>стр. 5</span></div>
+</section>
+
+<!-- ============ 6. ЦЕНА ============ -->
+<section class="page">
+  <h1>Колко струва</h1>
+  <p class="lead">Първо пробваш безплатно. Плащаш само ако видиш, че работи за теб.</p>
+
+  <table>
+    <tr><th>Какво</th><th>Безплатно</th><th>Проверен търговец 💰</th></tr>
+    <tr><td class="k">Заявка и значка</td><td>✅ да</td><td>✅ да</td></tr>
+    <tr><td class="k">Официални отговори</td><td>1 на месец</td><td><b>неограничено</b></td></tr>
+    <tr><td class="k">Оферти в обекта</td><td>❌ не</td><td>✅ да, колкото искаш</td></tr>
+    <tr><td class="k">Статистика (гледания)</td><td>❌ не</td><td>✅ да</td></tr>
+    <tr><td class="k">Цена</td><td>0 €</td><td><b>19 € / месец</b></td></tr>
+  </table>
+
+  <div class="two">
+    <div class="box money">
+      <div class="price">19 €<small> / месец</small></div>
+      Месечно, спираш когато искаш.
+    </div>
+    <div class="box money">
+      <div class="price">228 €<small> / година</small></div>
+      Плащаш 12 месеца наведнъж.
+    </div>
+  </div>
+
+  <h3>Как се плаща</h3>
+  <ul>
+    <li>От таблото натискаш <b>„Активирай за 19 €/мес“</b>.</li>
+    <li>Отваря се защитена страница на <b>Stripe</b> — плащаш с карта. Ние не виждаме данните на картата ти.</li>
+    <li>Планът се активира <b>веднага</b>. Забравиш ли да платиш, планът просто спира — значката остава,
+        но офертите и неограничените отговори спират до подновяване.</li>
+  </ul>
+
+  <div class="box tip">
+    <b>💡</b> Ако предпочиташ по банка или с фактура — кажи на екипа, пускаме плана ръчно.
+  </div>
+
+  <div class="footer"><span>SmartPrice · за търговци</span><span>стр. 6</span></div>
+</section>
+
+<!-- ============ 7. ГОТОВИ ТЕКСТОВЕ ============ -->
+
+</body>
+</html>
