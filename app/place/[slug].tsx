@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { PostCard } from '@/components/PostCard';
 import { BusinessOffersCard } from '@/components/BusinessOffersCard';
+import { VERIFIED_BADGE_ICON } from '@/src/lib/badges';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { api, ApiError, loadObject, registerVenueView, type ObjectDetail } from '@/src/api/client';
 import type { PostItem, PostPolarity } from '@/types';
@@ -271,9 +273,14 @@ export default function PlaceOffersScreen() {
                   който отговаря лично“, а не още един анонимен профил. */}
               {detail?.business?.verified ? (
                 <View style={styles.bizRow}>
-                  <Ionicons name="shield-checkmark" size={14} color={COLORS.greenBright} />
+                  {/* Значката „Проверен търговец“ — истинска емблема, не ей-такова емоджи. */}
+                  <Image
+                    source={{ uri: VERIFIED_BADGE_ICON }}
+                    style={styles.bizBadge}
+                    resizeMode="contain"
+                  />
                   <Text style={styles.bizText} numberOfLines={2}>
-                    ✅ Проверен търговец: {detail.business.legal_name}
+                    Проверен търговец: {detail.business.legal_name}
                   </Text>
                 </View>
               ) : null}
@@ -458,6 +465,8 @@ const styles = StyleSheet.create({
   pillGold: { backgroundColor: COLORS.goldSoftBg, borderColor: COLORS.goldBorder },
   pillText: { color: COLORS.textPrimary, fontSize: 11.5, fontWeight: '800' },
   bizRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
+  /** Значката е квадратна емблема — фиксирани размери, за да не я разтяга редът. */
+  bizBadge: { width: 18, height: 18 },
   bizText: { flex: 1, color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
   actionBtn: {

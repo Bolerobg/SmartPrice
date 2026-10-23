@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="ig" x1="0.1" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#fff1c2"/>
+      <stop offset="0.4" stop-color="#f2bb2a"/>
+      <stop offset="1" stop-color="#a86a00"/>
+    </linearGradient>
+    <radialGradient id="id" cx="0.5" cy="0.3" r="0.85">
+      <stop offset="0" stop-color="#0c8059"/>
+      <stop offset="1" stop-color="#03251d"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Златен пръстен + тъмнозелен диск: чете се и на 18 пиксела -->
+  <circle cx="32" cy="32" r="31" fill="url(#ig)"/>
+  <circle cx="32" cy="32" r="26.5" fill="url(#id)"/>
+  <path d="M18.5 32.5 L27.5 42 L46 21.5" fill="none" stroke="url(#ig)" stroke-width="8.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

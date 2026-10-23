@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
   Platform,
   RefreshControl,
@@ -18,6 +19,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { formatPostedAt } from '@/src/lib/format';
+import { VERIFIED_BADGE_ICON } from '@/src/lib/badges';
 import {
   api,
   businessOffers,
@@ -374,11 +376,16 @@ export default function BusinessDashboardScreen() {
                     ]}
                   >
                     <View style={styles.planHead}>
-                      <Ionicons
-                        name={b.plan_active ? 'checkmark-circle' : 'lock-open-outline'}
-                        size={16}
-                        color={b.plan_active ? COLORS.greenBright : COLORS.goldPrimary}
-                      />
+                      {b.plan_active ? (
+                        /* 🏅 Значката „Проверен търговец“ — същата като в приложението. */
+                        <Image
+                          source={{ uri: VERIFIED_BADGE_ICON }}
+                          style={styles.badgeMini}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <Ionicons name="lock-open-outline" size={16} color={COLORS.goldPrimary} />
+                      )}
                       <Text style={styles.planTitle}>
                         {b.plan_active ? 'План „Проверен търговец“ — активен' : 'Безплатен план'}
                       </Text>
@@ -710,6 +717,7 @@ const styles = StyleSheet.create({
   planFree: { backgroundColor: COLORS.goldSoftBg, borderColor: COLORS.goldBorder },
   planHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   planTitle: { color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '900' },
+  badgeMini: { width: 18, height: 18 },
   planText: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 6 },
   planLine: { color: COLORS.textSecondary, fontSize: 11.5, lineHeight: 17 },
   planBtns: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },

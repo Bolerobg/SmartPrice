@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="gold2" x1="0.1" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#fff1c2"/>
+      <stop offset="0.4" stop-color="#f2bb2a"/>
+      <stop offset="1" stop-color="#8f5c10"/>
+    </linearGradient>
+    <linearGradient id="body2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c8059"/>
+      <stop offset="0.6" stop-color="#065843"/>
+      <stop offset="1" stop-color="#03251d"/>
+    </linearGradient>
+    <clipPath id="ribbonClip"><rect x="12" y="176" width="232" height="34" rx="9"/></clipPath>
+  </defs>
+
+  <!-- Лъчи -->
+  <g fill="url(#gold2)" opacity="0.22">
+    <g id="ray"><path d="M0-120 L16-74 L-16-74Z"/></g>
+    <use href="#ray" transform="rotate(22.5 128 122)"/><use href="#ray" transform="rotate(45 128 122)"/>
+    <use href="#ray" transform="rotate(67.5 128 122)"/><use href="#ray" transform="rotate(90 128 122)"/>
+    <use href="#ray" transform="rotate(112.5 128 122)"/><use href="#ray" transform="rotate(135 128 122)"/>
+    <use href="#ray" transform="rotate(157.5 128 122)"/><use href="#ray" transform="rotate(180 128 122)"/>
+    <use href="#ray" transform="rotate(202.5 128 122)"/><use href="#ray" transform="rotate(225 128 122)"/>
+    <use href="#ray" transform="rotate(247.5 128 122)"/><use href="#ray" transform="rotate(270 128 122)"/>
+    <use href="#ray" transform="rotate(292.5 128 122)"/><use href="#ray" transform="rotate(315 128 122)"/>
+    <use href="#ray" transform="rotate(337.5 128 122)"/>
+  </g>
+
+  <!-- Щит -->
+  <path d="M128 10 L230 50 V124 C230 184 186 222 128 246 C70 222 26 184 26 124 V50 Z"
+        fill="url(#body2)" stroke="url(#gold2)" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M128 30 L212 64 V124 C212 174 176 206 128 226 C80 206 44 174 44 124 V64 Z"
+        fill="none" stroke="url(#gold2)" stroke-width="2" opacity="0.6"/>
+
+  <!-- Звезда -->
+  <path d="M128 42 l7 14.5 15.6 2.2 -11.3 11.2 2.7 15.6 -14-7.5 -14 7.5 2.7-15.6 -11.3-11.2 15.6-2.2Z" fill="url(#gold2)"/>
+
+  <!-- Отметка -->
+  <path d="M86 128 L115 158 L172 96" fill="none" stroke="url(#gold2)" stroke-width="17"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Лентичка (по-широка, за да се събере надписът) -->
+  <g clip-path="url(#ribbonClip)">
+    <rect x="12" y="176" width="232" height="34" rx="9" fill="url(#gold2)"/>
+    <rect x="12" y="176" width="232" height="11" rx="6" fill="#ffffff" opacity="0.22"/>
+  </g>
+  <text x="128" y="200" font-family="Arial Black, Arial, sans-serif" font-size="16.5" font-weight="900"
+        fill="#04301f" text-anchor="middle" letter-spacing="0">ПРОВЕРЕН ТЪРГОВЕЦ</text>
+</svg>

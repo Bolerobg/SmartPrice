@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
+import { VERIFIED_BADGE_SEAL } from '@/src/lib/badges';
 import { useAuth } from '@/src/auth/AuthContext';
 import {
   ApiError,
@@ -142,14 +143,13 @@ export default function BusinessRegisterScreen() {
           </View>
 
           <View style={[styles.card, ok ? styles.cardGreen : styles.cardGold]}>
-            <Ionicons
-              name={ok ? 'shield-checkmark' : 'time-outline'}
-              size={30}
-              color={ok ? COLORS.greenBright : COLORS.goldPrimary}
-            />
-            <Text style={styles.bigTitle}>
-              {ok ? '✅ Проверен търговец' : '⏳ Чака проверка'}
-            </Text>
+            {ok ? (
+              /* 🏅 Истинската значка — голяма, за да се види и запомни. */
+              <Image source={{ uri: VERIFIED_BADGE_SEAL }} style={styles.badgeHero} resizeMode="contain" />
+            ) : (
+              <Ionicons name="time-outline" size={30} color={COLORS.goldPrimary} />
+            )}
+            <Text style={styles.bigTitle}>{ok ? 'Проверен търговец' : '⏳ Чака проверка'}</Text>
             <Text style={styles.body}>{done.message}</Text>
             <Text style={styles.objLine}>
               🏪 {done.business.place_name}
@@ -408,6 +408,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.goldSoftBg ?? COLORS.bgCard,
   },
   bigTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '900' },
+  /** Значката „Проверен търговец“ — печатът с надписа. */
+  badgeHero: { width: 128, height: 128, marginBottom: 4 },
   body: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
   objLine: { color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '700' },
 });

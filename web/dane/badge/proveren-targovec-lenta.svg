@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 96" width="420" height="96">
+  <defs>
+    <linearGradient id="gp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffeaa6"/>
+      <stop offset="0.5" stop-color="#f0b41f"/>
+      <stop offset="1" stop-color="#a86a00"/>
+    </linearGradient>
+    <linearGradient id="pillbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b7a55"/>
+      <stop offset="1" stop-color="#03332a"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="3" y="3" width="414" height="90" rx="45" fill="url(#pillbg)" stroke="url(#gp)" stroke-width="4"/>
+  <rect x="11" y="11" width="398" height="74" rx="37" fill="none" stroke="#ffeaa6" stroke-width="1" opacity="0.45"/>
+
+  <!-- Мини медальон -->
+  <g transform="translate(52 48)">
+    <circle r="30" fill="url(#gp)"/>
+    <circle r="25" fill="#04362a"/>
+    <path d="M-13 1 L-4 11 L14-12" fill="none" stroke="url(#gp)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <text x="96" y="44" font-family="Arial Black, Arial, sans-serif" font-size="27" font-weight="900" fill="url(#gp)" letter-spacing="1">ПРОВЕРЕН</text>
+  <text x="96" y="76" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#ffd977" letter-spacing="4.5">ТЪРГОВЕЦ</text>
+</svg>
