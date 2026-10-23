@@ -27,6 +27,17 @@ import {
   sendWeeklyDigest,
   setDigestEnabled,
 } from '../lib/digest.js';
+import {
+  addLead,
+  deleteLead,
+  leadsBudget,
+  leadsCsv,
+  listLeads,
+  listSearchRuns,
+  refreshLeadFlags,
+  setLeadStatus,
+  startLeadsSearch,
+} from '../lib/leads.js';
 import { sendPushToAll } from '../lib/push.js';
 import {
   sendAccountDeletedEmail,
@@ -2031,6 +2042,147 @@ export default async function adminRoutes(app: FastifyInstance) {
       ip: req.ip,
     });
     return { ...res, message: `Пратено до ${res.sent} устройства (мъртви: ${res.gone}).` };
+  });
+
+  /* ================== 🧭 ОБИКОЛКИ — обекти извън приложението ==================
+   * Работен списък за терен: кои обекти НЕ са в SmartPrice, с телефон и адрес,
+   * плюс статус на посещението. Обектите се намират през Google Maps (Apify,
+   * харчи пари) — затова има оценка ПРЕДИ пускане и дневен лимит.
+   */
+
+  /** Списък + статистика. Преди връщане преизчислява кой вече е в приложението. */
+  app.get('/api/admin/leads', async (req) => {
+    await requireAdminPanel(req);
+    const q = z
+      .object({
+        status: z.string().trim().max(20).optional(),
+        city: z.string().trim().max(80).optional(),
+        q: z.string().trim().max(80).optional(),
+        onlyNotInApp: z.coerce.boolean().optional(),
+        onlyWithPhone: z.coerce.boolean().optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+      })
+      .parse(req.query ?? {});
+
+    // Автоматичните признаци се опресняват, за да не пращаме човек при
+    // обект, който вече е в приложението или вече е станал търговец.
+    const flags = await refreshLeadFlags();
+    const { items, stats } = await listLeads(q);
+    const budget = await leadsBudget(30);
+    return { items, stats, flags, budget };
+  });
+
+  /** Добавяне на обект на ръка (видян на улицата). */
+  app.post('/api/admin/leads', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        name: z.string().trim().min(2).max(200),
+        city: z.string().trim().max(80).optional(),
+        address: z.string().trim().max(300).optional(),
+        phone: z.string().trim().max(40).optional(),
+        website: z.string().trim().max(300).optional(),
+        category: z.string().trim().max(80).optional(),
+        note: z.string().trim().max(1000).optional(),
+        latitude: z.coerce.number().min(-90).max(90).optional(),
+        longitude: z.coerce.number().min(-180).max(180).optional(),
+        mapsUrl: z.string().trim().max(500).optional(),
+      })
+      .parse(req.body ?? {});
+
+    const lead = await addLead(input, admin.email);
+    await refreshLeadFlags();
+    await audit({
+      admin,
+      action: 'leads.add',
+      targetType: 'lead',
+      targetId: String(lead.id),
+      targetLabel: lead.name,
+      ip: req.ip,
+    });
+    return { lead, message: `„${lead.name}“ е в списъка за обиколки.` };
+  });
+
+  /** Смяна на статуса след посещение/обаждане. */
+  app.post('/api/admin/leads/status', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        id: z.coerce.number().int().positive(),
+        status: z.enum(['new', 'contacted', 'interested', 'refused', 'joined']),
+        note: z.string().trim().max(1000).optional(),
+      })
+      .parse(req.body ?? {});
+
+    const lead = await setLeadStatus(input.id, input.status, input.note);
+    if (!lead) throw notFound('Няма такъв обект в списъка.');
+    await audit({
+      admin,
+      action: 'leads.status',
+      targetType: 'lead',
+      targetId: String(lead.id),
+      targetLabel: `${lead.name} → ${lead.status}`,
+      ip: req.ip,
+    });
+    return { lead };
+  });
+
+  app.delete('/api/admin/leads/:id', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(req.params ?? {});
+    const ok = await deleteLead(id);
+    await audit({
+      admin,
+      action: 'leads.delete',
+      targetType: 'lead',
+      targetId: String(id),
+      ip: req.ip,
+    });
+    return { ok };
+  });
+
+  /** Търсене на нови обекти в Google Maps — харчи пари, затова е с оценка. */
+  app.post('/api/admin/leads/search', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const input = z
+      .object({
+        city: z.string().trim().min(2).max(80),
+        term: z.string().trim().min(2).max(80),
+        limit: z.coerce.number().int().min(1).max(120).default(30),
+      })
+      .parse(req.body ?? {});
+
+    const { run, budget, message } = await startLeadsSearch({ ...input, requestedBy: admin.email });
+    await audit({
+      admin,
+      action: 'leads.search',
+      targetType: 'leads_run',
+      targetId: String(run.id),
+      targetLabel: `${input.term} в ${input.city}`,
+      details: { estUsd: budget.estUsd, allowed: budget.allowed },
+      ip: req.ip,
+    });
+    return {
+      run,
+      budget,
+      message:
+        message ??
+        `Търсенето тръгна („${input.term}“ в ${input.city}, до ${input.limit} обекта). Отнема 1-3 минути — панелът ще покаже готовото.`,
+    };
+  });
+
+  /** История на търсенията (всяко е харчило пари — да се вижда). */
+  app.get('/api/admin/leads/runs', async (req) => {
+    await requireAdminPanel(req);
+    const runs = await listSearchRuns(10);
+    const budget = await leadsBudget(30);
+    return { runs, budget };
+  });
+
+  /** CSV за разпечатване (връщаме го като текст — панелът го сваля). */
+  app.get('/api/admin/leads.csv', async (req) => {
+    await requireAdminPanel(req);
+    return { csv: await leadsCsv() };
   });
 
 }

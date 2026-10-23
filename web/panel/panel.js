@@ -238,6 +238,7 @@ const PAGES = {
   favorites: ['Любими', 'Кои оферти хората пазят най-често'],
   businesses: ['Бизнеси', 'Заявки „това е моят обект“: проверка, абонамент, официални отговори'],
   digest: ['Известия', 'Седмичен дайджест „находки в твоя град“ + ръчно известие до всички'],
+  obykolki: ['Обиколки', 'Обекти извън приложението: търсене в Google Maps, статус на посещенията, готов текст за разговор'],
   security: ['Сигурност', 'Ненормална активност и аларми по имейл'],
   emails: ['Имейли', 'Изпратени писма и ръчно писмо до потребител'],
   audit: ['Дневник', 'Всяко действие на админ — кой, какво, кога'],
@@ -331,6 +332,7 @@ async function render(page, force = false) {
     if (page === 'favorites') return await renderFavorites(box, force);
     if (page === 'businesses') return await renderBusinesses(box, force);
     if (page === 'digest') return await renderDigest(box, force);
+    if (page === 'obykolki') return await renderObykolki(box, force);
     if (page === 'security') return await renderSecurity(box, force);
     if (page === 'emails') return await renderEmails(box, force);
     if (page === 'audit') return await renderAudit(box, force);
@@ -4782,6 +4784,283 @@ async function renderBusinesses(box, force = false) {
 }
 
 /* ---------------------------------------------------------- известия */
+
+/* ------------------------------------------- 🧭 Обиколки по обекти */
+
+/** Как се показва всеки статус на обиколката. */
+const LEAD_STATUS = {
+  new: { label: '🆕 нов', cls: 'pill-dim' },
+  contacted: { label: '📞 посетен', cls: 'pill-gold' },
+  interested: { label: '🤝 интересува се', cls: 'pill-cyan' },
+  refused: { label: '❌ отказа', cls: 'pill-red' },
+  joined: { label: '🎉 включен', cls: 'pill-green' },
+};
+
+/**
+ * Готовият текст за разговор/съобщение.
+ *
+ * Защо е в панела, а не наизуст: човекът отива на място и трябва да каже точното
+ * нещо, без да се сеща. Името на обекта се попълва само.
+ */
+function pitchFor(lead) {
+  const where = lead.city ? ` (${lead.city})` : '';
+  return (
+    'Здравейте! Пиша ви за SmartPrice — приложението, в което хората качват цени и сигнали за обекти (smartprice.bg).\n\n' +
+    `Видях обекта ви — ${lead.name}${where}. Исках да ви предложа нещо, което е безплатно за начало:\n\n` +
+    '✅ значка „Проверен търговец“ — хората виждат, че сте коректен\n' +
+    '💬 право на официален отговор под всеки сигнал — да чуят и вашата страна\n' +
+    '🏷️ възможност да пускате оферти в обекта си\n' +
+    '📊 статистика колко души гледат обекта ви\n\n' +
+    'Първият официален отговор на месец е безплатен, пълният план е 19 €/мес.\n' +
+    'Заявката е 3 минути, с ЕИК: smartprice.bg/business/register\n\n' +
+    'Кажете „да“ и ще ви покажа с 2-3 снимки как става.'
+  );
+}
+
+/**
+ * 🧭 Обиколки — работният списък за терен.
+ *
+ * Показва кои обекти около даден град ГИ НЯМА в приложението, с телефон и адрес,
+ * за да се отиде при тях, и пази статуса на посещението. Обектите се намират през
+ * Google Maps (Apify) — това харчи пари, затова оценката се показва преди пускане.
+ */
+async function renderObykolki(box, force = false) {
+  const f = cache.leadFilters || (cache.leadFilters = { status: 'all', city: '', q: '', onlyNotInApp: true, onlyWithPhone: false });
+  const params = new URLSearchParams({ status: f.status, limit: '300' });
+  if (f.city) params.set('city', f.city);
+  if (f.q) params.set('q', f.q);
+  if (f.onlyNotInApp) params.set('onlyNotInApp', 'true');
+  if (f.onlyWithPhone) params.set('onlyWithPhone', 'true');
+
+  const d = await api('/leads?' + params.toString());
+  const runs = await api('/leads/runs');
+  const s = d.stats;
+  const b = d.budget || {};
+  const running = (runs.runs || []).find((r) => r.status === 'running');
+
+  box.innerHTML = `
+    <div class="grid grid-5" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Обекти в списъка</div><div class="kpi-value">${num(s.total)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Непосетени</div><div class="kpi-value cyan">${num(s.byStatus.new)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Интересуват се</div><div class="kpi-value gold">${num(s.byStatus.interested)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Станали търговци</div><div class="kpi-value green">${num(s.byStatus.joined)}</div></div>
+      <div class="card kpi"><div class="kpi-label">С телефон</div><div class="kpi-value">${num(s.withPhone)}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">🔎 Намери нови обекти в Google Maps</div>
+      <div class="toolbar" style="margin-bottom:10px">
+        <input id="ld-city" placeholder="Град (напр. Пловдив)" maxlength="60" style="width:170px" />
+        <input id="ld-term" placeholder="Какво търсим (аптека, кафене, сервиз…)" maxlength="60" style="width:250px" />
+        <select id="ld-limit">
+          <option value="10">10 обекта</option>
+          <option value="20">20 обекта</option>
+          <option value="30" selected>30 обекта</option>
+          <option value="60">60 обекта</option>
+        </select>
+        <button class="btn btn-primary" id="ld-search">Търси</button>
+      </div>
+      <div class="hint">
+        Търсенето върви <strong>във фона</strong> (1-3 минути) и <strong>харчи пари</strong> в Apify —
+        около <strong>$0.012 на обект</strong>. Днес похарчени: <strong>$${Number(b.today ?? 0).toFixed(2)}</strong>
+        от дневен лимит <strong>$${Number(b.limitUsd ?? 0).toFixed(2)}</strong>.
+        ${running ? `<br><span class="pill pill-gold">⏳ тече търсене „${esc(running.term)}“ в ${esc(running.city)} — ще се появи само</span>` : ''}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">➕ Добави обект на ръка (видян на улицата)</div>
+      <div class="toolbar" style="margin-bottom:10px">
+        <input id="ldn-name" placeholder="Име на обекта *" maxlength="120" style="width:220px" />
+        <input id="ldn-city" placeholder="Град" maxlength="60" style="width:120px" />
+        <input id="ldn-addr" placeholder="Адрес" maxlength="200" style="width:200px" />
+        <input id="ldn-phone" placeholder="Телефон" maxlength="30" style="width:140px" />
+        <input id="ldn-note" placeholder="Бележка" maxlength="400" class="grow" />
+        <button class="btn" id="ldn-add">Добави</button>
+      </div>
+      <div class="hint">Полезно, ако го виждаш на място, но го няма в Google. Обект, който вече е в приложението, се отбелязва сам — няма да ходиш напразно.</div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="toolbar">
+        <select id="ld-fstatus">
+          <option value="all"${f.status === 'all' ? ' selected' : ''}>Всички статуси</option>
+          ${Object.entries(LEAD_STATUS).map(([k, v]) => `<option value="${k}"${f.status === k ? ' selected' : ''}>${v.label}</option>`).join('')}
+        </select>
+        <input id="ld-fcity" placeholder="Град" value="${esc(f.city)}" maxlength="60" style="width:130px" />
+        <input id="ld-fq" placeholder="Търси по име или адрес" value="${esc(f.q)}" class="grow" />
+        <label class="hint" style="display:flex;gap:6px;align-items:center">
+          <input type="checkbox" id="ld-noapp" ${f.onlyNotInApp ? 'checked' : ''} /> само тези, които ги няма в приложението
+        </label>
+        <label class="hint" style="display:flex;gap:6px;align-items:center">
+          <input type="checkbox" id="ld-phone" ${f.onlyWithPhone ? 'checked' : ''} /> само с телефон
+        </label>
+        <button class="btn" id="ld-csv">⬇️ CSV за печат</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🧭 Списък за обиколка (${num(d.items.length)})</div>
+      ${
+        d.items.length
+          ? `<div class="table-wrap"><table>
+              <thead><tr><th>Обект</th><th>Град</th><th>Връзка</th><th>Рейтинг</th><th>Статус</th><th>Бележка</th><th></th></tr></thead>
+              <tbody>
+                ${d.items
+                  .map((l) => {
+                    const tel = (l.phone || '').replace(/[^\d+]/g, '');
+                    const viber = tel ? `viber://chat?number=${encodeURIComponent(tel.startsWith('+') ? tel : '+' + tel)}` : '';
+                    return `<tr>
+                      <td>
+                        <strong>${esc(l.name)}</strong>
+                        ${l.inApp ? '<div><span class="pill pill-green" title="вече има сигнал в приложението">вече в приложението</span></div>' : ''}
+                        ${l.address ? `<div class="dim">${esc(l.address)}</div>` : ''}
+                      </td>
+                      <td>${esc(l.city || '—')}</td>
+                      <td>
+                        ${l.phone ? `<a href="tel:${esc(tel)}">${esc(l.phone)}</a>` : '<span class="dim">няма телефон</span>'}
+                        ${viber ? `<div><a href="${viber}" class="dim">Viber</a></div>` : ''}
+                      </td>
+                      <td>${l.rating != null ? `${Number(l.rating).toFixed(1)} <span class="dim">(${num(l.reviewsCount || 0)})</span>` : '<span class="dim">—</span>'}</td>
+                      <td>
+                        <select class="lead-status" data-id="${l.id}">
+                          ${Object.entries(LEAD_STATUS).map(([k, v]) => `<option value="${k}"${l.status === k ? ' selected' : ''}>${v.label}</option>`).join('')}
+                        </select>
+                      </td>
+                      <td><input class="lead-note" data-id="${l.id}" value="${esc(l.note)}" placeholder="какво каза" maxlength="400" style="width:170px" /></td>
+                      <td style="white-space:nowrap">
+                        <button class="btn btn-sm lead-pitch" data-id="${l.id}" title="Готовият текст за разговор">💬 Пича</button>
+                        ${l.mapsUrl ? `<a class="btn btn-sm" href="${esc(l.mapsUrl)}" target="_blank" rel="noopener" title="Отвори в Google Maps">🗺️</a>` : ''}
+                        <button class="btn btn-sm btn-danger lead-del" data-id="${l.id}" title="Махни от списъка">🗑️</button>
+                      </td>
+                    </tr>`;
+                  })
+                  .join('')}
+              </tbody></table></div>`
+          : '<div class="empty">Още няма обекти. Пусни търсене по град и термин (напр. „аптека“ в Пловдив) или добави обект на ръка.</div>'
+      }
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">📜 Последни търсения (всяко е харчило пари)</div>
+      ${
+        (runs.runs || []).length
+          ? `<div class="table-wrap"><table><thead><tr><th>Кога</th><th>Търсене</th><th>Намерени</th><th>Записани</th><th>Похарчено</th><th>Състояние</th></tr></thead><tbody>
+              ${(runs.runs || [])
+                .map(
+                  (r) => `<tr>
+                    <td>${dt(r.startedAt)}</td>
+                    <td>„${esc(r.term)}“ в ${esc(r.city)} <span class="dim">(до ${num(r.limitCount)})</span></td>
+                    <td>${num(r.found)}</td>
+                    <td>${num(r.added)}</td>
+                    <td>${r.realUsd != null ? '$' + Number(r.realUsd).toFixed(3) : r.estUsd != null ? '~$' + Number(r.estUsd).toFixed(3) : '—'}</td>
+                    <td><span class="pill ${r.status === 'done' ? 'pill-green' : r.status === 'running' ? 'pill-gold' : 'pill-red'}">${r.status === 'done' ? 'готово' : r.status === 'running' ? 'тече' : 'провал'}</span>
+                      ${r.note ? `<div class="dim">${esc(r.note)}</div>` : ''}</td>
+                  </tr>`
+                )
+                .join('')}
+            </tbody></table></div>`
+          : '<div class="empty">Още нищо не е търсено.</div>'
+      }
+    </div>
+  `;
+
+  const reload = () => renderObykolki(box, true);
+
+  $('#ld-fstatus').onchange = (e) => { f.status = e.target.value; reload(); };
+  $('#ld-fcity').onchange = (e) => { f.city = e.target.value.trim(); reload(); };
+  $('#ld-fq').onchange = (e) => { f.q = e.target.value.trim(); reload(); };
+  $('#ld-noapp').onchange = (e) => { f.onlyNotInApp = e.target.checked; reload(); };
+  $('#ld-phone').onchange = (e) => { f.onlyWithPhone = e.target.checked; reload(); };
+
+  $('#ld-search').onclick = async () => {
+    const city = $('#ld-city').value.trim();
+    const term = $('#ld-term').value.trim();
+    const limit = Number($('#ld-limit').value);
+    if (city.length < 2 || term.length < 2) { toast('Напиши град и какво търсим.', 'warn'); return; }
+    const est = (limit * 0.012).toFixed(2);
+    if (!confirm(`Търсене „${term}“ в ${city} — до ${limit} обекта.\n\nЩе похарчи ~$${est} в Apify. Да продължа?`)) return;
+    $('#ld-search').disabled = true;
+    try {
+      const r = await api('/leads/search', { method: 'POST', body: { city, term, limit } });
+      toast(r.message || 'Търсенето тръгна.', 'ok');
+      setTimeout(reload, 12000);
+    } catch (e) {
+      toast(e.message, 'error');
+      $('#ld-search').disabled = false;
+    }
+  };
+
+  $('#ldn-add').onclick = async () => {
+    const name = $('#ldn-name').value.trim();
+    if (name.length < 2) { toast('Напиши име на обекта.', 'warn'); return; }
+    try {
+      const r = await api('/leads', { method: 'POST', body: {
+        name,
+        city: $('#ldn-city').value.trim(),
+        address: $('#ldn-addr').value.trim(),
+        phone: $('#ldn-phone').value.trim(),
+        note: $('#ldn-note').value.trim(),
+      } });
+      toast(r.message || 'Добавен.', 'ok');
+      reload();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
+  box.querySelectorAll('.lead-status').forEach((el) => {
+    el.onchange = async () => {
+      try { await api('/leads/status', { method: 'POST', body: { id: Number(el.dataset.id), status: el.value } }); reload(); }
+      catch (e) { toast(e.message, 'error'); }
+    };
+  });
+
+  box.querySelectorAll('.lead-note').forEach((el) => {
+    el.onblur = async () => {
+      const row = $(`.lead-status[data-id="${el.dataset.id}"]`);
+      try {
+        await api('/leads/status', { method: 'POST', body: { id: Number(el.dataset.id), status: row ? row.value : 'new', note: el.value.trim() } });
+        toast('Бележката е записана.', 'ok');
+      } catch (e) { toast(e.message, 'error'); }
+    };
+  });
+
+  box.querySelectorAll('.lead-pitch').forEach((el) => {
+    el.onclick = async () => {
+      const lead = d.items.find((x) => String(x.id) === el.dataset.id);
+      if (!lead) return;
+      const text = pitchFor(lead);
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Текстът е копиран — само го постави в Viber/Facebook.', 'ok');
+      } catch {
+        alert(text);
+      }
+    };
+  });
+
+  box.querySelectorAll('.lead-del').forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm('Да го махна ли от списъка за обиколки?')) return;
+      try { await api('/leads/' + el.dataset.id, { method: 'DELETE' }); reload(); }
+      catch (e) { toast(e.message, 'error'); }
+    };
+  });
+
+  $('#ld-csv').onclick = async () => {
+    try {
+      const r = await api('/leads.csv');
+      const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'obikolki.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
+  // Ако търсенето още тече — проверяваме пак след малко (във фона е).
+  if (running) setTimeout(() => { if (state.page === 'obykolki') reload(); }, 15000);
+}
 
 /**
  * 📨 Известия — седмичният дайджест и ръчните съобщения.
