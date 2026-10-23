@@ -236,6 +236,7 @@ const PAGES = {
   fb_receipts: ['Фейсбук бележки', 'Сваляне на касови бележки и постове от публични Facebook групи с AI разчитане и одобрение'],
   referrals: ['Покани', 'Кой кого е поканил и кой е получил точки'],
   favorites: ['Любими', 'Кои оферти хората пазят най-често'],
+  businesses: ['Бизнеси', 'Заявки „това е моят обект“: проверка, абонамент, официални отговори'],
   security: ['Сигурност', 'Ненормална активност и аларми по имейл'],
   emails: ['Имейли', 'Изпратени писма и ръчно писмо до потребител'],
   audit: ['Дневник', 'Всяко действие на админ — кой, какво, кога'],
@@ -327,6 +328,7 @@ async function render(page, force = false) {
     if (page === 'fb_receipts') return await renderFbReceipts(box, force);
     if (page === 'referrals') return await renderReferrals(box, force);
     if (page === 'favorites') return await renderFavorites(box, force);
+    if (page === 'businesses') return await renderBusinesses(box, force);
     if (page === 'security') return await renderSecurity(box, force);
     if (page === 'emails') return await renderEmails(box, force);
     if (page === 'audit') return await renderAudit(box, force);
@@ -4575,6 +4577,205 @@ async function renderReferrals(box) {
         </tbody></table></div>
       </div>
     </div>`;
+}
+
+/* ---------------------------------------------------------- бизнеси */
+
+/**
+ * 🏢 „Търговец в SmartPrice“ — проверката на търговци.
+ *
+ * Защо е човешко решение: ЕИК може да съвпадне с касова бележка (тогава
+ * системата одобрява сама и тук има зелена отметка „автоматично“), но всичко
+ * останало трябва да мине през очи. Един обект може да има само един проверен
+ * търговец — затова одобрението казва изрично, ако вече има друг.
+ */
+const BIZ_STATUS = {
+  pending: ['⏳ Чака проверка', 'pill-gold'],
+  verified: ['✅ Проверен', 'pill-green'],
+  rejected: ['❌ Отхвърлен', 'pill-red'],
+};
+
+async function renderBusinesses(box, force = false) {
+  const status = (cache.bizStatus = force ? cache.bizStatus || 'pending' : cache.bizStatus || 'pending');
+  const q = cache.bizQuery || '';
+  const data = await api(
+    `/businesses?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}&limit=100`
+  );
+  const items = data.items || [];
+  const s = data.summary || {};
+
+  box.innerHTML = `
+    <div class="grid grid-4" style="margin-bottom:14px">
+      <div class="card kpi"><div class="kpi-label">Всички заявки</div><div class="kpi-value">${num(s.total)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Чакат проверка</div><div class="kpi-value gold">${num(s.pending)}</div></div>
+      <div class="card kpi"><div class="kpi-label">Проверени търговци</div><div class="kpi-value green">${num(s.verified)}</div></div>
+      <div class="card kpi"><div class="kpi-label">С платен абонамент</div><div class="kpi-value cyan">${num(s.paid)}</div></div>
+    </div>
+
+    <div class="toolbar">
+      <select class="grow" id="biz-status">
+        ${[
+          ['pending', '⏳ Чакащи проверка'],
+          ['verified', '✅ Проверени'],
+          ['rejected', '❌ Отхвърлени'],
+          ['all', 'Всички заявки'],
+        ]
+          .map(([v, label]) => `<option value="${v}"${v === status ? ' selected' : ''}>${label}</option>`)
+          .join('')}
+      </select>
+      <input class="grow" id="biz-q" placeholder="Търси по обект, фирма, ЕИК или имейл…" value="${esc(q)}" />
+      <button class="btn" id="biz-search">Търси</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🏢 Заявки „това е моят обект“ (${num(items.length)})</div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Обект</th><th>Фирма / ЕИК</th><th>Собственик</th><th>Статус</th><th>План</th><th></th>
+        </tr></thead>
+        <tbody>
+        ${
+          items.length
+            ? items
+                .map((b) => {
+                  const st = BIZ_STATUS[b.status] || ['?', 'pill-dim'];
+                  const paid = b.paid_until && new Date(b.paid_until).getTime() > Date.now();
+                  return `<tr>
+              <td>${esc(b.place_name)}<div class="dim">${esc(b.city || '—')} · ${num(b.signals_count)} сигнала</div></td>
+              <td>${esc(b.legal_name)}<div class="dim">ЕИК: ${esc(b.tax_id || '—')}</div>
+                  ${b.proof_url ? `<div><a class="dim" href="${esc(b.proof_url)}" target="_blank">📎 доказателство</a></div>` : ''}</td>
+              <td>${esc(b.owner_name || '—')}<div class="dim">${esc(b.owner_email || '')}</div>
+                  <div class="dim">${esc(b.contact_email)}${b.contact_phone ? ' · ' + esc(b.contact_phone) : ''}</div></td>
+              <td><span class="pill ${st[1]}">${st[0]}</span>
+                  ${b.auto_approved ? '<div class="dim">одобрено автоматично по ЕИК</div>' : ''}
+                  ${b.reject_reason ? `<div class="dim">${esc(b.reject_reason)}</div>` : ''}
+                  <div class="dim">${num(b.replies_count)} официални отговора</div></td>
+              <td>${paid ? `<span class="pill pill-green">💰 до ${dt(b.paid_until)}</span>` : '<span class="pill pill-dim">без абонамент</span>'}</td>
+              <td style="white-space:nowrap">
+                ${b.status !== 'verified' ? `<button class="btn btn-sm" data-b-approve="${b.id}">✅ Одобри</button>` : ''}
+                ${b.status !== 'rejected' ? `<button class="btn btn-sm btn-danger" data-b-reject="${b.id}">✕ Отхвърли</button>` : ''}
+                <button class="btn btn-sm" data-b-plan="${b.id}">💰 План</button>
+                <button class="btn btn-sm" data-b-replies="${b.id}">💬 Отговори</button>
+                <button class="btn btn-sm btn-danger" data-b-del="${b.id}" title="Маха заявката напълно">🗑</button>
+              </td>
+            </tr>`;
+                })
+                .join('')
+            : '<tr><td colspan="6" class="empty">Няма заявки с този филтър</td></tr>'
+        }
+        </tbody></table></div>
+      <div class="hint" style="margin-top:10px">
+        Провереният търговец получава значка „✅ Проверен търговец“ на страницата на обекта и
+        право на ЕДИН официален отговор под всеки сигнал за своя обект. Един обект може да има
+        само един проверен търговец. Абонаментът засега се води ръчно оттук (бутон „💰 План“) —
+        плащането през Stripe идва във Фаза 2.
+      </div>
+    </div>`;
+
+  const sel = $('#biz-status');
+  sel.onchange = (e) => {
+    cache.bizStatus = e.target.value;
+    render('businesses', false);
+  };
+  const doSearch = () => {
+    cache.bizQuery = $('#biz-q').value.trim();
+    render('businesses', false);
+  };
+  $('#biz-search').onclick = doSearch;
+  $('#biz-q').onkeydown = (e) => {
+    if (e.key === 'Enter') doSearch();
+  };
+
+  box.querySelectorAll('[data-b-approve]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Да одобря този търговец? Обектът ще получи значка „Проверен търговец“.')) return;
+      try {
+        const res = await api(`/businesses/${btn.dataset.bApprove}/approve`, { method: 'POST' });
+        toast(res.message || 'Одобрен');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+      render('businesses', true);
+    });
+  });
+
+  box.querySelectorAll('[data-b-reject]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const reason = prompt('Причина за отхвърлянето (ще я види търговецът):', '');
+      if (reason === null) return;
+      if (!reason.trim()) {
+        toast('Нужна е причина', 'error');
+        return;
+      }
+      try {
+        await api(`/businesses/${btn.dataset.bReject}/reject`, {
+          method: 'POST',
+          body: { reason: reason.trim() },
+        });
+        toast('Отхвърлено');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+      render('businesses', true);
+    });
+  });
+
+  box.querySelectorAll('[data-b-plan]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const monthsRaw = prompt(
+        'За колко месеца да е платен абонаментът?\n(0 = без абонамент / спиране)',
+        '1'
+      );
+      if (monthsRaw === null) return;
+      const months = Math.max(0, Math.min(60, Number(monthsRaw) || 0));
+      try {
+        await api(`/businesses/${btn.dataset.bPlan}/plan`, {
+          method: 'POST',
+          body: { tier: months > 0 ? 'verified' : 'free', months },
+        });
+        toast(months > 0 ? `Платен абонамент за ${months} мес.` : 'Абонаментът е спрян');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+      render('businesses', true);
+    });
+  });
+
+  box.querySelectorAll('[data-b-replies]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        const res = await api(`/businesses/${btn.dataset.bReplies}/replies`);
+        const list = res.items || [];
+        if (!list.length) {
+          alert('Този търговец още не е писал официален отговор.');
+          return;
+        }
+        alert(
+          list
+            .map(
+              (r) =>
+                `[${dt(r.created_at)}] ${r.post_title || ''} (${r.place_name}${r.city ? ', ' + r.city : ''})\n${r.body}`
+            )
+            .join('\n\n———\n\n')
+        );
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    });
+  });
+
+  box.querySelectorAll('[data-b-del]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Да махна заявката напълно? Това не може да се върне.')) return;
+      try {
+        await api(`/businesses/${btn.dataset.bDel}`, { method: 'DELETE' });
+        toast('Заявката е изтрита');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+      render('businesses', true);
+    });
+  });
 }
 
 /* ----------------------------------------------------------- любими */

@@ -263,6 +263,17 @@ export default function PlaceOffersScreen() {
                 ) : null}
               </View>
 
+              {/* 🏢 Провереният търговец — значката, която казва „това е собственик,
+                  който отговаря лично“, а не още един анонимен профил. */}
+              {detail?.business?.verified ? (
+                <View style={styles.bizRow}>
+                  <Ionicons name="shield-checkmark" size={14} color={COLORS.greenBright} />
+                  <Text style={styles.bizText} numberOfLines={2}>
+                    ✅ Проверен търговец: {detail.business.legal_name}
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={styles.actionsRow}>
                 <TouchableOpacity
                   style={styles.actionBtn}
@@ -287,6 +298,27 @@ export default function PlaceOffersScreen() {
                     <Ionicons name="stats-chart-outline" size={14} color={COLORS.accentCyan} />
                     <Text style={[styles.actionText, { color: COLORS.accentCyan }]}>
                       Статистика и цени
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {/* 🏢 „Това е моят бизнес“ — входът за търговеца. Показва се само
+                    когато обектът още няма проверен собственик, за да не подканваме
+                    хората да заявяват чужд обект. */}
+                {slug && !detail?.business?.verified ? (
+                  <TouchableOpacity
+                    style={styles.actionGhost}
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      router.push(
+                        `/business/register?slug=${slug}&name=${encodeURIComponent(
+                          placeName
+                        )}&city=${encodeURIComponent(city)}` as never
+                      )
+                    }
+                  >
+                    <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
+                    <Text style={[styles.actionText, { color: COLORS.textPrimary }]}>
+                      Това е моят бизнес
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -417,6 +449,8 @@ const styles = StyleSheet.create({
   pillRed: { backgroundColor: COLORS.redSoftBg, borderColor: COLORS.redBorder },
   pillGold: { backgroundColor: COLORS.goldSoftBg, borderColor: COLORS.goldBorder },
   pillText: { color: COLORS.textPrimary, fontSize: 11.5, fontWeight: '800' },
+  bizRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
+  bizText: { flex: 1, color: COLORS.textPrimary, fontSize: 12.5, fontWeight: '800' },
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
   actionBtn: {
     flexDirection: 'row',

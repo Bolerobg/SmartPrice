@@ -1766,6 +1766,184 @@ export default async function adminRoutes(app: FastifyInstance) {
     return res;
   });
 
+  /* ------------------------------------------------- 🏢 Бизнеси („Търговец в SmartPrice“)
+   * Проверката на търговци е човешко решение: ЕИК може да съвпадне с касова
+   * бележка (тогава системата одобрява сама), но всичко останало минава оттук.
+   * Оттук се пуска и абонаментът (ръчно, докато не влезе плащането през Stripe).
+   */
+
+  app.get('/api/admin/businesses', async (req) => {
+    await requireAdminPanel(req);
+    const q = z
+      .object({
+        status: z.enum(['pending', 'verified', 'rejected', 'all']).default('pending'),
+        q: z.string().trim().max(80).optional(),
+        ...paging,
+      })
+      .parse(req.query ?? {});
+
+    const like2 = q.q ? like(q.q) : null;
+    const [rows, summary] = await Promise.all([
+      many<Record<string, unknown>>(
+        `select b.id, b.venue_slug, b.place_name, b.city, b.legal_name, b.tax_id,
+                b.contact_email, b.contact_phone, b.proof_url, b.status, b.tier,
+                b.paid_until, b.auto_approved, b.reject_reason, b.created_at, b.reviewed_at,
+                p.email as owner_email, p.name as owner_name,
+                (select count(*)::int from business_replies br where br.business_id = b.id) as replies_count,
+                (select count(*)::int from posts po
+                  where po.status = 'published'
+                    and md5(lower(btrim(po.place_name)) || '|' || lower(btrim(po.city))) = b.venue_slug) as signals_count
+           from business_accounts b
+           left join profiles p on p.id = b.owner_user_id
+          where ($1 = 'all' or b.status = $1)
+            and ($2::text is null
+                 or b.place_name ilike $2 or b.city ilike $2
+                 or b.legal_name ilike $2 or b.tax_id ilike $2 or b.contact_email ilike $2)
+          order by (b.status = 'pending') desc, b.created_at desc
+          limit $3 offset $4`,
+        [q.status, like2, q.limit, q.offset]
+      ),
+      one<Record<string, unknown>>(
+        `select count(*)::int as total,
+                count(*) filter (where status = 'pending')::int  as pending,
+                count(*) filter (where status = 'verified')::int as verified,
+                count(*) filter (where status = 'rejected')::int as rejected,
+                count(*) filter (where status = 'verified' and paid_until > now())::int as paid
+           from business_accounts`
+      ),
+    ]);
+    return { items: rows, summary };
+  });
+
+  app.post('/api/admin/businesses/:id/approve', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { id } = z.object({ id: z.string().regex(/^\d+$/) }).parse(req.params);
+    const before = await one<Record<string, unknown>>(
+      'select id, place_name, legal_name, status from business_accounts where id = $1',
+      [id]
+    );
+    if (!before) throw notFound('Няма такава заявка.');
+
+    await query(
+      `update business_accounts
+          set status = 'verified', reject_reason = null,
+              reviewed_at = now(), reviewed_by = $2, updated_at = now()
+        where id = $1`,
+      [id, admin.email]
+    );
+    await audit({
+      admin,
+      action: 'business.approve',
+      targetType: 'business',
+      targetId: id,
+      targetLabel: String(before.legal_name ?? ''),
+      details: { place: before.place_name, was: before.status },
+      ip: req.ip,
+    });
+    return { ok: true, message: `„${before.legal_name}“ вече е Проверен търговец.` };
+  });
+
+  app.post('/api/admin/businesses/:id/reject', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { id } = z.object({ id: z.string().regex(/^\d+$/) }).parse(req.params);
+    const input = z.object({ reason: z.string().trim().min(3).max(300) }).parse(req.body ?? {});
+
+    const before = await one<Record<string, unknown>>(
+      'select id, legal_name from business_accounts where id = $1',
+      [id]
+    );
+    if (!before) throw notFound('Няма такава заявка.');
+
+    await query(
+      `update business_accounts
+          set status = 'rejected', reject_reason = $2,
+              reviewed_at = now(), reviewed_by = $3, updated_at = now()
+        where id = $1`,
+      [id, input.reason, admin.email]
+    );
+    await audit({
+      admin,
+      action: 'business.reject',
+      targetType: 'business',
+      targetId: id,
+      targetLabel: String(before.legal_name ?? ''),
+      details: { reason: input.reason },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  /** Абонаментът се води ръчно, докато не влезе Stripe (Фаза 2). */
+  app.post('/api/admin/businesses/:id/plan', async (req) => {
+    const admin = await requireAdminPanel(req);
+    const { id } = z.object({ id: z.string().regex(/^\d+$/) }).parse(req.params);
+    const input = z
+      .object({
+        tier: z.enum(['free', 'verified']),
+        months: z.coerce.number().int().min(0).max(60).default(0),
+      })
+      .parse(req.body ?? {});
+
+    const paidUntil =
+      input.tier === 'verified' && input.months > 0
+        ? `now() + interval '${input.months} month'` // брой месеци е валидиран цяло число
+        : 'null';
+
+    await query(
+      `update business_accounts
+          set tier = $2, paid_until = ${paidUntil}, updated_at = now()
+        where id = $1`,
+      [id, input.tier]
+    );
+    await audit({
+      admin,
+      action: 'business.plan',
+      targetType: 'business',
+      targetId: id,
+      details: { tier: input.tier, months: input.months },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  /** Официалните отговори на един търговец (за преглед от екипа). */
+  app.get('/api/admin/businesses/:id/replies', async (req) => {
+    await requireAdminPanel(req);
+    const { id } = z.object({ id: z.string().regex(/^\d+$/) }).parse(req.params);
+    const rows = await many<Record<string, unknown>>(
+      `select br.id, br.body, br.created_at, br.post_id::text,
+              po.title as post_title, po.place_name, po.city
+         from business_replies br
+         join posts po on po.id = br.post_id
+        where br.business_id = $1
+        order by br.created_at desc limit 50`,
+      [id]
+    );
+    return { items: rows };
+  });
+
+  /** Маха бизнес профила (например заявка, пусната за чужда фирма). */
+  app.delete('/api/admin/businesses/:id', async (req) => {
+    const admin = await requireFullAdmin(req);
+    const { id } = z.object({ id: z.string().regex(/^\d+$/) }).parse(req.params);
+    const before = await one<Record<string, unknown>>(
+      'select id, legal_name, place_name from business_accounts where id = $1',
+      [id]
+    );
+    if (!before) throw notFound('Няма такава заявка.');
+    await query('delete from business_accounts where id = $1', [id]);
+    await audit({
+      admin,
+      action: 'business.delete',
+      targetType: 'business',
+      targetId: id,
+      targetLabel: String(before.legal_name ?? ''),
+      details: { place: before.place_name },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
 }
 
 /** Помощна: взима IP-то от заявката (ползва се в одита). */

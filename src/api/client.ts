@@ -1509,6 +1509,8 @@ export interface ObjectDetail {
   }>;
   /** Google Maps: рейтинг, отзиви, работно време. Може да липсва. */
   place?: ObjectPlace | null;
+  /** 🏢 Провереният търговец на обекта (значка „✅ Проверен търговец“). */
+  business?: BusinessPublic | null;
   signals: ObjectSignal[];
   history: Array<{ id: string; price: number; title: string; created_at: string; polarity: string; image_url: string }>;
   months: Array<{ month: string; avg_price: number; min_price: number; max_price: number; posts: number }>;
@@ -1600,4 +1602,114 @@ export async function bestValueCategories(): Promise<{
   return rawRequest<{ items: BestValueCategory[]; rule?: BestValueRule }>(
     '/api/objects/best-value'
   );
+}
+
+/* ================= 🏢 „Търговец в SmartPrice“ (втората страна) =================
+ * Досега само потребителите имаха глас. Тук търговецът заявява „това е моят
+ * обект“, доказва го с ЕИК (ако ЕИК съвпадне с касова бележка от същия обект,
+ * одобрението е моментално) и получава право на ОФИЦИАЛЕН отговор под
+ * сигналите за неговия обект.
+ */
+
+export interface BusinessPublic {
+  id: string;
+  venue_slug: string;
+  place_name: string;
+  city: string | null;
+  legal_name: string;
+  /** ✅ Проверен търговец (одобрен от екипа или автоматично по ЕИК). */
+  verified: boolean;
+  tier: 'free' | 'verified';
+  paid_until: string | null;
+  /** Има ли право да пише официални отговори точно сега. */
+  can_reply: boolean;
+}
+
+export interface BusinessMine extends BusinessPublic {
+  status: 'pending' | 'verified' | 'rejected';
+  tax_id: string | null;
+  contact_email: string;
+  contact_phone: string | null;
+  auto_approved: boolean;
+  reject_reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  replies_count: number;
+}
+
+export interface BusinessReply {
+  id: string;
+  post_id: string;
+  body: string;
+  created_at: string;
+  business_id: string;
+  legal_name: string;
+  place_name: string;
+  city: string | null;
+}
+
+export interface ClaimBusinessInput {
+  venueSlug: string;
+  legalName: string;
+  taxId?: string;
+  contactEmail: string;
+  contactPhone?: string;
+  proofUrl?: string;
+}
+
+export async function claimBusiness(
+  input: ClaimBusinessInput
+): Promise<{ business: BusinessMine; autoApproved: boolean; message: string }> {
+  return rawRequest('/api/business/claim', { method: 'POST', body: input });
+}
+
+export async function myBusinesses(): Promise<{ items: BusinessMine[] }> {
+  return rawRequest('/api/business/mine');
+}
+
+/** Официалните отговори под една оферта (публично — вижда ги всеки). */
+export async function businessRepliesForPost(postId: string): Promise<BusinessReply[]> {
+  return rawRequest<{ byPost: BusinessReply[] }>(
+    `/api/business/replies?postId=${encodeURIComponent(postId)}`
+  ).then((r) => r.byPost ?? []);
+}
+
+/** Официалните отговори за много оферти наведнъж (за лентата). */
+export async function businessRepliesForPosts(
+  postIds: string[]
+): Promise<Record<string, BusinessReply[]>> {
+  const ids = postIds.filter(Boolean).slice(0, 40);
+  if (ids.length === 0) return {};
+  return rawRequest<{ grouped: Record<string, BusinessReply[]> }>(
+    `/api/business/replies?postIds=${encodeURIComponent(ids.join(','))}`,
+    { auth: false }
+  ).then((r) => r.grouped ?? {});
+}
+
+/** Кой проверен търговец отговаря за обекта на тази оферта. */
+export async function businessForPost(postId: string): Promise<BusinessPublic | null> {
+  return rawRequest<{ business: BusinessPublic | null }>(
+    `/api/business/for-post?postId=${encodeURIComponent(postId)}`,
+    { auth: false }
+  ).then((r) => r.business ?? null);
+}
+
+/** Мога ли АЗ да отговоря официално на този сигнал (собственик и проверен ли съм). */
+export async function businessCanReply(
+  postId: string
+): Promise<{ canReply: boolean; businessId: string | null; reason: string | null }> {
+  return rawRequest<{ canReply: boolean; businessId: string | null; reason: string | null }>(
+    `/api/business/can-reply?postId=${encodeURIComponent(postId)}`
+  ).catch(() => ({ canReply: false, businessId: null, reason: 'error' }));
+}
+
+export async function postBusinessReply(
+  businessId: string,
+  postId: string,
+  body: string
+): Promise<{ reply: BusinessReply }> {
+  return rawRequest(`/api/business/${encodeURIComponent(businessId)}/reply`, {
+    method: 'POST',
+    body: { postId, body },
+  });
 }

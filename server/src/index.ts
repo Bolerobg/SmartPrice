@@ -23,6 +23,9 @@ import communityRoutes from './routes/community.js';
 import ogRoutes from './routes/og.js';
 import raffleRoutes from './routes/raffles.js';
 import referralRoutes from './routes/referrals.js';
+// 🏢 „Търговец в SmartPrice“ — втората страна на приложението (заявка по ЕИК,
+// проверен търговец, официален отговор под сигналите за неговия обект)
+import businessRoutes from './routes/business.js';
 import adminRoutes from './routes/admin.js';
 import assistantRoutes from './routes/assistant.js';
 import scraperRoutes from './routes/scraper.js';
@@ -199,6 +202,8 @@ export async function buildApp() {
   await app.register(objectRoutes);
   await app.register(publicDataRoutes);
   await app.register(pushRoutes);
+  // 🏢 Бизнес профили: „това е моят обект“, проверен търговец, официален отговор
+  await app.register(businessRoutes);
 
   /* ---------------------------------------------------------------------
    *  Спрени/изтрити профили и активност.

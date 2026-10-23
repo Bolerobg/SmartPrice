@@ -212,6 +212,20 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* 🏢 Търговецът: заяви обекта си, отговаряй официално на сигналите за него */}
+        <View style={styles.raffleRow}>
+          <TouchableOpacity
+            style={[styles.storyCardBtn, { flex: 1, backgroundColor: COLORS.surfaceContainerLowest, borderWidth: 1, borderColor: COLORS.accentCyanBorder }]}
+            onPress={() => router.push('/business/dashboard' as never)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="briefcase" size={16} color={COLORS.accentCyan} />
+            <Text style={[styles.storyCardBtnText, { color: COLORS.accentCyan }]}>
+              Аз съм търговец
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* 🎮 Тренировка на пъзела — без ограничения, за подготовка за томболата */}
         <View style={styles.raffleRow}>
           <TouchableOpacity

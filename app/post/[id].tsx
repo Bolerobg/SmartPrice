@@ -25,6 +25,7 @@ import { ObjectSignalsCard } from '@/components/ObjectSignalsCard';
 import { PlaceVisitCard } from '@/components/PlaceVisitCard';
 import { ShopPriceCompare } from '@/components/ShopPriceCompare';
 import { PriceDuelCard } from '@/components/PriceDuelCard';
+import { BusinessReplyCard } from '@/components/BusinessReplyCard';
 import { Avatar } from '@/components/Avatar';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
@@ -821,6 +822,10 @@ export default function PostDetailScreen() {
           <Text style={styles.commentsHeading}>
             💬 Мнения и снимки с цени ({post.comments.length})
           </Text>
+
+          {/* 🏢 Официалният глас на търговеца: значка „Проверен търговец“,
+              отговорите му и (ако аз съм собственик) полето да отговоря. */}
+          <BusinessReplyCard postId={post.id} />
 
           {post.comments.length === 0 ? (
             <Text style={styles.noCommentsText}>

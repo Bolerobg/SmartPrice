@@ -7,6 +7,7 @@
  * Обектът се разпознава по (място + град); слугът идва от изгледа `v_objects`.
  */
 import { many, one } from '../db.js';
+import { businessForVenue, type BusinessPublic } from './business.js';
 
 /** Обогатени данни от Google Maps (рейтинг, отзиви, работно време, телефон). */
 export interface ObjectPlace {
@@ -565,6 +566,8 @@ export async function loadObject(slug: string): Promise<{
   categories_stats: ObjectCategoryStat[];
   /** Google Maps: рейтинг, отзиви, работно време. null, ако още не е обогатен. */
   place: ObjectPlace | null;
+  /** 🏢 Провереният търговец на този обект (ако има заявен и одобрен). */
+  business: BusinessPublic | null;
 } | null> {
   const key = String(slug ?? '').trim().slice(0, 64);
   if (!/^[0-9a-f]{32}$/.test(key)) return null;
@@ -578,7 +581,9 @@ export async function loadObject(slug: string): Promise<{
   );
   if (!object) return null;
 
-  const [signals, history, months] = await Promise.all([
+  // 🏢 Провереният търговец (значка „✅ Проверен търговец“) се тегли заедно с
+  // останалото — една заявка, а не отделно обръщение към базата после.
+  const [signals, history, months, business] = await Promise.all([
     many<ObjectSignal>(
       `select p.id::text, p.source, p.title, p.description, p.polarity, p.category, p.price_paid::float,
               p.currency, p.image_url, p.created_at::text, p.helped_count,
@@ -616,6 +621,7 @@ export async function loadObject(slug: string): Promise<{
         order by 1 asc`,
       [key]
     ),
+    businessForVenue(key),
   ]);
 
   // Обогатените данни от Google Maps са по СЪЩИЯ слуг (md5(място|град)) — едно
@@ -706,6 +712,7 @@ export async function loadObject(slug: string): Promise<{
     is_shop: isShop,
     categories_stats: categoriesWithBadges,
     place: place ?? null,
+    business: business ?? null,
   };
 }
 
