@@ -4862,7 +4862,7 @@ async function renderObykolki(box, force = false) {
       </div>
       <div class="hint">
         Търсенето върви <strong>във фона</strong> (1-3 минути) и <strong>харчи пари</strong> в Apify —
-        около <strong>$0.012 на обект</strong>. Днес похарчени: <strong>$${Number(b.today ?? 0).toFixed(2)}</strong>
+        около <strong>$0.02 на обект</strong> (измерено). Днес похарчени: <strong>$${Number(b.today ?? 0).toFixed(2)}</strong>
         от дневен лимит <strong>$${Number(b.limitUsd ?? 0).toFixed(2)}</strong>.
         ${running ? `<br><span class="pill pill-gold">⏳ тече търсене „${esc(running.term)}“ в ${esc(running.city)} — ще се появи само</span>` : ''}
       </div>
@@ -4978,7 +4978,8 @@ async function renderObykolki(box, force = false) {
     const term = $('#ld-term').value.trim();
     const limit = Number($('#ld-limit').value);
     if (city.length < 2 || term.length < 2) { toast('Напиши град и какво търсим.', 'warn'); return; }
-    const est = (limit * 0.012).toFixed(2);
+    // Същата стойност като PER_PLACE_USD в server/src/lib/leads.ts.
+    const est = (limit * 0.02).toFixed(2);
     if (!confirm(`Търсене „${term}“ в ${city} — до ${limit} обекта.\n\nЩе похарчи ~$${est} в Apify. Да продължа?`)) return;
     $('#ld-search').disabled = true;
     try {

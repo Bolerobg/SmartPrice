@@ -23,8 +23,15 @@ import {
   apifyToken,
 } from './apifyBrowser.js';
 
-/** Колко струва ЕДНО място в Apify (проверена стойност от 22.10.2026). */
-export const PER_PLACE_USD = 0.012;
+/**
+ * Колко струва ЕДНО място в Apify.
+ *
+ * ⚠️ Измерено на 23.10.2026: търсене „аптека“ в 1 град, 5 обекта = $0.101,
+ * тоест ~$0.020 на място (преди пишехме 0.012 — подценявахме с 40%).
+ * Затова оценката тук е по-висока от реалната понякога; истинската се записва
+ * от Apify след пускането (`real_usd` в `leads_search_runs`).
+ */
+export const PER_PLACE_USD = 0.02;
 
 const ACTOR = 'compass~crawler-google-places';
 
@@ -157,9 +164,9 @@ export interface ListLeadsParams {
   city?: string;
   q?: string;
   /** Само обекти, които ГИ НЯМА в приложението (за обиколка). */
-  onlyNotInApp?: boolean;
+  onlyNotInApp?: boolean | undefined;
   /** Само с телефон — за да има кого да питаш по Viber/телефон. */
-  onlyWithPhone?: boolean;
+  onlyWithPhone?: boolean | undefined;
   limit?: number;
 }
 

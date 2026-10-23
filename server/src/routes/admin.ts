@@ -2053,13 +2053,22 @@ export default async function adminRoutes(app: FastifyInstance) {
   /** Списък + статистика. Преди връщане преизчислява кой вече е в приложението. */
   app.get('/api/admin/leads', async (req) => {
     await requireAdminPanel(req);
+    /**
+     * ⚠️ НЕ ползвай z.coerce.boolean() тук: той превръща НИЗА „false“ в true
+     * (Boolean('false') === true), тоест филтърът се включва точно когато е
+     * изключен. Затова четем изрично като текст.
+     */
+    const boolish = z
+      .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
+      .optional()
+      .transform((v) => v === true || v === 'true' || v === '1');
     const q = z
       .object({
         status: z.string().trim().max(20).optional(),
         city: z.string().trim().max(80).optional(),
         q: z.string().trim().max(80).optional(),
-        onlyNotInApp: z.coerce.boolean().optional(),
-        onlyWithPhone: z.coerce.boolean().optional(),
+        onlyNotInApp: boolish,
+        onlyWithPhone: boolish,
         limit: z.coerce.number().int().min(1).max(500).optional(),
       })
       .parse(req.query ?? {});
