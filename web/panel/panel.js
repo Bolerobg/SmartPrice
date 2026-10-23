@@ -4649,7 +4649,8 @@ async function renderBusinesses(box, force = false) {
               <td><span class="pill ${st[1]}">${st[0]}</span>
                   ${b.auto_approved ? '<div class="dim">одобрено автоматично по ЕИК</div>' : ''}
                   ${b.reject_reason ? `<div class="dim">${esc(b.reject_reason)}</div>` : ''}
-                  <div class="dim">${num(b.replies_count)} официални отговора</div></td>
+                  <div class="dim">${num(b.replies_count)} официални отговора</div>
+                  <div class="dim">${num(b.offers_count)} оферти (${num(b.offers_live)} активни)</div></td>
               <td>${paid ? `<span class="pill pill-green">💰 до ${dt(b.paid_until)}</span>` : '<span class="pill pill-dim">без абонамент</span>'}</td>
               <td style="white-space:nowrap">
                 ${b.status !== 'verified' ? `<button class="btn btn-sm" data-b-approve="${b.id}">✅ Одобри</button>` : ''}

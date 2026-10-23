@@ -6,6 +6,14 @@ import { env, features } from '../env.js';
 import { requireUserId } from '../lib/auth.js';
 import { badRequest, notFound, unavailable } from '../lib/errors.js';
 import { loadFullProfile } from '../lib/profile.js';
+import {
+  applyBusinessPayment,
+  failBusinessPayment,
+  loadMyBusinesses,
+  renewBusinessSubscription,
+} from '../lib/business.js';
+import { sendAdminAlertEmail } from '../lib/email.js';
+import { ALERT_EMAIL } from '../lib/security.js';
 
 /**
  * ВАЖНО (валута): България премина към еврото и Stripe вече отказва BGN:
@@ -270,6 +278,32 @@ export default async function donationRoutes(app: FastifyInstance) {
           subscriptionId: typeof session.subscription === 'string' ? session.subscription : null,
           eventId: event.id,
         });
+        // 💰 Бизнес абонамент („Проверен търговец“) — същият webhook, друг вид плащане.
+        // `applyBusinessPayment` връща null, ако това не е бизнес плащане (дарение),
+        // затова редът е безопасен и за двата случая.
+        const businessApplied = await applyBusinessPayment({
+          sessionId: session.id,
+          subscriptionId: typeof session.subscription === 'string' ? session.subscription : null,
+          eventId: event.id,
+        }).catch(() => null);
+        if (businessApplied) {
+          const owner = typeof session.client_reference_id === 'string' ? session.client_reference_id : '';
+          const mine = owner ? await loadMyBusinesses(owner).catch(() => []) : [];
+          const biz = mine.find((b) => b.id === businessApplied.businessId);
+          void sendAdminAlertEmail({
+            to: ALERT_EMAIL,
+            title: '💰 Платен абонамент „Проверен търговец“',
+            severity: 'info',
+            kind: 'business_subscription',
+            details: {
+              'Обект': biz?.place_name ?? businessApplied.businessId,
+              'Фирма': biz?.legal_name ?? '—',
+              'Платено до': businessApplied.paidUntil ?? '—',
+              'Месеци': businessApplied.months,
+              'Профил': owner || '—',
+            },
+          }).catch(() => undefined);
+        }
         break;
       }
       case 'payment_intent.succeeded': {
@@ -289,6 +323,8 @@ export default async function donationRoutes(app: FastifyInstance) {
               where stripe_subscription_id = $1 and status = 'pending' returning id`,
             [subscriptionId, event.id]
           );
+          // Подновяване на бизнес абонамент (връща null за дарения).
+          await renewBusinessSubscription({ subscriptionId, eventId: event.id }).catch(() => null);
         }
         break;
       }
@@ -299,6 +335,11 @@ export default async function donationRoutes(app: FastifyInstance) {
             where stripe_payment_intent_id = $1 and status = 'pending' returning id`,
           [intent.id, event.id]
         );
+        break;
+      }
+      case 'checkout.session.expired': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        await failBusinessPayment({ sessionId: session.id, eventId: event.id }).catch(() => undefined);
         break;
       }
       default:

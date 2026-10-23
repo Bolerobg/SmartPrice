@@ -10,7 +10,7 @@
  * Ако някога се смени формулата в миграция 036, трябва да се смени и тук.
  */
 import { many, one, tx } from '../db.js';
-import { badRequest, conflict, notFound } from './errors.js';
+import { badRequest, conflict, forbidden, notFound } from './errors.js';
 
 /**
  * Профилите (`profiles.id`) и офертите (`posts.id`) в SmartPrice са UUID —
@@ -18,6 +18,19 @@ import { badRequest, conflict, notFound } from './errors.js';
  * която веднъж спря API-то: „foreign key constraint cannot be implemented“).
  */
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 💰 План „Проверен търговец“ — 19 € на месец.
+ *
+ * Защо точно това разделение: регистрацията и ПЪРВИЯТ отговор всеки месец са
+ * безплатни (за да влезе търговецът и да види ползата), а неограничените
+ * отговори, офертите и статистиката са платени. 19 € е под цената на един
+ * обяд — търговецът не го мисли, а за нас се събира без да плаши хората.
+ */
+export const PLAN_PRICE_EUR = 19;
+export const PLAN_MONTHS = 1;
+/** Безплатният план включва толкова официални отговора на месец. */
+export const FREE_REPLIES_PER_MONTH = 1;
 
 /** Само цифри — ЕИК идва от касова бележка с интервали и водещи нули. */
 export function normalizeTaxId(value: string | null | undefined): string {
@@ -37,6 +50,8 @@ export interface BusinessPublic {
   paid_until: string | null;
   /** Има ли право да пише официални отговори точно сега. */
   can_reply: boolean;
+  /** 💰 Платен абонамент, който е активен в момента. */
+  plan_active: boolean;
 }
 
 export interface BusinessMine extends BusinessPublic {
@@ -93,8 +108,9 @@ function toPublic(row: Row): BusinessPublic {
     tier: row.tier,
     paid_until: iso(row.paid_until),
     // Право на отговор: проверен търговец винаги може (Фаза 1 е безплатна).
-    // Когато дойдат плановете, тук ще се иска и активен абонамент.
+    // Броят на отговорите се пази в `addBusinessReply` (безплатно = 1/месец).
     can_reply: row.status === 'verified',
+    plan_active: hasActivePlan(row),
   };
 }
 
@@ -375,6 +391,24 @@ export async function addBusinessReply(params: {
   );
   if (!owns) throw badRequest('Този сигнал не е за твоя обект.');
 
+  /**
+   * 💰 Гейтът на плана.
+   *
+   * Безплатно: 1 официален отговор на месец — достатъчно търговецът да види,
+   * че работи и че хората го четат. Платено: неограничено. Съобщението казва
+   * точно какво да направи, вместо да отказва сухо.
+   */
+  if (!hasActivePlan(row)) {
+    const used = await repliesLast30Days(row.id);
+    if (used >= FREE_REPLIES_PER_MONTH) {
+      throw forbidden(
+        `Безплатният план включва ${FREE_REPLIES_PER_MONTH} официален отговор на месец ` +
+          `(използван). С план „Проверен търговец“ (${PLAN_PRICE_EUR} €/мес) отговаряш ` +
+          'неограничено, пускаш оферти и виждаш статистиката на обекта.'
+      );
+    }
+  }
+
   const body = params.body.trim();
   if (body.length < 20) throw badRequest('Отговорът е твърде кратък (поне 20 знака).');
   if (body.length > 1500) throw badRequest('Отговорът е твърде дълъг (до 1500 знака).');
@@ -409,4 +443,392 @@ export async function businessReplyCount(businessId: string): Promise<number> {
     [businessId]
   );
   return Number(row?.n ?? 0);
+}
+
+/** Отговорите през последните 30 дни — това брои безплатният план. */
+export async function repliesLast30Days(businessId: string): Promise<number> {
+  const row = await one<{ n: string }>(
+    `select count(*)::text as n from business_replies
+      where business_id = $1 and created_at > now() - interval '30 days'`,
+    [businessId]
+  );
+  return Number(row?.n ?? 0);
+}
+
+/* ======================= 💰 Плащания за абонамента ======================= */
+
+export interface StartPaymentInput {
+  businessId: string;
+  userId: string;
+  sessionId: string;
+  months: number;
+  amount: number;
+}
+
+export async function startBusinessPayment(input: StartPaymentInput): Promise<string> {
+  const row = await one<{ id: string }>(
+    `insert into business_payments
+       (business_id, user_id, amount, months, stripe_checkout_session_id, status)
+     values ($1,$2,$3,$4,$5,'pending') returning id`,
+    [input.businessId, input.userId, input.amount, input.months, input.sessionId]
+  );
+  return row!.id;
+}
+
+/**
+ * Плащането е минало → удължаваме абонамента.
+ *
+ * ВАЖНО: удължаваме от `paid_until`, ако още не е изтекъл (иначе човек, който
+ * плати 5 дни преди края, губи тези 5 дни). Записът е идемпотентен по
+ * `stripe_event_id` — Stripe може да прати същото събитие повече от веднъж.
+ */
+export async function applyBusinessPayment(params: {
+  sessionId: string;
+  subscriptionId?: string | null;
+  eventId: string;
+}): Promise<{ businessId: string; months: number; paidUntil: string | null } | null> {
+  return tx(async (client) => {
+    const pay = await client.query<{
+      id: string;
+      business_id: string;
+      months: number;
+      status: string;
+    }>(
+      `select id, business_id, months, status from business_payments
+        where stripe_checkout_session_id = $1 for update`,
+      [params.sessionId]
+    );
+    const row = pay.rows[0];
+    if (!row) return null; // не е бизнес плащане (напр. дарение) — не пипаме нищо
+    if (row.status === 'succeeded') {
+      const b = await client.query<{ paid_until: Date | null }>(
+        `select paid_until from business_accounts where id = $1`,
+        [row.business_id]
+      );
+      return { businessId: row.business_id, months: row.months, paidUntil: iso(b.rows[0]?.paid_until ?? null) };
+    }
+
+    await client.query(
+      `update business_payments
+          set status = 'succeeded', paid_at = now(), stripe_event_id = $2,
+              stripe_subscription_id = coalesce($3, stripe_subscription_id)
+        where id = $1`,
+      [row.id, params.eventId, params.subscriptionId ?? null]
+    );
+
+    const updated = await client.query<{ paid_until: Date }>(
+      `update business_accounts
+          set tier = 'verified',
+              paid_until = greatest(coalesce(paid_until, now()), now()) + ($2 || ' month')::interval,
+              updated_at = now()
+        where id = $1
+        returning paid_until`,
+      [row.business_id, String(row.months)]
+    );
+
+    return {
+      businessId: row.business_id,
+      months: row.months,
+      paidUntil: iso(updated.rows[0]?.paid_until ?? null),
+    };
+  });
+}
+
+/** Абонамент, който се подновява всеки месец (Stripe `invoice.paid`). */
+export async function renewBusinessSubscription(params: {
+  subscriptionId: string;
+  eventId: string;
+}): Promise<{ businessId: string; paidUntil: string | null } | null> {
+  return tx(async (client) => {
+    const pay = await client.query<{ business_id: string }>(
+      `select business_id from business_payments
+        where stripe_subscription_id = $1 and status = 'succeeded'
+        order by created_at desc limit 1`,
+      [params.subscriptionId]
+    );
+    const businessId = pay.rows[0]?.business_id;
+    if (!businessId) return null;
+
+    const updated = await client.query<{ paid_until: Date }>(
+      `update business_accounts
+          set tier = 'verified',
+              paid_until = greatest(coalesce(paid_until, now()), now()) + interval '1 month',
+              updated_at = now()
+        where id = $1
+        returning paid_until`,
+      [businessId]
+    );
+    // Пишем и ред в плащанията, за да се вижда историята на подновяванията.
+    await client.query(
+      `insert into business_payments (business_id, user_id, amount, months, status, paid_at,
+                                      stripe_subscription_id, stripe_event_id, currency)
+       select b.id, b.owner_user_id, $2, 1, 'succeeded', now(), $1, $3, 'EUR'
+         from business_accounts b where b.id = $4`,
+      [params.subscriptionId, PLAN_PRICE_EUR, params.eventId, businessId]
+    );
+    return { businessId, paidUntil: iso(updated.rows[0]?.paid_until ?? null) };
+  });
+}
+
+export async function failBusinessPayment(params: {
+  sessionId?: string | null;
+  eventId: string;
+}): Promise<void> {
+  if (!params.sessionId) return;
+  await one(
+    `update business_payments set status = 'failed', stripe_event_id = $2
+      where stripe_checkout_session_id = $1 and status = 'pending' returning id`,
+    [params.sessionId, params.eventId]
+  );
+}
+
+/** Проверка след връщане от Stripe (ако webhook-ът още не е пристигнал). */
+export async function businessPaymentBySession(
+  sessionId: string
+): Promise<{ id: string; business_id: string; user_id: string; status: string; months: number } | null> {
+  return one(
+    `select id, business_id, user_id, status, months from business_payments
+      where stripe_checkout_session_id = $1`,
+    [sessionId]
+  );
+}
+
+/** История на плащанията на един бизнес (за таблото). */
+export async function businessPayments(
+  businessId: string
+): Promise<Array<{ id: string; amount: number; currency: string; months: number; status: string; created_at: string; paid_at: string | null }>> {
+  return many(
+    `select id, amount::float, currency, months, status, created_at::text, paid_at::text
+       from business_payments where business_id = $1
+      order by created_at desc limit 24`,
+    [businessId]
+  );
+}
+
+/* ========================= 🏷️ Оферти от търговеца =========================
+ * ВАЖНО (продуктово решение): офертите НЕ влизат в общата лента с находки.
+ * Лентата е честна цена от хора; ако в нея влязат платени промоции, доверието
+ * (което е целият смисъл на SmartPrice) пада. Затова офертата се вижда в
+ * НЕГОВИЯ обект и на екрана на негова оферта — там човекът вече е при него.
+ */
+
+export interface BusinessOffer {
+  id: string;
+  business_id: string;
+  title: string;
+  description: string;
+  price: number | null;
+  old_price: number | null;
+  image_url: string | null;
+  valid_until: string | null;
+  status: 'active' | 'hidden';
+  created_at: string;
+  /** Изтекла ли е вече (по `valid_until`). */
+  expired: boolean;
+}
+
+interface OfferRow {
+  id: string;
+  business_id: string;
+  title: string;
+  description: string;
+  price: number | null;
+  old_price: number | null;
+  image_url: string | null;
+  valid_until: Date | string | null;
+  status: 'active' | 'hidden';
+  created_at: Date | string;
+}
+
+const mapOffer = (r: OfferRow): BusinessOffer => {
+  const validUntil = r.valid_until == null ? null : String(r.valid_until).slice(0, 10);
+  return {
+    id: r.id,
+    business_id: r.business_id,
+    title: r.title,
+    description: r.description,
+    price: r.price == null ? null : Number(r.price),
+    old_price: r.old_price == null ? null : Number(r.old_price),
+    image_url: r.image_url,
+    valid_until: validUntil,
+    status: r.status,
+    created_at: iso(r.created_at)!,
+    expired: Boolean(validUntil && validUntil < new Date().toISOString().slice(0, 10)),
+  };
+};
+
+/** Офертите на търговеца (за таблото — включително скритите). */
+export async function listBusinessOffers(businessId: string): Promise<BusinessOffer[]> {
+  const rows = await many<OfferRow>(
+    `select * from business_offers where business_id = $1 order by created_at desc limit 50`,
+    [businessId]
+  );
+  return rows.map(mapOffer);
+}
+
+/** Публичните оферти на един обект (само активни и не изтекли). */
+export async function publicOffersForVenue(slug: string, limit = 5): Promise<BusinessOffer[]> {
+  const rows = await many<OfferRow>(
+    `select o.* from business_offers o
+       join business_accounts b on b.id = o.business_id
+      where b.venue_slug = $1 and b.status = 'verified'
+        and o.status = 'active'
+        and (o.valid_until is null or o.valid_until >= current_date)
+      order by o.created_at desc limit $2`,
+    [slug, limit]
+  );
+  return rows.map(mapOffer);
+}
+
+export interface OfferInput {
+  userId: string;
+  businessId: string;
+  title: string;
+  description?: string;
+  price?: number | null;
+  oldPrice?: number | null;
+  imageUrl?: string | null;
+  validUntil?: string | null;
+}
+
+/** Пуска оферта. Иска проверен търговец И активен абонамент (това е платеното). */
+export async function createBusinessOffer(input: OfferInput): Promise<BusinessOffer> {
+  const row = await one<Row>(
+    `select * from business_accounts where id = $1 and owner_user_id = $2`,
+    [input.businessId, input.userId]
+  );
+  if (!row) throw notFound('Бизнес профилът не е намерен.');
+  if (row.status !== 'verified') {
+    throw badRequest('Още не си проверен търговец — оферти може след одобрение.');
+  }
+  if (!hasActivePlan(row)) {
+    throw forbidden(
+      `Офертите са част от плана „Проверен търговец“ (${PLAN_PRICE_EUR} €/мес). ` +
+        'Активирай го от таблото и веднага можеш да пуснеш промоция.'
+    );
+  }
+
+  const title = input.title.trim();
+  if (title.length < 3) throw badRequest('Заглавието е твърде кратко.');
+  const description = (input.description ?? '').trim();
+  if (description.length > 1000) throw badRequest('Описанието е твърде дълго (до 1000 знака).');
+
+  const price = input.price == null ? null : Number(input.price);
+  const oldPrice = input.oldPrice == null ? null : Number(input.oldPrice);
+  if (price != null && (!Number.isFinite(price) || price <= 0)) throw badRequest('Цената трябва да е положителна.');
+  if (oldPrice != null && (!Number.isFinite(oldPrice) || oldPrice <= 0)) throw badRequest('Старата цена трябва да е положителна.');
+  if (price != null && oldPrice != null && oldPrice <= price) {
+    throw badRequest('Старата цена трябва да е по-висока от новата — иначе не е отстъпка.');
+  }
+  if (oldPrice != null && price == null) throw badRequest('Ако даваш стара цена, дай и новата.');
+
+  const saved = await one<OfferRow>(
+    `insert into business_offers (business_id, title, description, price, old_price, image_url, valid_until)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+    [row.id, title, description, price, oldPrice, input.imageUrl ?? null, input.validUntil || null]
+  );
+  return mapOffer(saved!);
+}
+
+export async function setBusinessOfferStatus(params: {
+  userId: string;
+  offerId: string;
+  status: 'active' | 'hidden';
+}): Promise<void> {
+  const res = await one<{ id: string }>(
+    `update business_offers o set status = $3, updated_at = now()
+       from business_accounts b
+      where o.business_id = b.id and o.id = $1 and b.owner_user_id = $2
+      returning o.id`,
+    [params.offerId, params.userId, params.status]
+  );
+  if (!res) throw notFound('Офертата не е намерена.');
+}
+
+export async function deleteBusinessOffer(params: {
+  userId: string;
+  offerId: string;
+}): Promise<void> {
+  const res = await one<{ id: string }>(
+    `delete from business_offers o
+       using business_accounts b
+      where o.business_id = b.id and o.id = $1 and b.owner_user_id = $2
+      returning o.id`,
+    [params.offerId, params.userId]
+  );
+  if (!res) throw notFound('Офертата не е намерена.');
+}
+
+/* ======================= 📊 Статистика на обекта ======================= */
+
+/**
+ * Брои едно отваряне на страницата на обекта.
+ *
+ * Защо по (слуг, ден): търговецът иска да види „колко души ме гледат“ — това е
+ * най-силният аргумент да плаща. Пазим само сбор по дни, никакви лични данни.
+ */
+export async function registerVenueView(slug: string): Promise<void> {
+  if (!/^[0-9a-f]{32}$/.test(slug)) return;
+  await one(
+    `insert into venue_views (venue_slug, day, views) values ($1, current_date, 1)
+     on conflict (venue_slug, day) do update set views = venue_views.views + 1
+     returning venue_slug`,
+    [slug]
+  );
+}
+
+export interface VenueStats {
+  views_today: number;
+  views_7d: number;
+  views_30d: number;
+  signals_count: number;
+  replies_count: number;
+  reports_30d: number;
+  avg_rating: number | null;
+  plan_active: boolean;
+  paid_until: string | null;
+}
+
+/** Статистиката за таблото на търговеца. */
+export async function venueStats(businessId: string): Promise<VenueStats | null> {
+  const row = await one<Row>(
+    `select * from business_accounts where id = $1`,
+    [businessId]
+  );
+  if (!row) return null;
+
+  const [views, extra] = await Promise.all([
+    one<{ today: string; d7: string; d30: string }>(
+      `select
+         coalesce(sum(views) filter (where day = current_date), 0)::text as today,
+         coalesce(sum(views) filter (where day > current_date - 7), 0)::text as d7,
+         coalesce(sum(views) filter (where day > current_date - 30), 0)::text as d30
+       from venue_views where venue_slug = $1`,
+      [row.venue_slug]
+    ),
+    one<{ signals: string; replies: string; recent: string; rating: number | null }>(
+      `select
+         (select count(*)::text from posts p
+           where p.status = 'published'
+             and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1) as signals,
+         (select count(*)::text from business_replies br where br.business_id = $2) as replies,
+         (select count(*)::text from posts p
+           where p.status = 'published' and p.created_at > now() - interval '30 days'
+             and md5(lower(btrim(p.place_name)) || '|' || lower(btrim(p.city))) = $1) as recent,
+         (select rating::float from place_enrichment where slug = $1) as rating`,
+      [row.venue_slug, row.id]
+    ),
+  ]);
+
+  return {
+    views_today: Number(views?.today ?? 0),
+    views_7d: Number(views?.d7 ?? 0),
+    views_30d: Number(views?.d30 ?? 0),
+    signals_count: Number(extra?.signals ?? 0),
+    replies_count: Number(extra?.replies ?? 0),
+    reports_30d: Number(extra?.recent ?? 0),
+    avg_rating: extra?.rating ?? null,
+    plan_active: hasActivePlan(row),
+    paid_until: iso(row.paid_until),
+  };
 }

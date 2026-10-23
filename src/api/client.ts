@@ -1623,6 +1623,8 @@ export interface BusinessPublic {
   paid_until: string | null;
   /** Има ли право да пише официални отговори точно сега. */
   can_reply: boolean;
+  /** 💰 Платен абонамент „Проверен търговец“, който е активен в момента. */
+  plan_active: boolean;
 }
 
 export interface BusinessMine extends BusinessPublic {
@@ -1712,4 +1714,149 @@ export async function postBusinessReply(
     method: 'POST',
     body: { postId, body },
   });
+}
+
+/* ================= 💰 План „Проверен търговец“ (Фаза 2) =================
+ * 19 €/месец: неограничени официални отговори, оферти в своя обект и
+ * статистика. Безплатно: регистрация + 1 отговор на месец.
+ */
+
+export interface BusinessPlanConfig {
+  enabled: boolean;
+  priceEur: number;
+  months: number;
+  currency: string;
+  freeRepliesPerMonth: number;
+  includes: string[];
+}
+
+export async function businessPlanConfig(): Promise<BusinessPlanConfig> {
+  return rawRequest<BusinessPlanConfig>('/api/business/plan/config', { auth: false });
+}
+
+/** Пуска плащане за абонамента и връща линка към Stripe. */
+export async function subscribeBusiness(
+  businessId: string,
+  months = 1
+): Promise<{ checkoutUrl: string | null; sessionId: string; amount: number; currency: string; message: string }> {
+  return rawRequest(`/api/business/${encodeURIComponent(businessId)}/subscribe`, {
+    method: 'POST',
+    body: { months },
+  });
+}
+
+/** Проверка след връщане от Stripe (ако webhook-ът още не е пристигнал). */
+export async function confirmBusinessPaid(
+  businessId: string,
+  sessionId: string
+): Promise<{ business: BusinessMine | null }> {
+  return rawRequest(`/api/business/${encodeURIComponent(businessId)}/paid`, {
+    method: 'POST',
+    body: { sessionId },
+  });
+}
+
+export interface VenueStats {
+  views_today: number;
+  views_7d: number;
+  views_30d: number;
+  signals_count: number;
+  replies_count: number;
+  reports_30d: number;
+  avg_rating: number | null;
+  plan_active: boolean;
+  paid_until: string | null;
+}
+
+export async function businessStats(businessId: string): Promise<VenueStats | null> {
+  return rawRequest<{ stats: VenueStats | null }>(
+    `/api/business/${encodeURIComponent(businessId)}/stats`
+  ).then((r) => r.stats);
+}
+
+export interface BusinessPayment {
+  id: string;
+  amount: number;
+  currency: string;
+  months: number;
+  status: string;
+  created_at: string;
+  paid_at: string | null;
+}
+
+export async function businessPayments(businessId: string): Promise<BusinessPayment[]> {
+  return rawRequest<{ items: BusinessPayment[] }>(
+    `/api/business/${encodeURIComponent(businessId)}/payments`
+  ).then((r) => r.items ?? []);
+}
+
+/* ======================== 🏷️ Оферти от търговеца ======================== */
+
+export interface BusinessOffer {
+  id: string;
+  business_id: string;
+  title: string;
+  description: string;
+  price: number | null;
+  old_price: number | null;
+  image_url: string | null;
+  valid_until: string | null;
+  status: 'active' | 'hidden';
+  created_at: string;
+  expired: boolean;
+}
+
+/** Офертите на търговеца (собственик — включително скритите). */
+export async function businessOffers(businessId: string): Promise<BusinessOffer[]> {
+  return rawRequest<{ items: BusinessOffer[] }>(
+    `/api/business/${encodeURIComponent(businessId)}/offers`
+  ).then((r) => r.items ?? []);
+}
+
+export async function createBusinessOffer(
+  businessId: string,
+  input: {
+    title: string;
+    description?: string;
+    price?: number;
+    oldPrice?: number;
+    imageUrl?: string;
+    validUntil?: string;
+  }
+): Promise<{ offer: BusinessOffer }> {
+  return rawRequest(`/api/business/${encodeURIComponent(businessId)}/offers`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function setBusinessOfferStatus(
+  offerId: string,
+  status: 'active' | 'hidden'
+): Promise<void> {
+  await rawRequest(`/api/business/offers/${encodeURIComponent(offerId)}/status`, {
+    method: 'POST',
+    body: { status },
+  });
+}
+
+export async function deleteBusinessOffer(offerId: string): Promise<void> {
+  await rawRequest(`/api/business/offers/${encodeURIComponent(offerId)}`, { method: 'DELETE' });
+}
+
+/** Публично: офертите на един обект (за страницата на обекта). */
+export async function publicVenueOffers(slug: string, limit = 5): Promise<BusinessOffer[]> {
+  return rawRequest<{ items: BusinessOffer[] }>(
+    `/api/business/offers?slug=${encodeURIComponent(slug)}&limit=${limit}`,
+    { auth: false }
+  ).then((r) => r.items ?? []);
+}
+
+/** Публично: брои едно гледане на обекта (статистиката за търговеца). */
+export async function registerVenueView(slug: string): Promise<void> {
+  await rawRequest('/api/business/venue-view', {
+    method: 'POST',
+    body: { slug },
+    auth: false,
+  }).catch(() => undefined);
 }

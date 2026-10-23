@@ -1790,6 +1790,10 @@ export default async function adminRoutes(app: FastifyInstance) {
                 b.paid_until, b.auto_approved, b.reject_reason, b.created_at, b.reviewed_at,
                 p.email as owner_email, p.name as owner_name,
                 (select count(*)::int from business_replies br where br.business_id = b.id) as replies_count,
+                (select count(*)::int from business_offers bo where bo.business_id = b.id) as offers_count,
+                (select count(*)::int from business_offers bo
+                  where bo.business_id = b.id and bo.status = 'active'
+                    and (bo.valid_until is null or bo.valid_until >= current_date)) as offers_live,
                 (select count(*)::int from posts po
                   where po.status = 'published'
                     and md5(lower(btrim(po.place_name)) || '|' || lower(btrim(po.city))) = b.venue_slug) as signals_count

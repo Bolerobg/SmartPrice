@@ -13,8 +13,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { goBack } from '@/src/lib/navigation';
 import { COLORS } from '@/constants/theme';
 import { PostCard } from '@/components/PostCard';
+import { BusinessOffersCard } from '@/components/BusinessOffersCard';
 import { openInGoogleMaps } from '@/lib/locationService';
-import { api, ApiError, loadObject, type ObjectDetail } from '@/src/api/client';
+import { api, ApiError, loadObject, registerVenueView, type ObjectDetail } from '@/src/api/client';
 import type { PostItem, PostPolarity } from '@/types';
 
 /**
@@ -111,6 +112,9 @@ export default function PlaceOffersScreen() {
         if (d.object?.city) setCity(d.object.city);
       })
       .catch(() => undefined);
+    // 📊 Броим едно гледане на обекта — това е статистиката, която търговецът
+    // вижда в таблото си (силният аргумент да плаща абонамент). Без лични данни.
+    void registerVenueView(slug).catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -330,6 +334,10 @@ export default function PlaceOffersScreen() {
                 гласове от хора.
               </Text>
             </View>
+
+            {/* 🏷️ Офертите на самия търговец (ако е пуснал промоция). Показват се
+                ясно отделени, за да не се бъркат с находките на хората. */}
+            <BusinessOffersCard slug={slug} />
 
             <View style={styles.tabsRow}>
               {(
