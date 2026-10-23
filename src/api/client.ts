@@ -1860,3 +1860,30 @@ export async function registerVenueView(slug: string): Promise<void> {
     auth: false,
   }).catch(() => undefined);
 }
+
+/* ============ 🔔 Умна покана „включи известията“ (след първа полза) ============
+ * Броим „ползване“ (отваряне на поток/оферта) и чак след няколко отваряния питаме.
+ * Сървърът решава — не пита, ако вече си абониран, казал си „не“, или поканата
+ * е била показвана преди по-малко от 14 дни.
+ */
+
+export interface PushPromptState {
+  shouldPrompt: boolean;
+  count: number;
+  threshold?: number;
+  muted?: boolean;
+  subscribed?: boolean;
+}
+
+/** Отбелязва едно ползване и връща дали е време за поканата. */
+export async function pushPromptTick(): Promise<PushPromptState> {
+  return rawRequest<PushPromptState>('/api/me/push-prompt', { method: 'POST' }).catch(() => ({
+    shouldPrompt: false,
+    count: 0,
+  }));
+}
+
+/** „Не ми показвай повече“. */
+export async function pushPromptNever(): Promise<void> {
+  await rawRequest('/api/me/push-prompt/never', { method: 'POST' }).catch(() => undefined);
+}

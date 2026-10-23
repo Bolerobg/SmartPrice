@@ -15,7 +15,7 @@ import { Avatar } from '@/components/Avatar';
 import { InviteCard } from '@/components/InviteCard';
 import { PostCard } from '@/components/PostCard';
 import { RaffleTeaser } from '@/components/RaffleTeaser';
-import { PushNotificationsCard } from '@/components/PushNotificationsCard';
+import { PushPromptBanner } from '@/components/PushPromptBanner';
 
 type BoardTab = 'saved' | 'checkers' | 'points';
 type HomeSection = 'feed' | 'leaderboard';
@@ -146,10 +146,9 @@ export default function CommunityScreen() {
         </View>
 
         {/* Голяма карта: Спестени пари на общността */}
-        {/* 🔔 Включване на известия — точно тук, където човекът вече гледа находки
-            (в „Профил“ картата се вижда рядко, затова абонати бяха 0). Показва се
-            само на web и само ако още не е включено. */}
-        <PushNotificationsCard />
+        {/* 🔔 Поканата за известия — тук, където човекът вече гледа находки.
+            Показва се само след няколко ползвания и не по-често от 14 дни. */}
+        <PushPromptBanner />
 
         <View style={styles.heroStatsCard}>
           <View style={styles.heroTopRow}>

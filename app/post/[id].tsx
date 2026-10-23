@@ -33,6 +33,7 @@ import { useAuth } from '@/src/auth/AuthContext';
 import { openInGoogleMaps } from '@/lib/locationService';
 import { formatPostedAt, formatPostedAtLong, formatRelativeTime } from '@/src/lib/format';
 import { api, loadSimilarOffers } from '@/src/api/client';
+import { pushPromptTick } from '@/src/api/client';
 import type { SimilarOffer } from '@/src/api/client';
 import type { PostItem, PriceDuel } from '@/types';
 
@@ -77,6 +78,17 @@ export default function PostDetailScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const duelY = useRef(0);
   const duelScrolled = useRef(false);
+
+  /**
+   * 🔔 Броим отварянето на оферта като „ползване“.
+   *
+   * От този брояч зависи КОГА ще попитаме човека дали иска известия (след първа
+   * полза, не веднага). Не чакаме отговора — ако не мине, просто не питаме.
+   */
+  useEffect(() => {
+    if (!isAuthenticated || !id) return;
+    void pushPromptTick().catch(() => undefined);
+  }, [id, isAuthenticated]);
 
   useEffect(() => {
     let alive = true;

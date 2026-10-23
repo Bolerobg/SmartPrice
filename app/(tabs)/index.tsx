@@ -25,6 +25,7 @@ import { CATEGORIES, COLORS, THEME_MODE, setThemeMode } from '@/constants/theme'
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { FounderBanner } from '@/components/FounderBanner';
+import { PushPromptBanner } from '@/components/PushPromptBanner';
 import { ListingNudgeModal } from '@/components/ListingNudgeModal';
 import { PuzzleDemoNudge } from '@/components/PuzzleDemoNudge';
 import {
@@ -1007,6 +1008,10 @@ export default function FeedScreen() {
 
       {/* Бонусът за новодошли: първа находка в първите минути → „Основател“ */}
       <FounderBanner />
+
+      {/* 🔔 Поканата за известия идва СЛЕД като човекът е ползвал приложението
+          няколко пъти (сървърът брои) — не веднага, за да не дразни. */}
+      <PushPromptBanner />
 
       {/* 🎁 Красивият модел „и ти можеш да продаваш“ — показва се рядко. */}
       <ListingNudgeModal
