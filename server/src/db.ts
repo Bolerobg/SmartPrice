@@ -5,7 +5,14 @@ const { Pool } = pg;
 
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
-  max: 10,
+  /**
+   * ⚠️ 23.10.2026: беше 10 и при НАТОВАРВАНЕ заявките падаха с 500
+   * („timeout exceeded when trying to connect“) — пулът се изчерпваше, докато
+   * бавните заявки към големите таблици вървят. Един човек с отворено
+   * приложение прави по 6-10 заявки наведнъж, а при презареждане — още толкова.
+   * Постгресът позволява 100 връзки; 25 е безопасно и спира 500-ите.
+   */
+  max: 25,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   // numeric → number (иначе pg връща низове и сметките в JS чупят)
