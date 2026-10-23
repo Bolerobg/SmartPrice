@@ -640,8 +640,26 @@ interface OfferRow {
   created_at: Date | string;
 }
 
+/**
+ * Колоната `valid_until` е тип `date`, а pg я връща като JS Date → `String(date)`
+ * дава „Sun Nov 15 2026…“ и отрязаното до 10 знака става „Sun Nov 15“ (грешка,
+ * която потребителят виждаше в приложението). Затова форматираме ИЗРИЧНО.
+ */
+const dayOnly = (v: Date | string | null): string | null => {
+  if (v == null) return null;
+  if (v instanceof Date) {
+    // Дата без час: ползваме UTC частите, за да не измести деня часовата зона.
+    const y = v.getUTCFullYear();
+    const m = String(v.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(v.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(v);
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+};
+
 const mapOffer = (r: OfferRow): BusinessOffer => {
-  const validUntil = r.valid_until == null ? null : String(r.valid_until).slice(0, 10);
+  const validUntil = dayOnly(r.valid_until);
   return {
     id: r.id,
     business_id: r.business_id,

@@ -40,6 +40,13 @@ import {
 } from '@/src/api/client';
 import type { PostItem } from '@/types';
 
+/** „2026-11-15“ → „15.11.2026“ (български формат; сървърът дава ISO). */
+function bgDay(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return y && m && d ? `${d}.${m}.${y}` : iso;
+}
+
 /**
  * 📊 Таблото на търговеца.
  *
@@ -378,9 +385,9 @@ export default function BusinessDashboardScreen() {
                     </View>
                     <Text style={styles.planText}>
                       {b.plan_active
-                        ? `Неограничени отговори, оферти и статистика. Платен до ${
-                            b.paid_until ? b.paid_until.slice(0, 10) : '—'
-                          }.`
+                        ? `Неограничени отговори, оферти и статистика. Платен до ${bgDay(
+                            b.paid_until
+                          )}.`
                         : `Включва ${
                             planCfg?.freeRepliesPerMonth ?? 1
                           } официален отговор на месец. Планът дава неограничени отговори, оферти и статистика.`}
@@ -470,7 +477,7 @@ export default function BusinessDashboardScreen() {
                           <Text style={styles.offerMeta}>
                             {o.price != null ? `${o.price.toFixed(2)} €` : 'без цена'}
                             {o.old_price != null ? ` · вместо ${o.old_price.toFixed(2)} €` : ''}
-                            {o.valid_until ? ` · до ${o.valid_until}` : ''}
+                            {o.valid_until ? ` · до ${bgDay(o.valid_until)}` : ''}
                           </Text>
                           <Text
                             style={[

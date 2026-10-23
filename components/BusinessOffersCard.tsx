@@ -4,6 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/constants/theme';
 import { publicVenueOffers, type BusinessOffer } from '@/src/api/client';
 
+/** „2026-11-15“ → „15.11.2026“ (както го пише българинът). */
+function bgDay(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return y && m && d ? `${d}.${m}.${y}` : iso;
+}
+
 /**
  * 🏷️ Оферти от търговеца — показват се в НЕГОВИЯ обект.
  *
@@ -59,7 +65,7 @@ export function BusinessOffersCard({ slug }: { slug: string }) {
                 <Text style={styles.oldPrice}>{o.old_price.toFixed(2)} €</Text>
               ) : null}
               {o.valid_until ? (
-                <Text style={styles.valid}>до {o.valid_until}</Text>
+                <Text style={styles.valid}>до {bgDay(o.valid_until)}</Text>
               ) : null}
             </View>
           </View>
