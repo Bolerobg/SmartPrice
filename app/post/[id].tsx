@@ -26,6 +26,7 @@ import { PlaceVisitCard } from '@/components/PlaceVisitCard';
 import { ShopPriceCompare } from '@/components/ShopPriceCompare';
 import { PriceDuelCard } from '@/components/PriceDuelCard';
 import { BusinessReplyCard } from '@/components/BusinessReplyCard';
+import { BusinessClaimCard } from '@/components/BusinessClaimCard';
 import { Avatar } from '@/components/Avatar';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
@@ -838,6 +839,11 @@ export default function PostDetailScreen() {
           {/* 🏢 Официалният глас на търговеца: значка „Проверен търговец“,
               отговорите му и (ако аз съм собственик) полето да отговоря. */}
           <BusinessReplyCard postId={post.id} />
+
+          {/* 🏢 „Това е моят бизнес“ — под самата оферта, а не само на екрана
+              с всички оферти на обекта. Търговецът, който види сигнал за своя
+              обект от потока, трябва да може да заяви обекта ОТТУК. */}
+          <BusinessClaimCard postId={String(post.id)} />
 
           {post.comments.length === 0 ? (
             <Text style={styles.noCommentsText}>
