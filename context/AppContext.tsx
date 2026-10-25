@@ -306,13 +306,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (await getAddToHomeSeen()) return; // вече сме питали
           if (cancelled) return;
 
-          if (await hasFirstBenefit()) {
-            // Ползата е била в предишно отваряне → питаме, но не на самия вход.
-            schedule(20_000);
-            return;
-          }
-          // Чакаме първата полза, после даваме няколко секунди да я прочете.
+          // Човекът е влязъл директно на оферта (линк от Facebook) — това САМО
+          // по себе си е първата полза, затова питаме веднага след като я прочете.
+          const onOfferPage =
+            Platform.OS === 'web' &&
+            typeof window !== 'undefined' &&
+            /\/post\//.test(window.location.pathname);
+
+          // Абонираме се ПРЕДИ проверката: иначе, ако първата полза се отбележи
+          // точно в този момент (директно отваряне на /post/...), събитието
+          // минава преди да има кой да го чуе и поканата не излиза никога.
           unsubscribe = onFirstBenefit(() => schedule(3_500));
+
+          if (await hasFirstBenefit()) {
+            // Ползата вече е била → питаме, но не на самия вход (освен ако
+            // човекът не е точно на оферта в момента).
+            schedule(onOfferPage ? 4_000 : 20_000);
+          }
         })();
 
         return () => {
