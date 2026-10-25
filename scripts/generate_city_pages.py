@@ -155,6 +155,11 @@ def fetch() -> dict:
     }
 
 
+def num(n) -> str:
+    """Число с български разделител на хилядите (не английска запетая)."""
+    return f"{int(n):,}".replace(",", "\u00a0")
+
+
 def esc(v) -> str:
     return html.escape("" if v is None else str(v), quote=True)
 
@@ -235,7 +240,7 @@ def city_page(city: dict, chains: list, cheap: list, human: list, fresh: dict) -
     url = f"{BASE}/ceni/{slug}.html"
     day = fresh.get("day") or dt.date.today().strftime("%d.%m.%Y")
 
-    desc = (f"{city['offers']} оферти от {city['shops']} магазина в {name}. "
+    desc = (f"{num(city['offers'])} оферти от {num(city['shops'])} магазина в {name}. "
             f"Реални цени и находки от хора. Данни към {day}.")
 
     rows = "".join(
@@ -256,8 +261,8 @@ def city_page(city: dict, chains: list, cheap: list, human: list, fresh: dict) -
 <h1>Цени и находки в {esc(name)}</h1>
 <p class="sub">Колко струват нещата в {esc(name)} — от данните на КЗП и от касови бележки на хора.</p>
 <div class="stats">
-  <div class="stat"><b>{city['offers']:,}</b><span>оферти в града</span></div>
-  <div class="stat"><b>{city['shops']:,}</b><span>магазина и обекта</span></div>
+  <div class="stat"><b>{num(city['offers'])}</b><span>оферти в града</span></div>
+  <div class="stat"><b>{num(city['shops'])}</b><span>магазина и обекта</span></div>
   <div class="stat"><b>{len(human)}</b><span>находки от хора</span></div>
 </div>
 
@@ -306,12 +311,12 @@ def index_page(cities: list, fresh: dict) -> str:
     total = sum(c["offers"] for c in cities)
     cards = "".join(
         f"<a href=\"/ceni/{slugify(c['city'])}.html\"><b>{esc(c['city'])}</b>"
-        f"<span>{c['offers']:,} оферти · {c['shops']} магазина</span></a>"
+        f"<span>{num(c['offers'])} оферти · {num(c['shops'])} магазина</span></a>"
         for c in cities
     )
     body = f"""
 <h1>Цени по градове в България</h1>
-<p class="sub">{total:,} оферти от {len(cities)} града. Данни към {esc(day)}.</p>
+<p class="sub">{num(total)} оферти от {len(cities)} града. Данни към {esc(day)}.</p>
 <div class="grid">{cards}</div>
 <div class="note">Влизаш в град и виждаш кои вериги са там, какви цени са докладвани и
 какво са намерили хората. Приложението сравнява един и същ продукт между магазините.</div>
