@@ -171,7 +171,7 @@ export default function ProfileScreen() {
         </View>
 
         {/* Поканален цикъл: кодът, линкът и колко души са дошли по тях */}
-        <InviteCard profile={userProfile} onOpenCard={() => setCardOpen(true)} />
+        <InviteCard profile={userProfile} guest={!isAuthenticated} onOpenCard={() => setCardOpen(true)} />
 
         <View style={styles.raffleRow}>
           <TouchableOpacity

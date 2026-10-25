@@ -13,6 +13,8 @@ interface Props {
   onOpenCard?: () => void;
   /** Компактен вариант — за долния лист „Сподели“. */
   compact?: boolean;
+  /** Гост (не е влязъл). Тогава НЕ показваме грешка, а покана да влезе. */
+  guest?: boolean;
 }
 
 const INVITE_CHANNELS = ['whatsapp', 'viber', 'telegram'] as const;
@@ -25,7 +27,7 @@ const INVITE_CHANNELS = ['whatsapp', 'viber', 'telegram'] as const;
  *   2. Дава кода и линка в един клик до Viber/WhatsApp/Telegram — не го кара да
  *      обяснява какво е приложението.
  */
-export const InviteCard: React.FC<Props> = ({ profile, onOpenCard, compact }) => {
+export const InviteCard: React.FC<Props> = ({ profile, onOpenCard, compact, guest }) => {
   const [summary, setSummary] = useState<ReferralSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -98,9 +100,17 @@ export const InviteCard: React.FC<Props> = ({ profile, onOpenCard, compact }) =>
       {loading ? (
         <ActivityIndicator color={COLORS.greenBright} style={{ marginTop: 16 }} />
       ) : !link ? (
-        <Text style={styles.error}>
-          Кодът не се зареди. Провери връзката и опитай пак.
-        </Text>
+        guest ? (
+          <Text style={styles.guestHint}>
+            Влез в профила си, за да получиш своя код и линк. Тогава и двамата с приятеля ти
+            получавате по {points} точки доверие, щом той потвърди имейла си. Проверката на
+            цени не иска профил — поканата иска.
+          </Text>
+        ) : (
+          <Text style={styles.error}>
+            Кодът не се зареди. Провери връзката и опитай пак.
+          </Text>
+        )
       ) : (
         <>
           <View style={styles.codeRow}>
@@ -230,6 +240,7 @@ const styles = StyleSheet.create({
   title: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '900', letterSpacing: -0.2 },
   subtitle: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 17.5, marginTop: 4 },
   error: { color: COLORS.goldBright, fontSize: 12, marginTop: 14, fontWeight: '700' },
+  guestHint: { color: COLORS.textSecondary, fontSize: 12.5, lineHeight: 18.5, marginTop: 14 },
   codeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
   codeBox: {
     flex: 1,

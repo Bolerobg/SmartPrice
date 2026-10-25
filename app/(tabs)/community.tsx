@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { COLORS } from '@/constants/theme';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/src/auth/AuthContext';
 import { Avatar } from '@/components/Avatar';
 import { InviteCard } from '@/components/InviteCard';
 import { PostCard } from '@/components/PostCard';
@@ -33,6 +34,7 @@ const BOARD_TABS: { key: BoardTab; label: string; icon: string }[] = [
 
 export default function CommunityScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const {
     leaderboard,
     fetchLeaderboard,
@@ -294,7 +296,7 @@ export default function CommunityScreen() {
         ) : (
           <View>
             {/* Поканата е до класацията нарочно: точките от покани влизат в нея. */}
-            <InviteCard profile={userProfile} compact />
+            <InviteCard profile={userProfile} guest={!isAuthenticated} compact />
 
             {/* Томболата: кой какво е спечелил и как да участваш */}
             <RaffleTeaser compact />
