@@ -1214,6 +1214,19 @@ export const api = {
       body: { screen, platform },
     }),
 
+  /** 📈 Събитие по пътя на потребителя — работи и БЕЗ вход (броим и гостите). */
+  funnelEvent: (payload: {
+    visitor: string;
+    kind: string;
+    platform?: string;
+    meta?: Record<string, unknown>;
+  }) =>
+    rawRequest<{ ok: boolean; counted: boolean }>('/api/events', {
+      method: 'POST',
+      auth: false,
+      body: payload,
+    }),
+
   // ------------------------------------------------------------- Частни обяви (продавам)
   /** Цена, срок и колко снимки — за да го покажем още преди да е влязъл. */
   listingConfig: () => rawRequest<ListingConfigPublic>('/api/listings/config', { auth: false }),

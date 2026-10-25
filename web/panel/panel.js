@@ -221,6 +221,7 @@ setInterval(() => void loadPendingSummary(), 120000);
 
 const PAGES = {
   overview: ['Преглед', 'Какво се случва в приложението в реално време'],
+  funnel: ['Пътят на потребителя', 'От гост до пусната обява — къде отпадат хората (броят се и гостите)'],
   users: ['Потребители', 'Търси, редактирай, спри или изтрий профил'],
   posts: ['Оферти', 'Всички оферти с ID, локация и модерация'],
   raffles: ['Томболи', 'Създай томбола, сложи наградата със снимка и я разиграй'],
@@ -315,6 +316,7 @@ async function render(page, force = false) {
   box.innerHTML = `<div class="card"><span class="spinner"></span> Зареждам…</div>`;
   try {
     if (page === 'overview') return await renderOverview(box, force);
+    if (page === 'funnel') return await renderFunnel(box, force);
     if (page === 'users') return await renderUsers(box, force);
     if (page === 'posts') return await renderPosts(box, force);
     if (page === 'raffles') return await renderRaffles(box, force);
@@ -7295,6 +7297,131 @@ async function renderAudit(box) {
           : '<tr><td colspan="6" class="empty">Още няма действия</td></tr>'
       }
       </tbody></table></div>`;
+}
+
+/* ------------------------------------------------------------ пътят на потребителя */
+
+/**
+ * 📈 ОТ ГОСТ ДО ПУСНАТА ОБЯВА.
+ *
+ * Тук се броят УНИКАЛНИ ХОРА на всяка стъпка — включително гостите, които никога
+ * не влизат. Затова първите три стъпки идват от таблицата `funnel_events`, а не от
+ * профилите. Без тях не се вижда къде отпадат хората, а точно това решава дали
+ * публикациите във Facebook групите работят.
+ */
+async function renderFunnel(box) {
+  const data = await api('/analytics/funnel?days=30');
+  const steps = data.steps || [];
+  const ov = data.overview || {};
+  const t = ov.totals || {};
+  const top = steps.length ? steps[0].users : 0;
+  const nf = (v) => (Number(v) || 0).toLocaleString('bg-BG');
+
+  const kpi = (label, value, hint) => `
+    <div class="card" style="flex:1;min-width:160px;margin:0">
+      <div class="dim" style="font-size:12px">${esc(label)}</div>
+      <div style="font-size:26px;font-weight:800;line-height:1.15">${nf(value)}</div>
+      <div class="dim" style="font-size:11.5px">${esc(hint || '')}</div>
+    </div>`;
+
+  const head = `
+    <div class="card">
+      <div style="display:flex;font-weight:700;font-size:15px;margin-bottom:4px">📈 Пътят на потребителя</div>
+      <div class="dim" style="font-size:12.5px;max-width:900px">
+        Броят се <b>уникални хора</b> на всяка стъпка. Гостите се броят също — човек не е длъжен
+        да си направи профил, за да провери цена. Всеки браузър праща случаен идентификатор,
+        който стои само при него (без имейл, без име, без проследяване между сайтове).
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
+      ${kpi('Отворили приложението', t.visitors, 'общо за всичко време')}
+      ${kpi('Отворили днес', t.today, 'уникални хора днес')}
+      ${kpi('Сложили го на телефона', t.installs, isStandaloneHint())}
+      ${kpi('Стигнали до оферта', t.firstViews, 'първа полза')}
+    </div>`;
+
+  if (!top) {
+    box.innerHTML =
+      head +
+      `<div class="card"><div class="empty">
+        Още няма записани посещения.<br><br>
+        Числата тръгват от момента, в който новият код е качен. Досега статистиката искаше
+        вход, затова гостите не се виждаха изобщо — сега се виждат.
+      </div></div>`;
+    return;
+  }
+
+  const rows = steps
+    .map((s, i) => {
+      const w = Math.max(1, Math.round((s.users / top) * 100));
+      const dropColor = i === 0 ? '#6b7280' : s.rateFromPrev >= 100 ? '#10b981' : s.rateFromPrev >= 50 ? '#f59e0b' : '#ef4444';
+      return `<tr>
+        <td class="nowrap dim">${i + 1}</td>
+        <td>${esc(s.label)}${s.guestsOnly ? ' <span class="pill pill-cyan">вкл. гости</span>' : ''}</td>
+        <td class="mono" style="text-align:right;font-weight:700">${nf(s.users)}</td>
+        <td style="width:34%">
+          <div style="background:#111827;border-radius:6px;height:16px;overflow:hidden">
+            <div style="background:#0f766e;height:16px;width:${w}%"></div>
+          </div>
+        </td>
+        <td class="nowrap" style="color:${dropColor};font-weight:700">${i === 0 ? '—' : s.rateFromPrev + '% от горната'}</td>
+        <td class="nowrap dim">${s.rateFromTop}% от всички</td>
+      </tr>`;
+    })
+    .join('');
+
+  const plat = (ov.byPlatform || []).length
+    ? ov.byPlatform
+        .map(
+          (p) => `<tr><td>${esc(p.platform)}</td><td class="mono" style="text-align:right">${nf(p.visitors)}</td></tr>`
+        )
+        .join('')
+    : '<tr><td colspan="2" class="empty">няма данни</td></tr>';
+
+  const days = (ov.byDay || [])
+    .slice(0, 14)
+    .map(
+      (d) => `<tr><td class="mono dim">${esc(d.day)}</td>
+        <td class="mono" style="text-align:right">${nf(d.visitors)}</td>
+        <td class="mono" style="text-align:right">${nf(d.installs)}</td></tr>`
+    )
+    .join('');
+
+  box.innerHTML =
+    head +
+    `<div class="card">
+      <div style="display:flex;font-weight:700;font-size:14px;margin-bottom:8px">Стъпки (уникални хора)</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Стъпка</th><th style="text-align:right">Хора</th><th>Дял</th><th>Спад</th><th>От всички</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="hint" style="margin-top:10px">
+        Червено „спад“ значи, че тук губим хора — това е мястото, което се поправя първо.
+        Ако първата стъпка е голяма, а „Сложили го на телефона“ е малка, проблемът е в показаната
+        покана за иконата на началния екран (без икона на iPhone няма известия).
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">
+      <div class="card" style="flex:1;min-width:280px;margin:0">
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px">От какво устройство</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Устройство</th><th style="text-align:right">Хора</th></tr></thead>
+          <tbody>${plat}</tbody>
+        </table></div>
+      </div>
+      <div class="card" style="flex:1;min-width:280px;margin:0">
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px">Последните 14 дни</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Ден</th><th style="text-align:right">Отворили</th><th style="text-align:right">Инсталирали</th></tr></thead>
+          <tbody>${days || '<tr><td colspan="3" class="empty">няма данни</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+}
+
+/** Кратко обяснение под числото за инсталациите. */
+function isStandaloneHint() {
+  return 'отворили го като приложение, не в браузър';
 }
 
 /* ------------------------------------------------------------ прозорец */

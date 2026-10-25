@@ -14,7 +14,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit, requireAdminPanel, requireFullAdmin } from '../lib/admin.js';
-import { requireUserId } from '../lib/auth.js';
+import { optionalUserId, requireUserId } from '../lib/auth.js';
+import {
+  funnelOverview,
+  funnelWithGuests,
+  isFunnelKind,
+  linkVisitorToUser,
+  recordFunnelEvent,
+} from '../lib/funnel.js';
 import {
   analyticsFunnel,
   analyticsOverview,
@@ -45,6 +52,43 @@ export default async function analyticsRoutes(app: FastifyInstance): Promise<voi
       ip: req.ip,
       userAgent: req.headers['user-agent'] as string | undefined,
     });
+    return { ok: true, counted: res.counted };
+  });
+
+  /**
+   * 📈 Събитие по пътя на потребителя — БЕЗ вход.
+   *
+   * Защо без вход: приложението се ползва и от гости, а те са мнозинството. Ако
+   * искахме вход, нямаше да виждаме никого (профили: 5). `visitor` е случаен
+   * идентификатор от браузъра на човека — не е име, не е имейл.
+   */
+  app.post('/api/events', async (req) => {
+    const body = z
+      .object({
+        visitor: z.string().trim().min(8).max(64).regex(/^[A-Za-z0-9_-]+$/),
+        kind: z.string().trim().min(2).max(40),
+        platform: z.string().trim().max(20).optional(),
+        meta: z.record(z.unknown()).optional(),
+      })
+      .parse(req.body ?? {});
+
+    if (!isFunnelKind(body.kind)) return { ok: false, reason: 'unknown_kind' };
+
+    const userId = optionalUserId(req);
+    const res = await recordFunnelEvent({
+      visitor: body.visitor,
+      kind: body.kind,
+      userId,
+      platform: body.platform ?? null,
+      meta: body.meta ?? null,
+      ip: req.ip,
+    });
+
+    // Влязъл човек → прикачаме и предишните му гостувания към профила.
+    if (res.counted && userId && (body.kind === 'signup' || body.kind === 'verified')) {
+      await linkVisitorToUser(body.visitor, userId);
+    }
+
     return { ok: true, counted: res.counted };
   });
 
@@ -97,8 +141,25 @@ export default async function analyticsRoutes(app: FastifyInstance): Promise<voi
     return analyticsSources(days);
   });
 
-  /** Пътят на потребителя: регистрация, потвърждение, първа полза. */
+  /**
+   * Пътят на потребителя — ОТ ГОСТ до пусната обява.
+   * Броят се уникални хора на всяка стъпка (вкл. гостите, които не влизат).
+   */
   app.get('/api/admin/analytics/funnel', async (req) => {
+    await requireAdminPanel(req);
+    const days = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(365)
+      .catch(30)
+      .parse((req.query as { days?: unknown } | undefined)?.days ?? 30);
+    const [guests, overview] = await Promise.all([funnelWithGuests(), funnelOverview(days)]);
+    return { steps: guests.steps, overview };
+  });
+
+  /** Старата фуния (само влезли) — остава за съвместимост. */
+  app.get('/api/admin/analytics/funnel-logged', async (req) => {
     await requireAdminPanel(req);
     return analyticsFunnel();
   });
