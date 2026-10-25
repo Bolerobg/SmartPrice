@@ -30,6 +30,7 @@ import {
   isAlreadyInstalled,
   saveAddToHomeSeen,
 } from '@/components/AddToHomeScreenModal';
+import { hasFirstBenefit, onFirstBenefit } from '@/src/lib/firstBenefit';
 import type {
   CategoryId,
   CommentItem,
@@ -282,28 +283,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const openShare = useCallback((post: PostItem) => setSharingPost(post), []);
     const closeShare = useCallback(() => setSharingPost(null), []);
 
-      // Показваме поканата САМО веднъж, и то само в браузър, ако още не е
-      // добавено на началния екран. В истинското приложение е излишно.
+      // Показваме поканата „Добави на началния екран“ СЛЕД първата полза — когато
+      // човекът вече е отворил оферта и е видял истинска цена. Преди питахме
+      // 8 секунди след влизане, тоест преди да е разбрал защо му е приложението,
+      // и затова почти никой не я приемаше. Работи и за гости (без вход).
       useEffect(() => {
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
-        (async () => {
-          if (!isAuthenticated) return;
-          const platform = detectHomeScreenPlatform();
-          if (platform === 'native') return; // нативно → вече е инсталирано
-          if (isAlreadyInstalled()) return; // вече е добавено
-          const seen = await getAddToHomeSeen();
-          if (cancelled || seen) return;
-          // Изчакваме потребителят да види приложението, преди да го подканим.
+        let unsubscribe: (() => void) | null = null;
+
+        const schedule = (delayMs: number) => {
+          if (cancelled) return;
+          if (timer) clearTimeout(timer);
           timer = setTimeout(() => {
             if (!cancelled) openAddToHome('invite');
-          }, 8000);
+          }, delayMs);
+        };
+
+        (async () => {
+          if (detectHomeScreenPlatform() === 'native') return; // нативно → вече е инсталирано
+          if (isAlreadyInstalled()) return; // вече е добавено
+          if (await getAddToHomeSeen()) return; // вече сме питали
+          if (cancelled) return;
+
+          if (await hasFirstBenefit()) {
+            // Ползата е била в предишно отваряне → питаме, но не на самия вход.
+            schedule(20_000);
+            return;
+          }
+          // Чакаме първата полза, после даваме няколко секунди да я прочете.
+          unsubscribe = onFirstBenefit(() => schedule(3_500));
         })();
+
         return () => {
           cancelled = true;
           if (timer) clearTimeout(timer);
+          if (unsubscribe) unsubscribe();
         };
-      }, [isAuthenticated, openAddToHome]);
+      }, [openAddToHome]);
 
   // ------------------------------------------------------------ Зареждане на данни
 

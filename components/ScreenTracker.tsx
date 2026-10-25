@@ -4,6 +4,7 @@ import { usePathname } from 'expo-router';
 import { api } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
 import { isStandalone, track } from '@/src/lib/funnel';
+import { markFirstBenefit } from '@/src/lib/firstBenefit';
 
 /**
  * 👥 КОЙ КЪДЕ ОТВАРЯ — за статистиката в админ панела.
@@ -35,7 +36,12 @@ export const ScreenTracker = () => {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (pathname && pathname.startsWith('/post/')) void track('first_view');
+    if (pathname && pathname.startsWith('/post/')) {
+      void track('first_view');
+      // 🎯 Човекът е видял истинска цена → това е първата полза. Чак сега има
+      // смисъл да го питаме дали иска иконата на телефона (а с нея идват известията).
+      void markFirstBenefit();
+    }
   }, [pathname]);
 
   // 👥 Кой къде отваря — само за влезли (екран по екран, със отбив от минута).
