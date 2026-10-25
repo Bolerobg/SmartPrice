@@ -264,7 +264,10 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         ) : null}
 
-        {/* Панел за Stripe Монетизация и Периодично Напомняне */}
+        {/* Панел за Stripe Монетизация и Периодично Напомняне.
+            Само за влезли: гост не бива да вижда „Излез от профила“, „Смяна на
+            паролата“ и „Обнови данните от сървъра“ — нямат смисъл за него. */}
+        {isAuthenticated && (
         <View
           style={[
             styles.monetizationCard,
@@ -372,6 +375,7 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        )}
 
         {/* Покана: сложи приложението на началния екран (само в браузър) */}
         {showInstallRow && (
